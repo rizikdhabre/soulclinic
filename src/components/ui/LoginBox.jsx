@@ -110,13 +110,13 @@ export default function LoginBox() {
             ${glow ? "text-primary" : "text-foreground"}
           `}
         >
-          Welcome Back
+         مرحبًا بعودتك
         </h2>
 
         {/* Username */}
         <Input
           icon={<User size={18} />}
-          label="Username"
+          label="اسم المستخدم"
           glow={glow}
           type="text"
           value={username}
@@ -126,7 +126,7 @@ export default function LoginBox() {
         {/* Password */}
         <Input
           icon={<Lock size={18} />}
-          label="Password"
+          label="كلمة المرور"
           glow={glow}
           type="password"
           value={password}
@@ -160,7 +160,7 @@ export default function LoginBox() {
       }
     `}
           >
-            Sign In
+          تسجيل الدخول
           </button>
         )}
       </motion.div>

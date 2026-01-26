@@ -4,7 +4,6 @@ import { ObjectId } from "mongodb";
 
 export async function GET() {
   try {
-    console.log("Fetching treatments");
     const collection = await getCollection("treatments");
     const treatments = await collection.find({}).toArray();
 

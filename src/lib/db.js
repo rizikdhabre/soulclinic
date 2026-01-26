@@ -11,7 +11,6 @@ async function connectDb() {
     if (dbConnection) return dbConnection;
     await client.connect();
     dbConnection = client.db(dbName);
-    console.log("Connected to mongo DB");
     return dbConnection;
   } catch (error) {
     console.error("Error in connection to Data", error);
