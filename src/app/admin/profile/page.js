@@ -6,7 +6,6 @@ import AdminProfileCard from "@/components/admin/AdminProfileCard";
 import ChangePasswordModal from "@/components/admin/ChangePasswordModal";
 import DailyCalendar from "@/components/admin/DailyCalendar";
 import HujamahStatsCard from "@/components/admin/HujamahStatsCard";
-import MonthlyOverview from "@/components/admin/MonthlyOverview";
 
 export default function AdminProfilePage() {
   const [openPassword, setOpenPassword] = useState(false);
@@ -44,11 +43,6 @@ export default function AdminProfilePage() {
           </div>
         </section>
 
-        {/* MONTHLY OVERVIEW */}
-        <section className="space-y-4">
-          <h2 className="text-xl font-semibold">Monthly Overview</h2>
-          <MonthlyOverview />
-        </section>
       </div>
 
       {/* CHANGE PASSWORD MODAL */}
