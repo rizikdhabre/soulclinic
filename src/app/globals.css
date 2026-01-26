@@ -1,26 +1,283 @@
-@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Inter:wght@300;400;500;600&display=swap');
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: 40 30% 97%;
+    --foreground: 160 20% 15%;
+
+    --card: 40 25% 95%;
+    --card-foreground: 160 20% 15%;
+
+    --popover: 40 30% 97%;
+    --popover-foreground: 160 20% 15%;
+
+    --primary: 155 30% 42%;
+    --primary-foreground: 40 30% 97%;
+
+    --secondary: 35 40% 90%;
+    --secondary-foreground: 160 20% 20%;
+
+    --muted: 40 20% 92%;
+    --muted-foreground: 160 10% 45%;
+
+    --accent: 38 60% 65%;
+    --accent-foreground: 160 20% 15%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 40 20% 88%;
+    --input: 40 20% 88%;
+    --ring: 155 30% 42%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 40 25% 95%;
+    --sidebar-foreground: 160 20% 15%;
+    --sidebar-primary: 155 30% 42%;
+    --sidebar-primary-foreground: 40 30% 97%;
+    --sidebar-accent: 35 40% 90%;
+    --sidebar-accent-foreground: 160 20% 20%;
+    --sidebar-border: 40 20% 88%;
+    --sidebar-ring: 155 30% 42%;
+
+    /* Custom wellness tokens */
+    --wellness-sage: 155 30% 42%;
+    --wellness-sage-light: 155 25% 85%;
+    --wellness-cream: 40 30% 97%;
+    --wellness-warm: 35 40% 90%;
+    --wellness-gold: 38 60% 65%;
+    --wellness-stone: 40 15% 70%;
+    --wellness-dark: 160 20% 15%;
+
+    /* Gradients */
+    --gradient-hero: linear-gradient(135deg, hsl(155 25% 85% / 0.6) 0%, hsl(35 40% 90% / 0.8) 100%);
+    --gradient-card: linear-gradient(180deg, hsl(40 25% 95%) 0%, hsl(40 30% 97%) 100%);
+    --gradient-overlay: linear-gradient(180deg, hsl(160 20% 15% / 0.95) 0%, hsl(155 30% 20% / 0.98) 100%);
+
+    /* Shadows */
+    --shadow-soft: 0 4px 20px -4px hsl(160 20% 15% / 0.08);
+    --shadow-card: 0 8px 32px -8px hsl(160 20% 15% / 0.12);
+    --shadow-elevated: 0 16px 48px -12px hsl(160 20% 15% / 0.15);
+  }
+
+  .dark {
+    --background: 160 25% 8%;
+    --foreground: 40 20% 92%;
+
+    --card: 160 22% 12%;
+    --card-foreground: 40 20% 92%;
+
+    --popover: 160 22% 10%;
+    --popover-foreground: 40 20% 92%;
+
+    --primary: 155 35% 55%;
+    --primary-foreground: 160 25% 8%;
+
+    --secondary: 160 18% 18%;
+    --secondary-foreground: 40 20% 88%;
+
+    --muted: 160 15% 20%;
+    --muted-foreground: 40 15% 60%;
+
+    --accent: 38 50% 55%;
+    --accent-foreground: 160 25% 8%;
+
+    --destructive: 0 62.8% 45%;
+    --destructive-foreground: 40 20% 92%;
+
+    --border: 160 15% 20%;
+    --input: 160 15% 20%;
+    --ring: 155 35% 55%;
+
+    --sidebar-background: 160 22% 10%;
+    --sidebar-foreground: 40 20% 92%;
+    --sidebar-primary: 155 35% 55%;
+    --sidebar-primary-foreground: 160 25% 8%;
+    --sidebar-accent: 160 18% 18%;
+    --sidebar-accent-foreground: 40 20% 88%;
+    --sidebar-border: 160 15% 20%;
+    --sidebar-ring: 155 35% 55%;
+
+    /* Custom wellness tokens - dark mode */
+    --wellness-sage: 155 35% 55%;
+    --wellness-sage-light: 155 20% 25%;
+    --wellness-cream: 40 15% 12%;
+    --wellness-warm: 35 20% 18%;
+    --wellness-gold: 38 50% 55%;
+    --wellness-stone: 160 10% 40%;
+    --wellness-dark: 40 20% 92%;
+
+    /* Gradients - dark mode */
+    --gradient-hero: linear-gradient(135deg, hsl(155 20% 15% / 0.8) 0%, hsl(160 22% 12% / 0.9) 100%);
+    --gradient-card: linear-gradient(180deg, hsl(160 22% 14%) 0%, hsl(160 22% 12%) 100%);
+    --gradient-overlay: linear-gradient(180deg, hsl(40 20% 92% / 0.95) 0%, hsl(40 25% 88% / 0.98) 100%);
+
+    /* Shadows - dark mode */
+    --shadow-soft: 0 4px 20px -4px hsl(0 0% 0% / 0.3);
+    --shadow-card: 0 8px 32px -8px hsl(0 0% 0% / 0.4);
+    --shadow-elevated: 0 16px 48px -12px hsl(0 0% 0% / 0.5);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer components {
+  .heading-display {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 3rem; /* text-5xl */
+    font-weight: 300;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+  }
+
+  @media (min-width: 768px) {
+    .heading-display {
+      font-size: 3.75rem; /* md:text-6xl */
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .heading-display {
+      font-size: 4.5rem; /* lg:text-7xl */
+    }
+  }
+
+  .heading-section {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.875rem; /* text-3xl */
+    font-weight: 300;
+    letter-spacing: -0.02em;
+  }
+
+  @media (min-width: 768px) {
+    .heading-section {
+      font-size: 2.25rem; /* md:text-4xl */
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .heading-section {
+      font-size: 3rem; /* lg:text-5xl */
+    }
+  }
+
+  .text-body {
+    font-size: 1rem;
+    line-height: 1.75;
+  }
+
+  @media (min-width: 768px) {
+    .text-body {
+      font-size: 1.125rem;
+    }
+  }
+
+  .text-subtle {
+    font-size: 0.875rem;
+    color: hsl(var(--muted-foreground));
+    line-height: 1.75;
+  }
+
+  @media (min-width: 768px) {
+    .text-subtle {
+      font-size: 1rem;
+    }
+  }
+}
+
+
+@layer utilities {
+  .animate-fade-up {
+    animation: fadeUp 0.6s ease-out forwards;
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-out forwards;
+  }
+
+  .animate-scale-in {
+    animation: scaleIn 0.4s ease-out forwards;
+  }
+
+  @keyframes fadeUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes scaleIn {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+}
+
+.card-elevated {
+  background: transparent;
+  border-radius: 1rem;
+}
+
+
+.calendar-day {
+  @apply aspect-square rounded-lg flex items-center justify-center
+         text-sm text-muted-foreground
+         hover:bg-emerald-500/10 transition;
+}
+
+.calendar-day-selected {
+  @apply bg-emerald-500 text-emerald-950 font-semibold;
+}
+
+
+.month-tile {
+  @apply flex flex-col items-center justify-center
+         rounded-xl border border-white/5
+         py-6 hover:border-emerald-500/40 transition;
+}
+
+.month-tile-selected {
+  @apply border-emerald-500 bg-emerald-500/10;
+}
+
+.badge-role {
+  @apply text-xs px-3 py-1 rounded-full
+         bg-emerald-500/15 text-emerald-400;
 }
