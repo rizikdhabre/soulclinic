@@ -17,7 +17,8 @@ const emptyService = {
 };
 
 export default function AdminTreatmentsPage() {
-  const isHujama = (treatment) => treatment.title?.toLowerCase() === "hujama";
+  const HUJAMA_ID = "6971f64c9b98d43b59cbb4a0";
+  const isHujama = (treatment) => treatment._id === HUJAMA_ID;
   const [treatments, setTreatments] = useState([]);
   const [openIndex, setOpenIndex] = useState(null);
   const [menuIndex, setMenuIndex] = useState(null);
@@ -366,7 +367,7 @@ export default function AdminTreatmentsPage() {
                               )}
                             </td>
 
-                            {/* ✅ sub-treatments hamburger menu (mobile friendly) */}
+                            {/* sub-treatments hamburger menu (mobile friendly) */}
                             <td className="relative z-50 text-right py-3">
                               <div className="relative inline-block">
                                 <button
@@ -403,6 +404,11 @@ export default function AdminTreatmentsPage() {
                                             duration: s.duration ?? "",
                                             price: s.price ?? "",
                                             currency: s.currency ?? "ILS",
+
+                                            ...(hujama
+                                              ? { cupsCount: s.cupsCount ?? "" }
+                                              : {}),
+
                                             imageUrl: s.imageUrl ?? "",
                                             imagePath: s.imagePath ?? "",
                                           });

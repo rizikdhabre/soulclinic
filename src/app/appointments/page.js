@@ -14,6 +14,8 @@ export default function AppointmentsPage() {
   const duration = Number(searchParams.get("duration"));
   const price = Number(searchParams.get("price"));
   const title = searchParams.get("title");
+  const treatmentId = searchParams.get("treatmentId");
+  const cupsCount = searchParams.get("cupsCount");
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedTime, setSelectedTime] = useState(null);
   const [bookingError, setBookingError] = useState(null);
@@ -43,6 +45,7 @@ export default function AppointmentsPage() {
         title,
         date: format(selectedDate, "yyyy-MM-dd"),
         time: selectedTime,
+         ...(cupsCount ? { cupsCount: Number(cupsCount) } : {}),
       });
     } catch (error) {
       if (error.response?.status === 409) {

@@ -6,6 +6,8 @@ import { useParams, useRouter } from "next/navigation";
 export default function TreatmentDetails() {
   const { id } = useParams();
   const router = useRouter();
+  const HUJAMA_ID = "6971f64c9b98d43b59cbb4a0";
+  const isHujama = id === HUJAMA_ID;
 
   const [treatment, setTreatment] = useState(null);
   const [error, setError] = useState(null);
@@ -33,9 +35,18 @@ export default function TreatmentDetails() {
   if (!treatment) return null;
 
   const handleBookNow = (service) => {
-    router.push(
-      `/appointments?duration=${encodeURIComponent(service.duration)}&service=${encodeURIComponent(service.title)}&price=${encodeURIComponent(service.price)}&title=${encodeURIComponent(service.title)}`,
-    );
+    const params = new URLSearchParams({
+      treatmentId: id,
+      duration: service.duration,
+      price: service.price,
+      title: service.title,
+    });
+
+    if (isHujama && service.cupsCount) {
+      params.append("cupsCount", service.cupsCount);
+    }
+
+    router.push(`/appointments?${params.toString()}`);
   };
 
   return (

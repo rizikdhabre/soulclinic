@@ -13,6 +13,7 @@ async function upsertUserData({
   time,
   title,
   price,
+  cupsCount,
 }) {
   const usersCollection = await getCollection("usersData");
   const appointmentEntry = {
@@ -22,6 +23,7 @@ async function upsertUserData({
     title,
     price,
     attended: false,
+    ...(cupsCount ? { cupsCount } : {}),
   };
   const noteEntry = note
     ? {
@@ -129,6 +131,7 @@ export async function POST(req) {
       duration,
       title,
       price,
+      cupsCount,
     } = body;
 
     if (!firstName || !lastName || !phone || !date || !time) {
@@ -144,6 +147,7 @@ export async function POST(req) {
       phone,
       time,
       duration,
+      ...(cupsCount ? { cupsCount } : {}),
     };
 
     await appointmentsCollection.findOneAndUpdate(
@@ -167,6 +171,7 @@ export async function POST(req) {
       time,
       title,
       price,
+      cupsCount,
     });
     return NextResponse.json({ success: true });
   } catch (error) {

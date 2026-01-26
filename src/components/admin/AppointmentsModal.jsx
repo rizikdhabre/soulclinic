@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Phone, Calendar, Clock, DollarSign } from "lucide-react";
+import { X, Phone, Calendar, Clock } from "lucide-react";
 import { UserAvatar } from "./UserAvatar";
 import { Switch } from "@/components/ui/Switch";
 import { Button } from "@/components/ui/button";
@@ -221,7 +221,7 @@ export const AppointmentsModal = ({
                               {apt.title}
                             </p>
                             <p className="flex items-center gap-1 text-sm md:text-base text-muted-foreground">
-                              <DollarSign className="w-4 h-4" />
+                              <span className="text-2xl font-bold">₪</span>
                               {apt.price}
                             </p>
                           </div>

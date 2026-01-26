@@ -6,6 +6,7 @@ import AdminProfileCard from "@/components/admin/AdminProfileCard";
 import ChangePasswordModal from "@/components/admin/ChangePasswordModal";
 import DailyCalendar from "@/components/admin/DailyCalendar";
 import HujamahStatsCard from "@/components/admin/HujamahStatsCard";
+import IncomeStatsCard from "@/components/admin/IncomeStatsCard";
 
 export default function AdminProfilePage() {
   const [openPassword, setOpenPassword] = useState(false);
@@ -40,6 +41,7 @@ export default function AdminProfilePage() {
               Hujamah Usage Overview
             </h2>
             <HujamahStatsCard />
+             <IncomeStatsCard />
           </div>
         </section>
 
