@@ -77,7 +77,7 @@ export function TimeSlotPicker({
     return (
       <div className="text-center py-12 text-muted-foreground">
         <Clock className="mx-auto mb-4 w-6 h-6" />
-        Select a date first
+      يرجى اختيار تاريخ أولًا
       </div>
     );
   }
@@ -214,7 +214,7 @@ export function TimeSlotPicker({
     <div>
       <h3 className="mb-4 flex items-center gap-2 font-medium">
         <Clock className="w-5 h-5" />
-        Available Times
+        الأوقات المتاحة
       </h3>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">

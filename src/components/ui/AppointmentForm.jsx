@@ -100,7 +100,7 @@ export function AppointmentForm({
           className="space-y-4 rounded-2xl bg-card p-6 border border-border"
         >
           <input
-            placeholder="First Name"
+            placeholder="الاسم الأول"
             value={data.firstName}
             onChange={(e) => setData({ ...data, firstName: e.target.value })}
             className="
@@ -115,7 +115,7 @@ export function AppointmentForm({
             "
           />
           <input
-            placeholder="Last Name"
+            placeholder="اسم العائلة"
             value={data.lastName}
             onChange={(e) => setData({ ...data, lastName: e.target.value })}
             className="
@@ -131,7 +131,7 @@ export function AppointmentForm({
           />
 
           <input
-            placeholder="Phone Number"
+            placeholder="رقم الهاتف"
             value={data.phone}
             onChange={(e) => setData({ ...data, phone: e.target.value })}
             className="
@@ -147,7 +147,7 @@ export function AppointmentForm({
           />
 
           <textarea
-            placeholder="Add a note (optional)"
+            placeholder="إضافة ملاحظة (اختياري)"
             value={data.note}
             onChange={(e) => setData({ ...data, note: e.target.value })}
             rows={4}
@@ -189,7 +189,7 @@ export function AppointmentForm({
             disabled={!canSubmit || loading}
             className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
           >
-            {loading ? "Sending Code..." : "Confirm Appointment"}
+          {loading ? "جارٍ إرسال الرمز..." : "تأكيد الموعد"}
           </button>
         </form>
       )}
@@ -241,7 +241,7 @@ export function AppointmentForm({
             disabled={loading}
             className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
           >
-            {loading ? "Verifying..." : "Verify & Save Appointment"}
+           {loading ? "جارٍ التحقق..." : "التحقق وحفظ الموعد"}
           </button>
         </div>
       )}

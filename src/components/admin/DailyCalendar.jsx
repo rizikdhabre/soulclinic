@@ -77,7 +77,15 @@ const DailyCalendar = () => {
   const calendarStart = startOfWeek(monthStart);
   const calendarEnd = endOfWeek(monthEnd);
   const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
-  const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const weekDays = [
+    "الأحد",
+    "الاثنين",
+    "الثلاثاء",
+    "الأربعاء",
+    "الخميس",
+    "الجمعة",
+    "السبت",
+  ];
 
   /* ---------- fetch ---------- */
 
@@ -239,14 +247,14 @@ const DailyCalendar = () => {
     <div className="card-elevated p-6">
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-xl font-display font-semibold text-foreground">
-          Daily Appointments
+          المواعيد اليومية
         </h3>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
             className="p-2 rounded-xl hover:bg-muted transition-colors"
           >
-            <ChevronLeft className="w-5 h-5 text-muted-foreground" />
+            <ChevronRight className="w-5 h-5 text-muted-foreground" />
           </button>
           <span className="text-base font-semibold min-w-[140px] text-center">
             {format(currentMonth, "MMMM yyyy")}
@@ -255,7 +263,7 @@ const DailyCalendar = () => {
             onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
             className="p-2 rounded-xl hover:bg-muted transition-colors"
           >
-            <ChevronRight className="w-5 h-5 text-muted-foreground" />
+            <ChevronLeft className="w-5 h-5 text-muted-foreground" />
           </button>
         </div>
       </div>
@@ -292,7 +300,7 @@ const DailyCalendar = () => {
 
       <div className="border-t border-border pt-6">
         <h4 className="text-base font-semibold text-foreground mb-4">
-          Schedule on {format(selectedDate, "MMMM d, yyyy")}
+          جدول المواعيد بتاريخ {format(selectedDate, "MMMM d, yyyy")}
         </h4>
 
         <div className="mt-6 mb-4 flex items-center justify-between">
@@ -309,7 +317,7 @@ const DailyCalendar = () => {
                   : "bg-secondary hover:bg-secondary/80"
               }`}
             >
-              {editMode ? "Exit Edit" : "Edit Times"}
+              {editMode ? "الخروج من التعديل" : "تعديل الأوقات"}
             </button>
 
             {editMode && (
@@ -339,7 +347,7 @@ const DailyCalendar = () => {
                 }}
                 className="px-4 py-2 rounded-xl text-sm font-medium bg-primary text-primary-foreground"
               >
-                Save
+                حفظ التغييرات
               </button>
             )}
 
@@ -347,7 +355,7 @@ const DailyCalendar = () => {
               onClick={handleBlockAll}
               className="px-4 py-2 rounded-xl text-sm font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition"
             >
-              Block All
+              حظر الكل
             </button>
           </div>
         </div>
@@ -496,7 +504,7 @@ const DailyCalendar = () => {
                   </div>
 
                   <div className="flex-1 min-w-0 text-sm text-muted-foreground">
-                    {row.blocked ? "Blocked" : "Available"}
+                    {row.blocked ? "محظور" : "متاح"}
                   </div>
 
                   <button
@@ -513,12 +521,12 @@ const DailyCalendar = () => {
                     {row.blocked ? (
                       <>
                         <Unlock className="w-4 h-4" />
-                        Unblock
+                        إلغاء الحظر
                       </>
                     ) : (
                       <>
                         <Lock className="w-4 h-4" />
-                        Block
+                        حظر
                       </>
                     )}
                   </button>

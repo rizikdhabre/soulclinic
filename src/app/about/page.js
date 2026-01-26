@@ -15,13 +15,12 @@ const About = () => {
             transition={{ duration: 0.7 }}
             className="max-w-3xl mx-auto text-center"
           >
-            <h1 className="heading-display text-foreground mb-6">
-              Our Story
-            </h1>
+            <h1 className="heading-display text-foreground mb-6">من نحن</h1>
             <p className="text-body text-muted-foreground">
-              Founded on the belief that true wellness encompasses mind, body,
-              and spirit, Serenity has been a sanctuary of healing for over a
-              decade.
+              تأسس مركز العلاج على الإيمان بأن العافية الحقيقية تتحقق من خلال
+              التوازن بين الجسد والطاقة، حيث نقدم علاجات متخصصة مثل الحجامة،
+              الإبر الجافة، والعلاجات الطبيعية لمساعدة الجسم على الشفاء الذاتي
+              وتخفيف الآلام وتحسين جودة الحياة. بخبرة تمتد لأكثر من 3 سنوات
             </p>
           </motion.div>
         </div>
@@ -37,19 +36,13 @@ const About = () => {
               viewport={{ once: true }}
               transition={{ duration: 0.6 }}
             >
-              <h2 className="heading-section text-foreground mb-6">
-                Our Mission
-              </h2>
+              <h2 className="heading-section text-foreground mb-6">مهمتنا</h2>
               <p className="text-body text-muted-foreground mb-6">
-                At Serenity, we believe everyone deserves access to transformative
-                wellness experiences. Our mission is to create a space where
-                ancient healing traditions meet modern comfort, providing
-                personalized care that addresses your unique needs.
-              </p>
-              <p className="text-body text-muted-foreground">
-                Every treatment is crafted with intention, every product is
-                thoughtfully sourced, and every interaction is guided by our
-                commitment to your wellbeing.
+                مهمتنا هي تقديم علاجات طبيعية وآمنة تعتمد على أساليب علاجية
+                فعّالة مثل الحجامة والإبر الجافة، بهدف تخفيف الألم، تحسين صحة
+                الجسم، وتعزيز التوازن الجسدي والنفسي. نلتزم بتوفير رعاية مهنية
+                وإنسانية تركّز على احتياجات كل شخص، وتسعى إلى تحقيق شفاء حقيقي
+                ومستدام.
               </p>
             </motion.div>
 
@@ -64,7 +57,7 @@ const About = () => {
                 <div className="text-center p-8">
                   <Heart className="w-16 h-16 text-primary mx-auto mb-4" />
                   <p className="font-serif text-2xl text-foreground">
-                    Healing with Purpose
+                    الشفاء بهدف
                   </p>
                 </div>
               </div>
@@ -91,11 +84,14 @@ const About = () => {
             className="text-center mb-16"
           >
             <h2 className="heading-section text-foreground mb-4">
-              Our Core Values
+              قيمنا الأساسية
             </h2>
             <p className="text-subtle max-w-2xl mx-auto">
-              These principles guide everything we do, from the treatments we
-              offer to the environment we create.
+              نؤمن بأن العلاج الحقيقي يقوم على الصدق، الاحترافية، والاهتمام
+              بالإنسان قبل كل شيء. ترتكز قيمنا الأساسية على تقديم رعاية آمنة
+              وموثوقة، احترام خصوصية كل مراجع، والالتزام بأعلى معايير الجودة.
+              نسعى لبناء علاقة ثقة دائمة مع من نخدمهم، ونعمل بروح المسؤولية
+              لنكون جزءًا حقيقيًا من رحلة الشفاء والتواز
             </p>
           </motion.div>
 
@@ -103,23 +99,27 @@ const About = () => {
             {[
               {
                 icon: Heart,
-                title: "Compassion",
-                description: "Every guest is treated with genuine care and empathy.",
+                title: "الرحمة",
+                description:
+                  "الرحمة تعني تقديم الرعاية والاهتمام الصادق بكل شخص، مع فهم معاناته ودعمه بلطف واحترام في رحلة الشفاء.",
               },
               {
                 icon: Award,
-                title: "Excellence",
-                description: "We maintain the highest standards in all our practices.",
+                title: "التميّز",
+                description:
+                  "التميّز يعني الالتزام بأعلى معايير الجودة والاحترافية في تقديم العلاجات لضمان أفضل النتائج الممكنة.",
               },
               {
                 icon: Users,
-                title: "Inclusivity",
-                description: "Wellness is for everyone, without exception.",
+                title: "الشمولية",
+                description:
+                  "الشمولية تعني احترام الجميع وتقديم الرعاية دون تمييز، مع مراعاة احتياجات كل فرد وخلفيته",
               },
               {
                 icon: Clock,
-                title: "Presence",
-                description: "We honor your time and remain fully present.",
+                title: "الحضور",
+                description:
+                  "الحضور يعني الإصغاء الكامل والاهتمام الحقيقي بكل شخص، والتواجد الذهني والإنساني أثناء تقديم الرعاية والعلاج.",
               },
             ].map((value, index) => (
               <motion.div
@@ -156,16 +156,12 @@ const About = () => {
             className="max-w-3xl mx-auto text-center"
           >
             <h2 className="heading-section text-foreground mb-6">
-              Meet Our Team
+              تعرّف على فريقنا
             </h2>
             <p className="text-body text-muted-foreground mb-8">
-              Our therapists are more than practitioners—they're healers who bring
-              decades of combined experience, continuous learning, and a genuine
-              passion for wellness to every session.
-            </p>
-            <p className="text-subtle">
-              Each team member is certified in their specialty and committed to
-              ongoing education in the latest wellness techniques and research.
+              صقر هو مؤسس المركز وصاحب خبرة معتمدة، حاصل على شهادات مهنية في
+              مجاله، ويحرص على تقديم علاج باحترام واهتمام لكل شخص، مع سجل مميّز
+              من رضا العملاء، وأسلوب إنساني راقٍ في التعامل والعلاج.
             </p>
           </motion.div>
         </div>

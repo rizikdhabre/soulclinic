@@ -5,6 +5,7 @@ import { ArrowRight, Sparkles, Leaf, Heart } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import Image from "next/image";
+import ParticleSphere from "@/components/ui/ParticleSphere";
 
 const HomePage = () => {
   return (
@@ -28,7 +29,7 @@ const HomePage = () => {
           className="absolute top-1/3 right-[30%] w-16 h-16 rounded-full bg-primary/15 blur-xl"
         />
 
-        <div className="container mx-auto px-6 pt-24 pb-12 relative z-10">
+        <div className="container mx-auto px-6 pb-12 relative z-10">
           <div className="max-w-4xl mx-auto text-center">
             {/* LOGO */}
             <motion.div
@@ -52,42 +53,15 @@ const HomePage = () => {
               "
               />
             </motion.div>
-
-            {/* Badge */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6 }}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-8"
-            >
-              <Sparkles className="w-4 h-4 text-primary" />
-              <span className="text-sm text-primary font-medium">
-                Premium Wellness Experience
-              </span>
-            </motion.div>
-
-            {/* Heading */}
             <motion.h1
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.7, delay: 0.1 }}
               className="heading-display text-foreground mb-6"
             >
-              Discover Your Path to{" "}
-              <span className="text-primary">Inner Peace</span>
+              اكتشف طريقك إلى{" "}
+              <span className="text-primary">السلام الداخلي</span>
             </motion.h1>
-
-            {/* Subheading */}
-            <motion.p
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.7, delay: 0.2 }}
-              className="text-body text-muted-foreground max-w-2xl mx-auto mb-10"
-            >
-              Experience transformative therapies that nurture your body, calm
-              your mind, and restore your spirit. Our expert therapists guide
-              you on a journey to complete wellness.
-            </motion.p>
 
             {/* CTA Buttons */}
             <motion.div
@@ -98,20 +72,34 @@ const HomePage = () => {
             >
               <Button
                 asChild
-                size="xxl"
-                className="group px-12 py-8 rounded-full"
+                size="xl"
+                className="group px-12 py-8 rounded-full text-5xl"
               >
-                <Link href="/dashboard"
-                 className="text-4xl font-semibold flex items-center" >
-                  Book Now
-                    <ArrowRight className="ml-7 w-10 h-10 group-hover:translate-x-1 transition-transform" />
+                <Link
+                  href="/dashboard"
+                  className="font-semibold flex items-center"
+                >
+                  احجز موعدك الآن
+                  <ArrowRight className="ml-7 w-10 h-10 group-hover:translate-x-1 transition-transform" />
                 </Link>
               </Button>
             </motion.div>
           </div>
         </div>
-        {/* Scroll Indicator */}
+
         <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1 }}
+          className="absolute bottom-8 left-1/2 -translate-x-1/2"
+        >
+          <div className="flex flex-col items-center gap-2 text-foreground/60">
+            <ParticleSphere size={190} enableZoom={false} autoRotate={false} />
+          </div>
+        </motion.div>
+
+        {/* Scroll Indicator */}
+        {/* <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 1 }}
@@ -124,7 +112,7 @@ const HomePage = () => {
           >
             <motion.div className="w-1 h-2 rounded-full bg-foreground/50" />
           </motion.div>
-        </motion.div>
+        </motion.div> */}
       </section>
 
       {/* Features Section */}
@@ -138,28 +126,28 @@ const HomePage = () => {
             className="text-center mb-16"
           >
             <h2 className="heading-section text-foreground mb-4">
-              Why Choose Soul
+              لماذا تختار عيادة SOUL؟
             </h2>
           </motion.div>
           <div className="grid md:grid-cols-3 gap-8">
             {[
               {
                 icon: Leaf,
-                title: "Natural Therapies",
+                title: "العلاجات الطبيعية",
                 description:
-                  "All treatments use organic, sustainably sourced ingredients for pure healing.",
+                  "جميع العلاجات تستخدم مكونات عضوية ومصدرها مستدام لتحقيق شفاء نقي.",
               },
               {
                 icon: Heart,
-                title: "Expert Therapists",
+                title: "أخصائيين مختصين",
                 description:
-                  "Our certified practitioners bring years of experience and genuine care.",
+                  "يقدّم ممارسونا المعتمدون سنواتٍ من الخبرة والرعاية الصادق",
               },
               {
                 icon: Sparkles,
-                title: "Transformative Results",
+                title: "نتائج مُغيِّرة للحياة",
                 description:
-                  "Experience lasting benefits that extend far beyond your visit.",
+                  "اختبر فوائد دائمة تمتد إلى ما هو أبعد بكثير من زيارتك",
               },
             ].map((feature, index) => (
               <motion.div

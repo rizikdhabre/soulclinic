@@ -6,9 +6,9 @@ import { useRouter } from "next/navigation";
 import axios from "axios";
 
 const adminSections = [
-  { title: "Treatments", href: "/admin/treatments" },
-  { title: "Users", href: "/admin/users" },
-  { title: "Profile", href: "/admin/profile" },
+  { title: "صفحة العلاجات", href: "/admin/treatments" },
+  { title: "المستخدمون", href: "/admin/users" },
+  { title: "الملف الشخصي", href: "/admin/profile" },
 ];
 
 const containerVariants = {
@@ -51,7 +51,7 @@ export default function AdminPage() {
           transition={{ duration: 0.5 }}
           className="text-4xl font-bold text-center mb-4"
         >
-          Admin Panel
+          صفحة المسؤول
         </motion.h1>
 
         {/* Logout panel */}

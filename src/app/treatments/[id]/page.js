@@ -83,9 +83,9 @@ export default function TreatmentDetails() {
 
               <div className="flex flex-col gap-4 text-sm font-medium">
                 <div className="flex justify-between">
-                  <span>Duration: {s.duration}</span>
+                  <span>المدة: {s.duration}</span>
                   <span>
-                    Price: {s.price} {s.currency}
+                    السعر: {s.price} {s.currency}
                   </span>
                 </div>
 
@@ -93,7 +93,7 @@ export default function TreatmentDetails() {
                   onClick={() => handleBookNow(s)}
                   className="mt-2 w-full rounded-xl bg-primary py-3 text-white transition hover:bg-primary/90"
                 >
-                  Book now
+                 احجز الآن
                 </button>
               </div>
             </div>

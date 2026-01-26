@@ -29,13 +29,11 @@ const Dashboard = () => {
             transition={{ duration: 0.7 }}
             className="max-w-3xl mx-auto text-center"
           >
-            <h1 className="heading-display text-foreground mb-6">
-              Our Treatments
-            </h1>
+            <h1 className="heading-display text-foreground mb-6">علاجاتنا</h1>
             <p className="text-body text-muted-foreground">
-              Discover our carefully curated collection of therapies, each
-              designed to nurture your wellbeing and restore your natural
-              balance.
+              نقدّم مجموعة من العلاجات المتخصصة التي تهدف إلى تخفيف الألم، تحسين
+              صحة الجسم، واستعادة التوازن الجسدي والنفسي، وذلك باستخدام أساليب
+              علاجية آمنة وفعّالة تُقدَّم باحترافية واهتمام بكل شخص.
             </p>
           </motion.div>
         </div>

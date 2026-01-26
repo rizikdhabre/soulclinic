@@ -18,7 +18,7 @@ export const UsersTable = ({ users, onViewAppointments }) => {
     const pastAppointments = user.appointments.filter(
       (apt) => apt.date < new Date().toISOString().split("T")[0]
     );
-    if (!pastAppointments.length) return "No past appointments";
+    if (!pastAppointments.length) return "لا توجد مواعيد سابقة";
     const lastApt = pastAppointments[0];
     return new Date(lastApt.date).toLocaleDateString("en-US", {
       month: "short",
@@ -34,10 +34,10 @@ export const UsersTable = ({ users, onViewAppointments }) => {
         <table className="w-full">
           <thead>
             <tr className="border-b border-border">
-              <th className="p-4 text-left text-sm font-semibold text-muted-foreground">Name</th>
-              <th className="p-4 text-left text-sm font-semibold text-muted-foreground">Appointments</th>
-              <th className="p-4 text-center text-sm font-semibold text-muted-foreground">Total</th>
-              <th className="p-4 text-left text-sm font-semibold text-muted-foreground">Last Appointment</th>
+              <th className="p-4 text-center text-sm font-semibold text-muted-foreground">الاسم</th>
+              <th className="p-4 text-center text-sm font-semibold text-muted-foreground">المواعيد</th>
+              <th className="p-4 text-center text-sm font-semibold text-muted-foreground">المجموع</th>
+              <th className="p-4 text-center text-sm font-semibold text-muted-foreground">آخر موعد</th>
             </tr>
           </thead>
           <tbody>
@@ -60,7 +60,7 @@ export const UsersTable = ({ users, onViewAppointments }) => {
                 </td>
                 <td className="p-4">
                   <Button size="sm" variant="outline" onClick={() => onViewAppointments(user)} className="gap-2">
-                    <Eye className="w-4 h-4" /> View Appointments
+                    <Eye className="w-4 h-4" /> عرض المواعيد
                   </Button>
                 </td>
                 <td className="p-4 text-center">
@@ -99,7 +99,7 @@ export const UsersTable = ({ users, onViewAppointments }) => {
             {user.phone}
           </p>
           <p className="text-xs text-muted-foreground">
-            Appointments: {user.appointments.length}
+            المواعيد: {user.appointments.length}
           </p>
         </div>
       </div>
@@ -119,14 +119,14 @@ export const UsersTable = ({ users, onViewAppointments }) => {
       {/* Pagination */}
       <div className="flex justify-between items-center p-4 border-t border-border bg-muted/30">
         <p className="text-sm text-muted-foreground">
-          Showing {startIndex + 1}–{Math.min(endIndex, users.length)} of {users.length}
+          عرض {startIndex + 1}–{Math.min(endIndex, users.length)} من {users.length}
         </p>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronRight className="w-4 h-4" />
           </Button>
           <Button size="sm" variant="outline" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
-            <ChevronRight className="w-4 h-4" />
+           <ChevronLeft className="w-4 h-4" />
           </Button>
         </div>
       </div>

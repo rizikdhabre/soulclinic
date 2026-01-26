@@ -10,11 +10,11 @@ export function AppointmentHeader() {
     >
 
       <h1 className="text-4xl font-bold mb-2">
-        Book an Appointment
+      حجز موعد
       </h1>
 
       <p className="text-muted-foreground">
-        Select a date and time that works best for you.
+        اختر التاريخ والوقت المناسبين لك.
       </p>
     </motion.div>
   );

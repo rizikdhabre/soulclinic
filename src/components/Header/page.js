@@ -17,14 +17,14 @@ const Header = () => {
   const pathname = usePathname();
 
   const menuItems = [
-    { name: "Home", path: "/" },
-    { name: "About Us", path: "/about" },
-    { name: "Treatments", path: "/dashboard" },
-    { name: "Contact Us", path: "/contact" },
+    { name: "الرئيسية", path: "/" },
+    { name: "من نحن", path: "/about" },
+    { name: "العلاجات", path: "/dashboard" },
+    { name: "اتصل بنا", path: "/contact" },
 
     isAdmin
-      ? { name: "Admin Panel", path: "/admin" }
-      : { name: "Login Page", path: "/login" },
+      ? { name: "صفحة الإدارة", path: "/admin" }
+      : { name: "صفحة تسجيل الدخول", path: "/login" },
   ];
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 20);

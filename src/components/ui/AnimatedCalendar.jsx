@@ -19,8 +19,7 @@ import {
 } from "date-fns";
 import { cn } from "@/lib/utils";
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
+const WEEKDAYS = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
 export function AnimatedCalendar({
   selectedDate,
   onSelectDate,
@@ -82,7 +81,8 @@ export function AnimatedCalendar({
           onClick={goToPreviousMonth}
           className="p-2 rounded-xl bg-secondary"
         >
-          <ChevronLeft className="w-5 h-5" />
+          <ChevronRight className="w-5 h-5" />
+        
         </motion.button>
 
         <AnimatePresence mode="wait" custom={direction}>
@@ -106,7 +106,7 @@ export function AnimatedCalendar({
           onClick={goToNextMonth}
           className="p-2 rounded-xl bg-secondary"
         >
-          <ChevronRight className="w-5 h-5" />
+          <ChevronLeft className="w-5 h-5" />
         </motion.button>
       </div>
 
@@ -115,7 +115,7 @@ export function AnimatedCalendar({
         {WEEKDAYS.map((day) => (
           <div
             key={day}
-            className="text-center text-xs font-medium text-muted-foreground py-2"
+            className="text-center text-xs font-medium text-muted-foreground p-"
           >
             {day}
           </div>

@@ -27,7 +27,7 @@ const IncomeStatsCard = () => {
 
   return (
     <div className="card-elevated p-6">
-      <h3 className="text-lg font-semibold mb-4">Monthly Income</h3>
+      <h3 className="text-lg font-semibold mb-4">الدخل الشهري</h3>
 
       {/* Loading */}
       {loading && (
@@ -43,10 +43,10 @@ const IncomeStatsCard = () => {
             <span className="text-2xl font-bold">₪</span>
           </div>
           <p className="text-sm text-muted-foreground">
-            No income recorded yet
+            لم يتم تسجيل أي دخل بعد
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            Income will appear once sessions are marked as attended
+         سيظهر الدخل عند تسجيل الجلسات كمحضورة
           </p>
         </div>
       )}

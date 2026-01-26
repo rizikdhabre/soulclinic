@@ -29,7 +29,7 @@ const HujamahStatsCard = () => {
   return (
     <div className="card-elevated p-6">
       <h3 className="text-lg font-semibold mb-4">
-        Hujamah Usage (Monthly)
+     استخدام الحجامة (شهريًا)
       </h3>
 
       {/* Loading */}
@@ -46,10 +46,10 @@ const HujamahStatsCard = () => {
             <Activity size={28} />
           </div>
           <p className="text-sm text-muted-foreground">
-            No Hujamah sessions recorded yet
+           لم يتم تسجيل أي جلسات حجامة بعد
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            Statistics will appear once sessions are marked as attended
+          ستظهر الإحصائيات عند تسجيل الجلسات كمحضورة
           </p>
         </div>
       )}

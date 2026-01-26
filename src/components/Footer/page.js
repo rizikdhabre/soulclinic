@@ -22,41 +22,10 @@ const Footer = () => {
               <span className="font-serif text-2xl text-foreground">Soul</span>
             </div>
             <p className="text-subtle max-w-xs">
-              Restoring balance, healing the body, and calming the soul.
+              استعادة التوازن، وشفاء الجسد، وتهدئة الروح
             </p>
           </motion.div>
 
-          {/* Quick Links */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.5, delay: 0.1 }}
-          >
-            <h4 className="font-serif text-lg text-foreground mb-4">
-              Quick Links
-            </h4>
-            <nav className="space-y-2">
-              {["Home", "About", "Treatments", "Contact"].map((item) => {
-                const href =
-                  item === "Home"
-                    ? "/"
-                    : item === "Treatments"
-                      ? "/dashboard"
-                      : `/${item.toLowerCase().replace(" ", "-")}`;
-
-                return (
-                  <Link
-                    key={item}
-                    href={href}
-                    className="block text-muted-foreground hover:text-primary transition-colors duration-300"
-                  >
-                    {item}
-                  </Link>
-                );
-              })}
-            </nav>
-          </motion.div>
 
           {/* Contact Info */}
           <motion.div
@@ -65,9 +34,9 @@ const Footer = () => {
             viewport={{ once: true }}
             transition={{ duration: 0.5, delay: 0.2 }}
           >
-            <h4 className="font-serif text-lg text-foreground mb-4">Contact</h4>
+            <h4 className="font-serif text-lg text-foreground mb-4">اتصل بنا</h4>
             <div className="space-y-2 text-muted-foreground">
-              <p>Dier Hana</p>
+              <p>ديرحنا</p>
               <p>0507456258</p>
             </div>
           </motion.div>
@@ -82,15 +51,14 @@ const Footer = () => {
           className="mt-12 pt-8 border-t border-border flex flex-col md:flex-row items-center justify-between gap-4"
         >
           <p className="text-sm text-muted-foreground">
-            © {new Date().getFullYear()} Soul. All rights reserved.
+            © {new Date().getFullYear()} Soul. جميع الحقوق محفوظة.
           </p>
 
           <p className="text-sm text-muted-foreground flex items-center gap-1">
-            Made with <Heart className="w-4 h-4 text-accent fill-accent" /> for
-            your wellbeing
+           صُنع بـ <Heart className="w-4 h-4 text-accent fill-accent" /> من أجل صحتك ورفاهيتك
           </p>
           <p className="text-sm text-muted-foreground ">
-            Developed by{" "}
+            تم التطوير بواسطة{" "}
             <a href="https://www.instagram.com/rizikdhabre1/">Rizik Dhabre</a>
           </p>
         </motion.div>

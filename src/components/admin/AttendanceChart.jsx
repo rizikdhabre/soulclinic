@@ -51,25 +51,25 @@ export const AttendanceChart = ({ rate, attended, total }) => {
       </div>
       <div className="flex flex-col gap-2">
         <h3 className="flex items-center gap-2 font-semibold text-foreground">
-          Attendance Rate
+         نسبة الحضور
           <TrendingUp className="w-4 h-4 text-success" />
         </h3>
 
         <p className="text-sm text-muted-foreground">
-          Overall appointment attendance
+         حضور المواعيد
         </p>
         <div className="flex gap-4 mt-1 text-sm">
           <div className="flex items-center gap-2">
            <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
             <span className="text-foreground">
-              {attended} attended
+              {attended} <br/>حضر
             </span>
           </div>
 
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-destructive" />
             <span className="text-foreground">
-              {missed} missed
+              {missed} <br/>لم يحضر
             </span>
           </div>
         </div>

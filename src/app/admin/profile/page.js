@@ -22,7 +22,7 @@ export default function AdminProfilePage() {
       <div className="relative max-w-7xl mx-auto px-6 py-14 space-y-16">
         {/* PAGE HEADER */}
         <header className="space-y-2 mt-20">
-          <h1 className="text-3xl md:text-4xl font-semibold">Admin Profile</h1>
+          <h1 className="text-3xl md:text-4xl font-semibold">الملف الشخصي للمشرف</h1>
         </header>
 
         {/* PROFILE ROW */}
@@ -37,9 +37,6 @@ export default function AdminProfilePage() {
           </div>
 
           <div>
-            <h2 className="text-xl font-semibold mb-4">
-              Hujamah Usage Overview
-            </h2>
             <HujamahStatsCard />
              <IncomeStatsCard />
           </div>

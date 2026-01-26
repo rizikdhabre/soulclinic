@@ -267,7 +267,7 @@ export const AppointmentsModal = ({
                                   onCancelAppointment(apt._id);
                                 }}
                               >
-                                Cancel
+                                الغاء الموعد
                               </Button>
                             )}
                           </div>
@@ -308,7 +308,7 @@ export const AppointmentsModal = ({
                       </div>
                     ) : (
                       <p className="text-sm text-muted-foreground italic">
-                        No notes for this appointment
+                      لا توجد ملاحظات لهذا الموعد
                       </p>
                     )}
                   </div>
@@ -318,7 +318,7 @@ export const AppointmentsModal = ({
               {/* ADMIN NOTES */}
               <div className="mt-8 border-t border-border pt-6">
                 <h3 className="text-sm md:text-base font-semibold text-foreground mb-3">
-                  Admin Notes
+                 ملاحظات الإدارة
                 </h3>
 
                 {/* Add note */}
@@ -326,7 +326,7 @@ export const AppointmentsModal = ({
                   <textarea
                     value={newNote}
                     onChange={(e) => setNewNote(e.target.value)}
-                    placeholder="Write a private admin note…"
+                    placeholder="اكتب ملاحظة خاصة بالإدارة…"
                     rows={2}
                     className="
         flex-1 resize-none rounded-xl
@@ -341,7 +341,7 @@ export const AppointmentsModal = ({
                     className="h-auto px-4 rounded-xl"
                     onClick={addAdminNote}
                   >
-                    Add
+                    إضافة
                   </Button>
                 </div>
 
@@ -349,7 +349,7 @@ export const AppointmentsModal = ({
                 <div className="space-y-3">
                   {adminNotes.length === 0 && (
                     <p className="text-sm text-muted-foreground italic">
-                      No admin notes yet
+                    لا توجد ملاحظات إدارية بعد
                     </p>
                   )}
 
@@ -419,7 +419,7 @@ export const AppointmentsModal = ({
 
               {/* Footer */}
               <div className="border-t border-border px-4 py-3 text-center text-sm text-muted-foreground bg-muted/30">
-                {user.appointments.length} total appointments
+                 إجمالي المواعيد: {user.appointments.length} 
               </div>
             </motion.div>
           </motion.div>

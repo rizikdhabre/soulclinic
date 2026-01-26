@@ -76,7 +76,7 @@ export default function UsersAdminPage() {
     );
     if (!appointment) return;
 
-    // ✅ Optimistic UI: remove immediately from users + selectedUser
+    //  Optimistic UI: remove immediately from users + selectedUser
     setUsers((prev) =>
       prev.map((u) => ({
         ...u,
@@ -131,9 +131,9 @@ export default function UsersAdminPage() {
     <div className="min-h-screen p-6 space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-semibold mt-20">User Management</h1>
+        <h1 className="text-2xl font-semibold mt-20">إدارة المستخدمين</h1>
         <p className="text-sm text-muted-foreground">
-          Manage customers, appointments, and attendance
+          إدارة العملاء والمواعيد والحضور
         </p>
       </div>
 
@@ -142,10 +142,10 @@ export default function UsersAdminPage() {
         {/* Search */}
         <div className="lg:col-span-2 bg-card rounded-2xl p-6 shadow-card">
           <label className="block text-sm font-medium mb-2 text-muted-foreground">
-            Search users
+           بحث عن المستخدمين
           </label>
           <Input
-            placeholder="Search by first name, last name, or full name…"
+            placeholder="ابحث بالاسم الأول أو اسم العائلة أو الاسم الكامل…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -162,7 +162,7 @@ export default function UsersAdminPage() {
       {/* Users Table */}
       {filteredUsers.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
-          No users found
+          لا يوجد مستخدمون
         </div>
       ) : (
         <UsersTable

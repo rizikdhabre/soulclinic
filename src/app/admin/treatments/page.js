@@ -77,7 +77,6 @@ export default function AdminTreatmentsPage() {
     fetchTreatments();
   };
 
-  // 🔥 upload image via backend
   const uploadServiceImage = async (treatmentId, serviceIndex) => {
     const formData = new FormData();
     formData.append("image", selectedImage);
@@ -157,12 +156,12 @@ export default function AdminTreatmentsPage() {
   return (
     <div className="max-w-6xl mx-auto py-16 px-6 bg-background text-foreground">
       <div className="flex justify-between items-center mb-10">
-        <h1 className="text-4xl font-bold">Treatments</h1>
+        <h1 className="text-4xl font-bold">العلاجات</h1>
         <button
           onClick={() => setShowAddModal(true)}
           className="px-5 py-2 rounded-xl bg-primary text-primary-foreground"
         >
-          + Add Treatment
+          إضافة علاج+
         </button>
       </div>
 
@@ -192,7 +191,7 @@ export default function AdminTreatmentsPage() {
                         onClick={() => saveTitle(treatment._id)}
                         className="px-4 py-2 rounded-lg bg-green-600 text-white"
                       >
-                        Save
+                        حفظ
                       </button>
                     </div>
 
@@ -231,7 +230,7 @@ export default function AdminTreatmentsPage() {
                         initial={{ opacity: 0, y: -5 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -5 }}
-                        className="absolute right-0 mt-2 w-36 bg-background border border-border rounded-xl shadow-lg z-[9999]"
+                        className="absolute end-0 mt-2 w-36 bg-background border border-border rounded-xl shadow-lg z-[9999]"
                       >
                         <button
                           onClick={() => {
@@ -242,7 +241,7 @@ export default function AdminTreatmentsPage() {
                           }}
                           className="w-full text-left px-4 py-2 hover:bg-muted"
                         >
-                          Edit
+                          تغيير
                         </button>
 
                         <button
@@ -252,7 +251,7 @@ export default function AdminTreatmentsPage() {
                           }}
                           className="w-full text-left px-4 py-2 hover:bg-muted"
                         >
-                          {isOpen ? "Hide" : "View"}
+                          {isOpen ? "اخفاء" : "عرض"}
                         </button>
 
                         <button
@@ -265,7 +264,7 @@ export default function AdminTreatmentsPage() {
                           }}
                           className="w-full text-left px-4 py-2 text-destructive hover:bg-destructive/10"
                         >
-                          Delete
+                          حذف
                         </button>
                       </motion.div>
                     )}
@@ -294,7 +293,7 @@ export default function AdminTreatmentsPage() {
                         }}
                         className="px-4 py-2 bg-primary text-primary-foreground rounded-lg"
                       >
-                        + Add Service
+                         إضافة خدمة +
                       </button>
                     </div>
 
@@ -302,22 +301,25 @@ export default function AdminTreatmentsPage() {
                       <thead className="border border-border">
                         <tr className="border-b border border-border ">
                           <th className="text-left py-2 border border-border">
-                            Name
+                            اسم الخدمة
                           </th>
-                          <th className="text-left py-2 border border-border">
-                            Duration
+                          <th className="text-start py-2 border border-border">
+                            المدة
                           </th>
-                          <th className="text-left py-2 border border-border">
-                            Price
+                          <th className="text-start py-2 border border-border">
+                            السعر
                           </th>
-                          <th className="text-left py-2 border border-border">
-                            Description
+                          <th className="text-start py-2 border border-border">
+                            الوصف
                           </th>
                           {hujama && (
-                            <th className="border p-2">Glasses</th> //
+                            <th className="border p-2">عدد الكووس</th> //
                           )}
-                          <th className="text-left py-2 border border-border">
-                            Image
+                          <th className="text-start py-2 border border-border">
+                            الصورة
+                          </th>
+                          <th className="text-right py-2 border border-border">
+                            الإجراءات
                           </th>
                         </tr>
                       </thead>
@@ -389,7 +391,7 @@ export default function AdminTreatmentsPage() {
                                       initial={{ opacity: 0, y: -5 }}
                                       animate={{ opacity: 1, y: 0 }}
                                       exit={{ opacity: 0, y: -5 }}
-                                      className="absolute right-0 mt-2 w-32 bg-background border border-border rounded-xl shadow-lg z-[9999]"
+                                      className="absolute end-0 mt-2 w-32 bg-background border border-border rounded-xl shadow-lg z-[9999]"
                                     >
                                       <button
                                         onClick={() => {
@@ -417,7 +419,7 @@ export default function AdminTreatmentsPage() {
                                         }}
                                         className="w-full text-left px-4 py-2 hover:bg-muted"
                                       >
-                                        Edit
+                                        تعديل
                                       </button>
 
                                       <button
@@ -431,7 +433,7 @@ export default function AdminTreatmentsPage() {
                                         }}
                                         className="w-full text-left px-4 py-2 text-destructive hover:bg-destructive/10"
                                       >
-                                        Delete
+                                        حذف
                                       </button>
                                     </motion.div>
                                   )}
@@ -470,7 +472,7 @@ export default function AdminTreatmentsPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]">
           <div className="bg-background p-6 rounded-2xl w-full max-w-lg">
             <input
-              placeholder="Title"
+              placeholder="العنوان"
               value={newTreatment.title}
               onChange={(e) =>
                 setNewTreatment((p) => ({ ...p, title: e.target.value }))
@@ -479,7 +481,7 @@ export default function AdminTreatmentsPage() {
               style={{ WebkitTextFillColor: "var(--foreground)" }}
             />
             <textarea
-              placeholder="Description"
+              placeholder="الوصف"
               value={newTreatment.description}
               onChange={(e) =>
                 setNewTreatment((p) => ({
@@ -496,7 +498,7 @@ export default function AdminTreatmentsPage() {
                 onClick={addTreatment}
                 className="bg-primary px-4 py-2 rounded text-white"
               >
-                Save
+                حفظ
               </button>
             </div>
           </div>
@@ -507,7 +509,7 @@ export default function AdminTreatmentsPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]">
           <div className="bg-background p-6 rounded-2xl w-full max-w-lg space-y-3">
             <input
-              placeholder="Title"
+              placeholder="العنوان"
               className="border border-border bg-background text-foreground placeholder:text-foreground/50 px-3 py-2 rounded-md w-full"
               style={{ WebkitTextFillColor: "var(--foreground)" }}
               value={serviceForm.title}
@@ -516,7 +518,7 @@ export default function AdminTreatmentsPage() {
               }
             />
             <input
-              placeholder="Duration"
+              placeholder="المدة (بالدقائق)"
               type="number"
               className="border border-border bg-background text-foreground placeholder:text-foreground/50 px-3 py-2 rounded-md w-full"
               style={{ WebkitTextFillColor: "var(--foreground)" }}
@@ -526,7 +528,7 @@ export default function AdminTreatmentsPage() {
               }
             />
             <input
-              placeholder="Price"
+              placeholder="السعر"
               type="number"
               className="border border-border bg-background text-foreground placeholder:text-foreground/50 px-3 py-2 rounded-md w-full"
               style={{ WebkitTextFillColor: "var(--foreground)" }}
@@ -539,7 +541,7 @@ export default function AdminTreatmentsPage() {
               <input
                 type="number"
                 min={1}
-                placeholder="Number of glasses"
+                placeholder="عدد الزجاجات"
                 className="border border-border bg-background text-foreground placeholder:text-foreground/50 px-3 py-2 rounded-md w-full"
                 style={{ WebkitTextFillColor: "var(--foreground)" }}
                 value={serviceForm.cupsCount}
@@ -552,7 +554,7 @@ export default function AdminTreatmentsPage() {
               />
             )}
             <textarea
-              placeholder="Description"
+              placeholder="الوصف"
               className="border border-border bg-background text-foreground placeholder:text-foreground/50 px-3 py-2 rounded-md w-full min-h-[110px]"
               style={{ WebkitTextFillColor: "var(--foreground)" }}
               value={serviceForm.description}
@@ -560,8 +562,6 @@ export default function AdminTreatmentsPage() {
                 setServiceForm((p) => ({ ...p, description: e.target.value }))
               }
             />
-
-            {/* ✅ Image upload (added only) */}
             <div className="space-y-2">
               <input
                 type="file"
@@ -591,13 +591,13 @@ export default function AdminTreatmentsPage() {
                   setSelectedImage(null);
                 }}
               >
-                Cancel
+                إلغاء
               </button>
               <button
                 onClick={() => saveService(serviceEdit.treatmentId)}
                 className="bg-primary px-4 py-2 rounded text-white"
               >
-                Save
+                حفظ
               </button>
             </div>
           </div>
@@ -609,7 +609,7 @@ export default function AdminTreatmentsPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]">
           <div className="bg-background p-6 rounded-xl">
             <div className="flex justify-end gap-3">
-              <button onClick={() => setConfirmDelete(null)}>Cancel</button>
+              <button onClick={() => setConfirmDelete(null)}>إلغاء</button>
               <button
                 onClick={
                   confirmDelete.type === "treatment"
@@ -618,7 +618,7 @@ export default function AdminTreatmentsPage() {
                 }
                 className="bg-destructive px-4 py-2 rounded text-white"
               >
-                Delete
+                حذف
               </button>
             </div>
           </div>

@@ -19,9 +19,9 @@ const AdminProfileCard = ({ onChangePassword }) => {
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-3 mb-2">
             <h2 className="text-2xl md:text-3xl font-bold text-foreground">
-              Welcome,<br/> Sqr Dagash 
+              مرحبًا,<br/> صقر دغش
             </h2>
-            <span className="badge-role">Admin</span>
+            <span className="badge-role">مشرف</span>
           </div>
         </div>
         <Button
@@ -29,7 +29,7 @@ const AdminProfileCard = ({ onChangePassword }) => {
           className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl px-5 py-2.5 shadow-md"
         >
           <KeyRound className="w-4 h-4" />
-          Change Password
+         تغيير كلمة المرور
         </Button>
       </div>
     </div>
