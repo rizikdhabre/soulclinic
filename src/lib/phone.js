@@ -1,25 +1,27 @@
 export function normalizeIsraeliPhone(input) {
   if (!input) return null;
-  let phone = input.replace(/\D/g, "");
 
+  let phone = input.toString().trim();
 
-  if (phone.startsWith("0")) {
+  phone = phone.replace(/[^\d+]/g, "");
+
+  if (phone.startsWith("00")) {
+    phone = "+" + phone.slice(2);
+  }
+
+  if (phone.startsWith("+")) {
+    phone = phone.slice(1);
+  }
+
+  if (phone.startsWith("05")) {
     phone = "972" + phone.slice(1);
   }
 
-  if (phone.startsWith("972")) {
-
-  } else {
-    return null;
-  }
+  if (!phone.startsWith("972")) return null;
 
   const normalized = `+${phone}`;
 
   const israeliMobileRegex = /^\+9725\d{8}$/;
 
-  if (!israeliMobileRegex.test(normalized)) {
-    return null;
-  }
-
-  return normalized;
+  return israeliMobileRegex.test(normalized) ? normalized : null;
 }

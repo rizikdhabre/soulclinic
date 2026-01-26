@@ -16,6 +16,7 @@ export async function GET(req) {
 
     const collection = await getCollection("treatments");
 
+
     const treatment = await collection.findOne({
       _id: new ObjectId(id),
     });
