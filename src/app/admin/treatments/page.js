@@ -34,6 +34,9 @@ export default function AdminTreatmentsPage() {
   const [serviceEdit, setServiceEdit] = useState(null);
   const [serviceForm, setServiceForm] = useState(emptyService);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [newTreatment, setNewTreatment] = useState({
@@ -59,95 +62,137 @@ export default function AdminTreatmentsPage() {
   };
 
   const saveTitle = async (id) => {
-    await axios.put("/api/admin/treatments", {
-      id,
-      title: editedTitle,
-      description: editedDescription,
-    });
-    setEditingIndex(null);
-    fetchTreatments();
+    try {
+      setIsSaving(true);
+      await axios.put("/api/admin/treatments", {
+        id,
+        title: editedTitle,
+        description: editedDescription,
+      });
+      setEditingIndex(null);
+      fetchTreatments();
+    } catch (error) {
+      setIsSaving(false);
+      console.error("Failed to save title/description:", error);
+    }
   };
 
   const addTreatment = async () => {
-    if (!newTreatment.title.trim()) return;
+    try {
+      setIsAdding(true);
 
-    await axios.post("/api/admin/treatments", newTreatment);
-    setShowAddModal(false);
-    setNewTreatment({ title: "", description: "", services: [] });
-    fetchTreatments();
+      if (!newTreatment.title.trim()) return;
+
+      await axios.post("/api/admin/treatments", newTreatment);
+      setShowAddModal(false);
+      setNewTreatment({ title: "", description: "", services: [] });
+      setIsAdding(false);
+      fetchTreatments();
+    } catch (error) {
+      setIsAdding(false);
+      console.error("Failed to add treatment:", error);
+    }
   };
 
   const uploadServiceImage = async (treatmentId, serviceIndex) => {
-    const formData = new FormData();
-    formData.append("image", selectedImage);
-    formData.append("treatmentId", treatmentId);
-    formData.append("serviceIndex", serviceIndex);
+    try {
+      const formData = new FormData();
+      formData.append("image", selectedImage);
+      formData.append("treatmentId", treatmentId);
+      formData.append("serviceIndex", serviceIndex);
 
-    const res = await axios.post("/api/admin/upload-service-image", formData);
-    return res.data;
+      const res = await axios.post("/api/admin/upload-service-image", formData);
+      return res.data;
+    } catch (error) {
+      console.error("Failed to upload image:", error);
+    }
   };
 
   const saveService = async (treatmentId) => {
-    let imageData = {
-      url: serviceForm.imageUrl || "",
-      path: serviceForm.imagePath || "",
-    };
+    if (isSaving) return;
 
-    if (selectedImage) {
-      imageData = await uploadServiceImage(
-        treatmentId,
-        serviceEdit.index ?? Date.now(),
-      );
+    try {
+      setIsSaving(true);
+
+      let imageData = {
+        url: serviceForm.imageUrl || "",
+        path: serviceForm.imagePath || "",
+      };
+
+      if (selectedImage) {
+        imageData = await uploadServiceImage(
+          treatmentId,
+          serviceEdit.index ?? Date.now(),
+        );
+      }
+
+      const payload = {
+        ...serviceForm,
+        imageUrl: imageData.url,
+        imagePath: imageData.path,
+      };
+
+      if (serviceEdit.index === null) {
+        await axios.post("/api/admin/treatments/services", {
+          treatmentId,
+          service: payload,
+        });
+      } else {
+        await axios.put("/api/admin/treatments/services", {
+          treatmentId,
+          serviceIndex: serviceEdit.index,
+          service: payload,
+        });
+      }
+
+      setServiceEdit(null);
+      setServiceForm(emptyService);
+      setSelectedImage(null);
+      setServiceMenu(null);
+      await fetchTreatments();
+    } catch (error) {
+      console.error("Failed to save service:", error);
+    } finally {
+      setIsSaving(false);
     }
-
-    const payload = {
-      ...serviceForm,
-      imageUrl: imageData.url,
-      imagePath: imageData.path,
-    };
-
-    if (serviceEdit.index === null) {
-      await axios.post("/api/admin/treatments/services", {
-        treatmentId,
-        service: payload,
-      });
-    } else {
-      await axios.put("/api/admin/treatments/services", {
-        treatmentId,
-        serviceIndex: serviceEdit.index,
-        service: payload,
-      });
-    }
-
-    setServiceEdit(null);
-    setServiceForm(emptyService);
-    setSelectedImage(null);
-    setServiceMenu(null);
-    fetchTreatments();
   };
 
   const confirmDeleteTreatment = async () => {
+    if (isDeleting) return;
     if (!confirmDelete?.id) return;
 
-    await axios.delete("/api/admin/treatments", {
-      data: {
-        id: confirmDelete.id,
-      },
-    });
+    try {
+      setIsDeleting(true);
 
-    setConfirmDelete(null);
-    fetchTreatments();
+      await axios.delete("/api/admin/treatments", {
+        data: { id: confirmDelete.id },
+      });
+
+      setConfirmDelete(null);
+      await fetchTreatments();
+    } catch (error) {
+      console.error("Failed to delete treatment:", error);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const confirmDeleteService = async () => {
-    await axios.delete("/api/admin/treatments/services", {
-      data: {
-        treatmentId: confirmDelete.treatmentId,
-        serviceIndex: confirmDelete.serviceIndex,
-      },
-    });
-    setConfirmDelete(null);
-    fetchTreatments();
+    try {
+      setIsDeleting(true);
+      await axios.delete("/api/admin/treatments/services", {
+        data: {
+          treatmentId: confirmDelete.treatmentId,
+          serviceIndex: confirmDelete.serviceIndex,
+        },
+      });
+      setConfirmDelete(null);
+      setIsDeleting(false);
+      fetchTreatments();
+    } catch (error) {
+      setIsDeleting(false);
+      console.error("Failed to delete service:", error);
+    }
   };
 
   if (loading) {
@@ -164,6 +209,7 @@ export default function AdminTreatmentsPage() {
         <h1 className="text-4xl font-bold">العلاجات</h1>
         <button
           onClick={() => setShowAddModal(true)}
+          disabled={isAdding}
           className="px-5 py-2 rounded-xl bg-primary text-primary-foreground"
         >
           إضافة علاج+
@@ -193,6 +239,7 @@ export default function AdminTreatmentsPage() {
 
                       <button
                         type="button"
+                        disabled={isSaving}
                         onClick={() => saveTitle(treatment._id)}
                         className="px-4 py-2 rounded-lg bg-green-600 text-white"
                       >
@@ -259,7 +306,9 @@ export default function AdminTreatmentsPage() {
                         </button>
 
                         <button
+                        disabled={isDeleting}
                           onClick={() => {
+                            if (isDeleting) return;
                             setConfirmDelete({
                               type: "treatment",
                               id: treatment._id,
@@ -286,6 +335,7 @@ export default function AdminTreatmentsPage() {
                   >
                     <div className="flex justify-end mb-4">
                       <button
+                        disabled={isAdding}
                         onClick={() => {
                           setServiceEdit({
                             treatmentId: treatment._id,
@@ -612,6 +662,7 @@ export default function AdminTreatmentsPage() {
               </button>
               <button
                 onClick={() => saveService(serviceEdit.treatmentId)}
+                disabled={isSaving}
                 className="bg-primary px-4 py-2 rounded text-white"
               >
                 حفظ
