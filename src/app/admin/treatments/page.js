@@ -19,6 +19,7 @@ const emptyService = {
 export default function AdminTreatmentsPage() {
   const HUJAMA_ID = "6971f64c9b98d43b59cbb4a0";
   const isHujama = (treatment) => treatment._id === HUJAMA_ID;
+
   const [treatments, setTreatments] = useState([]);
   const [openIndex, setOpenIndex] = useState(null);
   const [menuIndex, setMenuIndex] = useState(null);
@@ -68,7 +69,6 @@ export default function AdminTreatmentsPage() {
   };
 
   const addTreatment = async () => {
-    // small guard so it doesn't submit empty
     if (!newTreatment.title.trim()) return;
 
     await axios.post("/api/admin/treatments", newTreatment);
@@ -84,7 +84,7 @@ export default function AdminTreatmentsPage() {
     formData.append("serviceIndex", serviceIndex);
 
     const res = await axios.post("/api/admin/upload-service-image", formData);
-    return res.data; // { url, path }
+    return res.data;
   };
 
   const saveService = async (treatmentId) => {
@@ -127,9 +127,14 @@ export default function AdminTreatmentsPage() {
   };
 
   const confirmDeleteTreatment = async () => {
+    if (!confirmDelete?.id) return;
+
     await axios.delete("/api/admin/treatments", {
-      data: { id: confirmDelete.id },
+      data: {
+        id: confirmDelete.id,
+      },
     });
+
     setConfirmDelete(null);
     fetchTreatments();
   };
@@ -213,7 +218,6 @@ export default function AdminTreatmentsPage() {
                   </div>
                 )}
 
-                {/* ✅ treatment hamburger menu (restored) */}
                 <div className="relative z-50 ml-4">
                   <button
                     onClick={() =>
@@ -293,157 +297,173 @@ export default function AdminTreatmentsPage() {
                         }}
                         className="px-4 py-2 bg-primary text-primary-foreground rounded-lg"
                       >
-                         إضافة خدمة +
+                        إضافة خدمة +
                       </button>
                     </div>
 
-                    <table className="w-full relative  order border-border border-collapse">
-                      <thead className="border border-border">
-                        <tr className="border-b border border-border ">
-                          <th className="text-left py-2 border border-border">
-                            اسم الخدمة
-                          </th>
-                          <th className="text-start py-2 border border-border">
-                            المدة
-                          </th>
-                          <th className="text-start py-2 border border-border">
-                            السعر
-                          </th>
-                          <th className="text-start py-2 border border-border">
-                            الوصف
-                          </th>
-                          {hujama && (
-                            <th className="border p-2">عدد الكووس</th> //
-                          )}
-                          <th className="text-start py-2 border border-border">
-                            الصورة
-                          </th>
-                          <th className="text-right py-2 border border-border">
-                            الإجراءات
-                          </th>
-                        </tr>
-                      </thead>
-
-                      <tbody>
-                        {(treatment.services || []).map((s, i) => (
-                          <tr
-                            key={i}
-                            className="border border-border align-top"
-                          >
-                            <td className="py-3 border border-border">
-                              {s.title}
-                            </td>
-                            <td className="py-3 border border-border">
-                              {s.duration}
-                            </td>
-                            <td className="py-3 border border-border">
-                              {s.price} {s.currency}
-                            </td>
-                            <td className="py-3 border border-border">
-                              {s.description}
-                            </td>
+                    <div className="relative w-full overflow-x-auto">
+                      <table className="w-full min-w-[900px] relative order border-border border-collapse">
+                        <thead className="border border-border">
+                          <tr className="border-b border border-border">
+                            <th className="text-left py-2 border border-border">
+                              اسم الخدمة
+                            </th>
+                            <th className="text-start py-2 border border-border">
+                              المدة
+                            </th>
+                            <th className="text-start py-2 border border-border">
+                              السعر
+                            </th>
+                            <th className="text-start py-2 border border-border">
+                              الوصف
+                            </th>
                             {hujama && (
-                              <td className="border p-2">
-                                {s.cupsCount || "—"}
-                              </td>
+                              <th className="border p-2">عدد الكووس</th>
                             )}
-                            <td className="py-3 border border-border">
-                              {s.imageUrl ? (
-                                <button
-                                  type="button"
-                                  onClick={() => setPreviewImage(s.imageUrl)}
-                                  className="block"
-                                >
-                                  <img
-                                    src={s.imageUrl}
-                                    alt={s.title}
-                                    className="
-                              object-cover rounded-lg border border-border
-                              w-12 h-12
-                              md:w-16 md:h-16
-                            "
-                                  />
-                                </button>
-                              ) : (
-                                <span className="text-foreground/50">—</span>
-                              )}
-                            </td>
-
-                            {/* sub-treatments hamburger menu (mobile friendly) */}
-                            <td className="relative z-50 text-right py-3">
-                              <div className="relative inline-block">
-                                <button
-                                  onClick={() =>
-                                    setServiceMenu(
-                                      serviceMenu === `${index}-${i}`
-                                        ? null
-                                        : `${index}-${i}`,
-                                    )
-                                  }
-                                  className="p-2 border border-border rounded-lg"
-                                >
-                                  ⋮
-                                </button>
-
-                                <AnimatePresence>
-                                  {serviceMenu === `${index}-${i}` && (
-                                    <motion.div
-                                      initial={{ opacity: 0, y: -5 }}
-                                      animate={{ opacity: 1, y: 0 }}
-                                      exit={{ opacity: 0, y: -5 }}
-                                      className="absolute end-0 mt-2 w-32 bg-background border border-border rounded-xl shadow-lg z-[9999]"
-                                    >
-                                      <button
-                                        onClick={() => {
-                                          setServiceEdit({
-                                            treatmentId: treatment._id,
-                                            index: i,
-                                            isHujama: hujama,
-                                          });
-                                          setServiceForm({
-                                            title: s.title ?? "",
-                                            description: s.description ?? "",
-                                            duration: s.duration ?? "",
-                                            price: s.price ?? "",
-                                            currency: s.currency ?? "ILS",
-
-                                            ...(hujama
-                                              ? { cupsCount: s.cupsCount ?? "" }
-                                              : {}),
-
-                                            imageUrl: s.imageUrl ?? "",
-                                            imagePath: s.imagePath ?? "",
-                                          });
-                                          setSelectedImage(null);
-                                          setServiceMenu(null);
-                                        }}
-                                        className="w-full text-left px-4 py-2 hover:bg-muted"
-                                      >
-                                        تعديل
-                                      </button>
-
-                                      <button
-                                        onClick={() => {
-                                          setConfirmDelete({
-                                            type: "service",
-                                            treatmentId: treatment._id,
-                                            serviceIndex: i,
-                                          });
-                                          setServiceMenu(null);
-                                        }}
-                                        className="w-full text-left px-4 py-2 text-destructive hover:bg-destructive/10"
-                                      >
-                                        حذف
-                                      </button>
-                                    </motion.div>
-                                  )}
-                                </AnimatePresence>
-                              </div>
-                            </td>
+                            <th className="text-start py-2 border border-border">
+                              الصورة
+                            </th>
+                            <th className="text-right py-2 border border-border">
+                              الإجراءات
+                            </th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+
+                        <tbody>
+                          {(treatment.services || []).map((s, i) => (
+                            <tr
+                              key={i}
+                              className="border border-border align-top"
+                            >
+                              <td className="py-3 px-2 border border-border whitespace-nowrap">
+                                {s.title}
+                              </td>
+
+                              <td className="py-3 px-2 border border-border whitespace-nowrap">
+                                {s.duration}
+                              </td>
+
+                              <td className="py-3 px-2 border border-border whitespace-nowrap">
+                                {s.price} {s.currency}
+                              </td>
+
+                              <td className="py-3 px-2 border border-border">
+                                <div
+                                  className="
+                                    max-w-[240px] md:max-w-[320px]
+                                    break-words whitespace-normal
+                                    line-clamp-3 md:line-clamp-none
+                                    text-sm
+                                  "
+                                >
+                                  {s.description}
+                                </div>
+                              </td>
+
+                              {hujama && (
+                                <td className="border p-2 text-center">
+                                  {s.cupsCount || "—"}
+                                </td>
+                              )}
+
+                              <td className="py-3 px-2 border border-border">
+                                {s.imageUrl ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPreviewImage(s.imageUrl)}
+                                    className="block"
+                                  >
+                                    <img
+                                      src={s.imageUrl}
+                                      alt={s.title}
+                                      className="
+                                        object-cover rounded-lg border border-border
+                                        w-12 h-12
+                                        md:w-16 md:h-16
+                                      "
+                                    />
+                                  </button>
+                                ) : (
+                                  <span className="text-foreground/50">—</span>
+                                )}
+                              </td>
+
+                              <td className="relative z-50 text-right py-3 px-2 border border-border">
+                                <div className="relative inline-block">
+                                  <button
+                                    onClick={() =>
+                                      setServiceMenu(
+                                        serviceMenu === `${index}-${i}`
+                                          ? null
+                                          : `${index}-${i}`,
+                                      )
+                                    }
+                                    className="p-2 border border-border rounded-lg"
+                                  >
+                                    ⋮
+                                  </button>
+
+                                  <AnimatePresence>
+                                    {serviceMenu === `${index}-${i}` && (
+                                      <motion.div
+                                        initial={{ opacity: 0, y: -5 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -5 }}
+                                        className="absolute end-0 mt-2 w-32 bg-background border border-border rounded-xl shadow-lg z-[9999]"
+                                      >
+                                        <button
+                                          onClick={() => {
+                                            setServiceEdit({
+                                              treatmentId: treatment._id,
+                                              index: i,
+                                              isHujama: hujama,
+                                            });
+                                            setServiceForm({
+                                              title: s.title ?? "",
+                                              description: s.description ?? "",
+                                              duration: s.duration ?? "",
+                                              price: s.price ?? "",
+                                              currency: s.currency ?? "ILS",
+                                              ...(hujama
+                                                ? {
+                                                    cupsCount:
+                                                      s.cupsCount ?? "",
+                                                  }
+                                                : {}),
+                                              imageUrl: s.imageUrl ?? "",
+                                              imagePath: s.imagePath ?? "",
+                                            });
+                                            setSelectedImage(null);
+                                            setServiceMenu(null);
+                                          }}
+                                          className="w-full text-left px-4 py-2 hover:bg-muted"
+                                        >
+                                          تعديل
+                                        </button>
+
+                                        <button
+                                          onClick={() => {
+                                            setConfirmDelete({
+                                              type: "service",
+                                              treatmentId: treatment._id,
+                                              serviceIndex: i,
+                                            });
+                                            setServiceMenu(null);
+                                          }}
+                                          className="w-full text-left px-4 py-2 text-destructive hover:bg-destructive/10"
+                                        >
+                                          حذف
+                                        </button>
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -460,14 +480,11 @@ export default function AdminTreatmentsPage() {
           <img
             src={previewImage}
             alt="Preview"
-            className="
-        max-w-[90vw] max-h-[90vh]
-        rounded-xl border border-border
-        bg-background
-      "
+            className="max-w-[90vw] max-h-[90vh] rounded-xl border border-border bg-background"
           />
         </div>
       )}
+
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]">
           <div className="bg-background p-6 rounded-2xl w-full max-w-lg">
@@ -604,7 +621,6 @@ export default function AdminTreatmentsPage() {
         </div>
       )}
 
-      {/* Confirm Delete */}
       {confirmDelete && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]">
           <div className="bg-background p-6 rounded-xl">

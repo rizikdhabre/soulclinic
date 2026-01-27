@@ -40,10 +40,6 @@ export async function POST(req) {
   }
 }
 
-/* =========================
-   PUT – edit sub-treatment
-   (replace image if changed)
-========================= */
 export async function PUT(req) {
   try {
     const { treatmentId, serviceIndex, service } = await req.json();
@@ -61,7 +57,6 @@ export async function PUT(req) {
 
     const collection = await getCollection("treatments");
 
-    // 🔹 get old service to compare images
     const treatment = await collection.findOne({
       _id: new ObjectId(treatmentId),
     });
@@ -69,7 +64,6 @@ export async function PUT(req) {
     const oldService = treatment?.services?.[serviceIndex];
     const oldImagePath = oldService?.imagePath;
 
-    // 🔹 update service fields
     const updateFields = {};
     Object.keys(service).forEach((key) => {
       updateFields[`services.${serviceIndex}.${key}`] = service[key];
@@ -82,8 +76,6 @@ export async function PUT(req) {
         $currentDate: { updatedAt: true },
       }
     );
-
-    // 🔥 DELETE OLD IMAGE IF REPLACED
     if (
       oldImagePath &&
       service.imagePath &&
@@ -110,10 +102,6 @@ export async function PUT(req) {
   }
 }
 
-/* =========================
-   DELETE – delete sub-treatment
-   + delete image from Firebase
-========================= */
 export async function DELETE(req) {
   try {
     const { treatmentId, serviceIndex } = await req.json();
@@ -127,7 +115,6 @@ export async function DELETE(req) {
 
     const collection = await getCollection("treatments");
 
-    // 🔹 get service + imagePath BEFORE deletion
     const treatment = await collection.findOne({
       _id: new ObjectId(treatmentId),
     });
