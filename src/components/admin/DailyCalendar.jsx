@@ -68,7 +68,67 @@ const DailyCalendar = () => {
   const [draftEditedTimes, setDraftEditedTimes] = useState([]);
   const [baseEditedTimes, setBaseEditedTimes] = useState([]);
   const [draftTimeByIndex, setDraftTimeByIndex] = useState({});
+  const [expandedAppointmentId, setExpandedAppointmentId] = useState(null);
+  const [timeConflictMessage, setTimeConflictMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
   const selectedDateKey = format(selectedDate, "yyyy-MM-dd");
+
+  //helper
+  const findDuplicates = (arr) => {
+    const seen = new Set();
+    const duplicates = new Set();
+
+    for (const item of arr) {
+      if (seen.has(item)) duplicates.add(item);
+      seen.add(item);
+    }
+
+    return [...duplicates];
+  };
+
+  const handleSaveChanges = async () => {
+    try {
+      setIsSaving(true);
+
+      const next = baseEditedTimes.map((t) => draftTimeByIndex[t] ?? t);
+
+      const duplicates = findDuplicates(next);
+
+      if (duplicates.length > 0) {
+        setTimeConflictMessage(
+          "لم يتم تغيير الوقت لأنه هذا الوقت موجود مسبقًا",
+        );
+
+        setTimeout(() => {
+          setTimeConflictMessage("");
+        }, 5000);
+
+        return;
+      }
+
+      const nextBlocked = Array.from(
+        new Set(blockedTimes.map((t) => draftTimeByIndex[t] ?? t)),
+      ).filter((t) => next.includes(t));
+
+      await axios.post("/api/appointments/edit", {
+        date: selectedDateKey,
+        editedTimes: next,
+        blockedTimes: nextBlocked,
+      });
+
+      setEditedTimes(next);
+      setBlockedTimes(nextBlocked);
+      setDraftTimeByIndex({});
+      setBaseEditedTimes([]);
+      setDraftEditedTimes([]);
+      setEditMode(false);
+      fetchDay();
+    } catch (error) {
+      console.error("Failed to save appointment changes:", error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   /* ---------- calendar ---------- */
 
@@ -302,12 +362,16 @@ const DailyCalendar = () => {
         <h4 className="text-base font-semibold text-foreground mb-4">
           جدول المواعيد بتاريخ {format(selectedDate, "MMMM d, yyyy")}
         </h4>
+        {timeConflictMessage && (
+          <div className="mb-4 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {timeConflictMessage}
+          </div>
+        )}
 
         <div className="mt-6 mb-4 flex items-center justify-between">
           <h4 className="text-sm font-medium text-muted-foreground">
             {format(selectedDate, "MMMM d, yyyy")}
           </h4>
-
           <div className="flex gap-2">
             <button
               onClick={handleToggleEdit}
@@ -322,29 +386,8 @@ const DailyCalendar = () => {
 
             {editMode && (
               <button
-                onClick={async () => {
-                  const next = baseEditedTimes.map(
-                    (t) => draftTimeByIndex[t] ?? t,
-                  );
-
-                  const nextBlocked = Array.from(
-                    new Set(blockedTimes.map((t) => draftTimeByIndex[t] ?? t)),
-                  );
-
-                  await axios.post("/api/appointments/edit", {
-                    date: selectedDateKey,
-                    editedTimes: next,
-                    blockedTimes: nextBlocked,
-                  });
-
-                  setEditedTimes(next);
-                  setBlockedTimes(nextBlocked);
-                  setDraftTimeByIndex({});
-                  setBaseEditedTimes([]);
-                  setDraftEditedTimes([]);
-                  setEditMode(false);
-                  fetchDay();
-                }}
+                disabled={isSaving}
+                onClick={handleSaveChanges}
                 className="px-4 py-2 rounded-xl text-sm font-medium bg-primary text-primary-foreground"
               >
                 حفظ التغييرات
@@ -374,14 +417,25 @@ const DailyCalendar = () => {
             {timeline.map((row) => {
               const apt = row.apt;
 
+              /* ===================== APPOINTMENT SLOT ===================== */
               if (apt) {
+                const isExpanded = expandedAppointmentId === apt._id;
+
                 return (
                   <div
                     key={apt._id || row.time}
-                    className="flex items-center gap-4 p-4 rounded-xl bg-muted/50 hover:bg-muted transition-colors"
+                    className="rounded-xl bg-muted/50 hover:bg-muted transition-colors p-4"
                   >
-                    <div className="flex items-center gap-2 min-w-[80px]">
-                      <Clock className="w-4 h-4 text-primary" />
+                    {/* ---------- TOP ROW (always visible) ---------- */}
+                    <div
+                      className="flex items-center gap-3 cursor-pointer md:cursor-default"
+                      onClick={() =>
+                        setExpandedAppointmentId(isExpanded ? null : apt._id)
+                      }
+                    >
+                      <Clock className="w-4 h-4 text-primary shrink-0" />
+
+                      {/* TIME */}
                       {editingAppointmentId === apt._id ? (
                         <input
                           type="time"
@@ -392,83 +446,129 @@ const DailyCalendar = () => {
                             setEditingAppointmentTime(e.target.value)
                           }
                           className="
-                            border rounded px-2 py-1 text-sm
-                            bg-background
-                            text-foreground
-                            dark:bg-muted
-                            dark:text-foreground
-                            focus:outline-none focus:ring-2 focus:ring-primary
-                          "
+                  border rounded px-2 py-1 text-sm
+                  bg-background text-foreground
+                  focus:outline-none focus:ring-2 focus:ring-primary
+                "
                         />
                       ) : (
-                        <span className="font-semibold text-sm">
+                        <span className="font-semibold text-sm min-w-[60px]">
                           {apt.time}
                         </span>
                       )}
+
+                      {/* NAME */}
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <User className="w-4 h-4 text-muted-foreground shrink-0" />
+                        <span className="text-sm truncate">
+                          {apt.firstName} {apt.lastName}
+                        </span>
+                      </div>
+
+                      {/* DESKTOP ONLY */}
+                      <div className="hidden md:flex items-center gap-3">
+                        <span className="text-xs bg-secondary px-2 py-1 rounded-lg">
+                          {apt.duration} min
+                        </span>
+
+                        {apt.status && (
+                          <span className={getStatusBadgeClass(apt.status)}>
+                            {String(apt.status).charAt(0).toUpperCase() +
+                              String(apt.status).slice(1)}
+                          </span>
+                        )}
+
+                        {editingAppointmentId === apt._id ? (
+                          <button
+                            onClick={async () => {
+                              try {
+                                await axios.post(
+                                  "/api/appointments/update-time",
+                                  {
+                                    appointmentId: apt._id,
+                                    date: selectedDateKey,
+                                    newTime: editingAppointmentTime,
+                                  },
+                                );
+                                setEditingAppointmentId(null);
+                                setEditingAppointmentTime("");
+                                fetchDay();
+                              } catch (err) {
+                                console.error("Failed to update", err);
+                              }
+                            }}
+                            className="px-3 py-1 text-xs rounded bg-primary text-primary-foreground"
+                          >
+                            حفظ
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setEditingAppointmentId(apt._id);
+                              setEditingAppointmentTime(apt.time);
+                            }}
+                            className="px-3 py-1 text-xs rounded bg-secondary"
+                          >
+                            تغيير الموعد
+                          </button>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <User className="w-4 h-4 text-muted-foreground shrink-0" />
-                      <span className="text-sm truncate">
-                        {apt.firstName} {apt.lastName}
-                      </span>
-                    </div>
+                    {/* ---------- MOBILE EXPANDED DETAILS ---------- */}
+                    {isExpanded && (
+                      <div className="mt-3 pt-3 border-t space-y-2 text-sm md:hidden">
+                        <div>
+                          ⏱ <strong>{apt.duration} min</strong>
+                        </div>
 
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <Stethoscope className="w-4 h-4 text-muted-foreground shrink-0" />
-                      <span className="text-sm truncate">{apt.title}</span>
-                    </div>
+                        {apt.status && (
+                          <span className={getStatusBadgeClass(apt.status)}>
+                            {apt.status}
+                          </span>
+                        )}
 
-                    <span className="text-xs text-muted-foreground bg-secondary px-2 py-1 rounded-lg shrink-0">
-                      {apt.duration} min
-                    </span>
-
-                    {editingAppointmentId === apt._id ? (
-                      <button
-                        onClick={async () => {
-                          try {
-                            await axios.post("/api/appointments/update-time", {
-                              appointmentId: apt._id,
-                              date: selectedDateKey,
-                              newTime: editingAppointmentTime,
-                            });
-
-                            setEditingAppointmentId(null);
-                            setEditingAppointmentTime("");
-                            fetchDay();
-                          } catch (err) {
-                            console.error(
-                              "Failed to update appointment time",
-                              err,
-                            );
-                          }
-                        }}
-                        className="px-3 py-1 text-xs rounded bg-primary text-primary-foreground"
-                      >
-                        Save
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          setEditingAppointmentId(apt._id);
-                          setEditingAppointmentTime(apt.time);
-                        }}
-                        className="px-3 py-1 text-xs rounded bg-secondary"
-                      >
-                        Edit
-                      </button>
+                        {editingAppointmentId === apt._id ? (
+                          <button
+                            onClick={async () => {
+                              try {
+                                await axios.post(
+                                  "/api/appointments/update-time",
+                                  {
+                                    appointmentId: apt._id,
+                                    date: selectedDateKey,
+                                    newTime: editingAppointmentTime,
+                                  },
+                                );
+                                setEditingAppointmentId(null);
+                                setEditingAppointmentTime("");
+                                fetchDay();
+                              } catch (err) {
+                                console.error("Failed to update", err);
+                              }
+                            }}
+                            className="w-full px-3 py-2 text-xs rounded bg-primary text-primary-foreground"
+                          >
+                            حفظ
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setEditingAppointmentId(apt._id);
+                              setEditingAppointmentTime(apt.time);
+                            }}
+                            className="w-full px-3 py-2 text-xs rounded bg-secondary"
+                          >
+                            تغيير الموعد
+                          </button>
+                        )}
+                      </div>
                     )}
-
-                    {apt.status ? (
-                      <span className={getStatusBadgeClass(apt.status)}>
-                        {String(apt.status).charAt(0).toUpperCase() +
-                          String(apt.status).slice(1)}
-                      </span>
-                    ) : null}
                   </div>
                 );
               }
 
+              /* ===================== EMPTY SLOT ===================== */
               return (
                 <div
                   key={`slot-${row.time}`}
@@ -479,56 +579,40 @@ const DailyCalendar = () => {
                     {editMode ? (
                       <input
                         type="time"
-                        onClick={(e) => e.stopPropagation()}
-                        onMouseDown={(e) => e.stopPropagation()}
                         value={draftTimeByIndex[row.time] ?? row.time}
-                        onChange={(e) => {
-                          const value = e.target.value;
+                        onChange={(e) =>
                           setDraftTimeByIndex((prev) => ({
                             ...prev,
-                            [row.time]: value,
-                          }));
-                        }}
+                            [row.time]: e.target.value,
+                          }))
+                        }
                         className="
-                            border rounded px-2 py-1 text-sm
-                            bg-background
-                            text-foreground
-                            dark:bg-muted
-                            dark:text-foreground
-                            focus:outline-none focus:ring-2 focus:ring-primary
-                          "
+                border rounded px-2 py-1 text-sm
+                bg-background text-foreground
+                focus:outline-none focus:ring-2 focus:ring-primary
+              "
                       />
                     ) : (
                       <span className="font-semibold text-sm">{row.time}</span>
                     )}
                   </div>
 
-                  <div className="flex-1 min-w-0 text-sm text-muted-foreground">
+                  <div className="flex-1 text-sm text-muted-foreground">
                     {row.blocked ? "محظور" : "متاح"}
                   </div>
 
                   <button
                     onClick={() => toggleBlock(row.time)}
                     disabled={editMode}
-                    className={`flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg transition ${
+                    className={`text-xs px-3 py-2 rounded-lg ${
                       editMode
                         ? "opacity-40 cursor-not-allowed"
                         : row.blocked
-                          ? "bg-muted text-muted-foreground hover:bg-muted/70"
-                          : "bg-primary/10 text-primary hover:bg-primary/20"
+                          ? "bg-muted"
+                          : "bg-primary/10 text-primary"
                     }`}
                   >
-                    {row.blocked ? (
-                      <>
-                        <Unlock className="w-4 h-4" />
-                        إلغاء الحظر
-                      </>
-                    ) : (
-                      <>
-                        <Lock className="w-4 h-4" />
-                        حظر
-                      </>
-                    )}
+                    {row.blocked ? "إلغاء الحظر" : "حظر"}
                   </button>
                 </div>
               );
