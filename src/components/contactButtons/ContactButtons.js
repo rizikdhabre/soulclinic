@@ -1,8 +1,6 @@
 "use client";
-
 import { useState } from "react";
 import { FaWhatsapp, FaInstagram, FaPhoneAlt, FaMinus } from "react-icons/fa";
-
 const WHATSAPP_URL = "https://wa.me/972532286019";
 const INSTAGRAM_PERSONAL_URL = "https://www.instagram.com/sqr_dagash";
 const INSTAGRAM_CLINIC_URL = "https://www.instagram.com/soul_clinica";

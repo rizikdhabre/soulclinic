@@ -70,7 +70,7 @@ export default function AdminPage() {
               transition
             "
           >
-            Logout
+          تسجيل خروج
           </button>
         </motion.div>
 

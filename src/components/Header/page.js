@@ -6,7 +6,7 @@ import { Menu, X, Sun, Moon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "@/hooks/useTheme";
-import { GiYinYang } from "react-icons/gi";
+import Image from "next/image";
 
 const Header = () => {
   const { theme, toggleTheme } = useTheme();
@@ -39,19 +39,19 @@ const Header = () => {
     };
   }, [isMenuOpen]);
 
- useEffect(() => {
-  const checkAuth = async () => {
-    try {
-      const res = await fetch("/api/me", { cache: "no-store" });
-      const data = await res.json();
-      setIsAdmin(data.isAdmin);
-    } catch {
-      setIsAdmin(false);
-    }
-  };
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const res = await fetch("/api/me", { cache: "no-store" });
+        const data = await res.json();
+        setIsAdmin(data.isAdmin);
+      } catch {
+        setIsAdmin(false);
+      }
+    };
 
-  checkAuth();
-}, [pathname]);
+    checkAuth();
+  }, [pathname]);
 
   return (
     <>
@@ -80,16 +80,24 @@ const Header = () => {
           {/* Logo */}
           <Link href="/" className="absolute left-1/2 -translate-x-1/2">
             <motion.div
-              whileHover={{ scale: 1.02 }}
-              className="flex flex-col items-center"
+              whileHover={{ scale: 1.06 }}
+              whileTap={{ scale: 0.97 }}
+              className="
+              relative
+              w-32 h-32 md:w-36 md:h-36
+              rounded-full
+              flex items-center justify-center
+              shadow-[0_12px_40px_rgba(0,0,0,0.45)]
+            "
             >
-              <span className="flex items-center gap-2 font-serif text-2xl md:text-3xl font-medium tracking-wide text-foreground">
-                <GiYinYang size={32} />
-                SOUL
-              </span>
-              <span className="text-[10px] md:text-xs tracking-[0.3em] text-muted-foreground uppercase">
-                For Body&Soul
-              </span>
+              <Image
+                src="/LogoSoul.PNG"
+                alt="Soul Logo"
+                width={300}
+                height={300}
+                priority
+                className="object-contain  rounded-full"
+              />
             </motion.div>
           </Link>
 

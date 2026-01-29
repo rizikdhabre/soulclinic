@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-
+import NeonLoader from "@/components/ui/loading";
 export default function TreatmentDetails() {
   const { id } = useParams();
   const router = useRouter();
   const HUJAMA_ID = "6971f64c9b98d43b59cbb4a0";
   const isHujama = id === HUJAMA_ID;
+  const [loading, setLoading] = useState(true);
 
   const [treatment, setTreatment] = useState(null);
   const [error, setError] = useState(null);
@@ -15,14 +16,36 @@ export default function TreatmentDetails() {
   useEffect(() => {
     if (!id) return;
 
-    fetch(`/api/treatment?id=${id}`)
-      .then((res) => {
+    const fetchTreatment = async () => {
+      try {
+        setLoading(true);
+
+        const res = await fetch(`/api/treatment?id=${id}`);
         if (!res.ok) throw new Error("Failed to fetch treatment");
-        return res.json();
-      })
-      .then(setTreatment)
-      .catch(() => setError("Failed to load treatment"));
+
+        const data = await res.json();
+        setTreatment(data);
+      } catch (err) {
+        setError("Failed to load treatment");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTreatment();
   }, [id]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-background">
+        <NeonLoader width={320} height={80} />
+
+        <p className="text-muted-foreground text-lg tracking-wide animate-pulse">
+          جاري التحميل...
+        </p>
+      </div>
+    );
+  }
 
   if (error) {
     return (
@@ -93,7 +116,7 @@ export default function TreatmentDetails() {
                   onClick={() => handleBookNow(s)}
                   className="mt-2 w-full rounded-xl bg-primary py-3 text-white transition hover:bg-primary/90"
                 >
-                 احجز الآن
+                  احجز الآن
                 </button>
               </div>
             </div>

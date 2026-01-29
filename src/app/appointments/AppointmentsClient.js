@@ -8,6 +8,7 @@ import { AppointmentHeader } from "@/components/ui/AppointmentHeader";
 import { AppointmentForm } from "@/components/ui/AppointmentForm";
 import { TimeSlotPicker } from "@/components/ui/TimeSlotPicker";
 import { useSearchParams } from "next/navigation";
+
 export default function AppointmentsClient() {
   const searchParams = useSearchParams();
   const duration = Number(searchParams.get("duration"));

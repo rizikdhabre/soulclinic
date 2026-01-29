@@ -1,10 +1,8 @@
 "use client";
 
 import { motion } from "framer-motion";
-import Link from "next/link";
 import { Heart } from "lucide-react";
-import { GiYinYang } from "react-icons/gi";
-
+import Image from "next/image";
 const Footer = () => {
   return (
     <footer className="bg-card border-t border-border">
@@ -17,15 +15,30 @@ const Footer = () => {
             viewport={{ once: true }}
             transition={{ duration: 0.5 }}
           >
-            <div className="flex items-center gap-2 mb-4">
-              <GiYinYang size={32} />
+            <div className="flex items-center gap-3 mb-4">
+              <div
+                className="
+      relative
+      w-14 h-14
+      rounded-full
+      overflow-hidden
+      shadow-sm
+    "
+              >
+                <Image
+                  src="/LogoSoul.PNG"
+                  alt="Soul Logo"
+                  fill
+                  className="object-contain rounded-full"
+                />
+              </div>
+
               <span className="font-serif text-2xl text-foreground">Soul</span>
             </div>
             <p className="text-subtle max-w-xs">
               استعادة التوازن، وشفاء الجسد، وتهدئة الروح
             </p>
           </motion.div>
-
 
           {/* Contact Info */}
           <motion.div
@@ -34,10 +47,18 @@ const Footer = () => {
             viewport={{ once: true }}
             transition={{ duration: 0.5, delay: 0.2 }}
           >
-            <h4 className="font-serif text-lg text-foreground mb-4">اتصل بنا</h4>
+            <h4 className="font-serif text-lg text-foreground mb-4">
+              اتصل بنا
+            </h4>
             <div className="space-y-2 text-muted-foreground">
               <p>ديرحنا</p>
-              <p>0507456258</p>
+
+              <a
+                href="tel:0507456258"
+                className="hover:text-foreground transition-colors"
+              >
+                0507456258
+              </a>
             </div>
           </motion.div>
         </div>
@@ -55,7 +76,8 @@ const Footer = () => {
           </p>
 
           <p className="text-sm text-muted-foreground flex items-center gap-1">
-           صُنع بـ <Heart className="w-4 h-4 text-accent fill-accent" /> من أجل صحتك ورفاهيتك
+            صُنع بـ <Heart className="w-4 h-4 text-accent fill-accent" /> من أجل
+            صحتك ورفاهيتك
           </p>
           <p className="text-sm text-muted-foreground ">
             تم التطوير بواسطة{" "}

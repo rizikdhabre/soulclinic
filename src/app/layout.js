@@ -2,7 +2,7 @@ import "./globals.css";
 import { Geist, Geist_Mono } from "next/font/google";
 import Header from "@/components/Header/page";
 import Footer from "@/components/Footer/page";
-import ContactButtons from "@/components/contactButtons/ContactButtons";
+import ContactButtonsWrapper from "@/components/contactButtons/ContactButtonsWrapper";
 import { Toaster } from "sonner";
 
 const geistSans = Geist({
@@ -28,7 +28,7 @@ export default function RootLayout({ children }) {
       >
         <Header/>
         {children}
-        <ContactButtons />
+        <ContactButtonsWrapper />
          <Toaster richColors position="top-right" />
         <Footer/>
       </body>

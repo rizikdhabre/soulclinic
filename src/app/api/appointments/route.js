@@ -1,8 +1,34 @@
 import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
+import { sendWhatsAppTemplate } from "@/lib/whatsapp";
 /* ---------------- HELPER ---------------- */
 
+export async function sendAppointmentConfirmationToCustomer({
+  phone,
+  firstName,
+  lastName,
+  title,
+  date,
+  time,
+}) {
+  const fullName = `${firstName || ""} ${lastName || ""}`.trim();
+  const toWhatsApp = phone.startsWith("whatsapp:")
+    ? phone
+    : phone.startsWith("+")
+      ? `whatsapp:${phone}`
+      : `whatsapp:+${phone}`;
+  return sendWhatsAppTemplate({
+    to: toWhatsApp,
+    templateSid: process.env.TWILIO_TEMPLATE_NEW_APPOINTMENT_CUSTUMER,
+    variables: {
+      1: fullName || "عزيزي الزبون",
+      2: title,
+      3: date,
+      4: time,
+    },
+  });
+}
 async function upsertUserData({
   appointmentId,
   phone,
@@ -56,6 +82,34 @@ async function upsertUserData({
     }
 
     await usersCollection.updateOne({ phone }, update);
+  }
+
+  try {
+    const fullName = `${firstName || ""} ${lastName || ""}`.trim();
+
+    await sendAppointmentConfirmationToCustomer({
+      phone,
+      firstName,
+      lastName,
+      title,
+      date,
+      time,
+    });
+
+    await sendWhatsAppTemplate({
+      to: process.env.TWILIO_WHATSAPP_TO,
+      templateSid: process.env.TWILIO_TEMPLATE_NEW_APPOINTMENT_ADMIN,
+      variables: {
+        1: fullName || "غير معروف",
+        2: phone,
+        3: title,
+        4: date,
+        5: time,
+      },
+    });
+  } catch (err) {
+    // ❗ Do NOT break booking flow if WhatsApp fails
+    console.error("WhatsApp admin notify failed:", err);
   }
 }
 
@@ -193,7 +247,21 @@ export async function DELETE(req) {
         { status: 400 },
       );
     }
+
     const usersCollection = await getCollection("usersData");
+
+    const user = await usersCollection.findOne(
+      { phone },
+      { projection: { firstName: 1, lastName: 1 } },
+    );
+
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    const firstName = user.firstName || "";
+    const lastName = user.lastName || "";
+    const fullName = `${firstName} ${lastName}`.trim();
 
     await usersCollection.updateOne(
       { phone },
@@ -208,16 +276,25 @@ export async function DELETE(req) {
     const appointmentsCollection = await getCollection("appointments");
 
     await appointmentsCollection.updateOne(
-      {
-        date,
-        "appointments.time": time,
-      },
-      {
-        $pull: {
-          appointments: { time },
-        },
-      },
+      { date, "appointments.time": time },
+      { $pull: { appointments: { time } } },
     );
+    const toWhatsApp = phone.startsWith("whatsapp:")
+      ? phone
+      : phone.startsWith("+")
+        ? `whatsapp:${phone}`
+        : `whatsapp:+${phone}`;
+
+    await sendWhatsAppTemplate({
+      to: toWhatsApp,
+      templateSid: process.env.TWILIO_TEMPLATE_CANCEL_REALADMIN,
+      variables: {
+        1: fullName,
+        2: date,
+        3: time,
+      },
+    });
+
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Cancel appointment error:", error);

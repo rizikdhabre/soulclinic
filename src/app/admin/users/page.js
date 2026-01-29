@@ -49,11 +49,12 @@ export default function UsersAdminPage() {
     setSelectedUser(user);
   };
 
-  const handleToggleAttendance = (appointmentId, attended) => {
+  const handleToggleAttendance = async (appointmentId, attended) => {
+
     setUsers((prev) =>
       prev.map((u) => ({
         ...u,
-        appointments: u.appointments.map((a) =>
+        appointments: (u.appointments || []).map((a) =>
           String(a._id) === String(appointmentId) ? { ...a, attended } : a,
         ),
       })),
@@ -63,13 +64,26 @@ export default function UsersAdminPage() {
       prev
         ? {
             ...prev,
-            appointments: prev.appointments.map((a) =>
+            appointments: (prev.appointments || []).map((a) =>
               String(a._id) === String(appointmentId) ? { ...a, attended } : a,
             ),
           }
         : prev,
     );
+   
+    try {
+      const res=await axios.patch("/api/admin/attendance", {
+        appointmentId,
+        attended,
+      });
+      console.log("Attendance update response:", res.data);
+    } catch (error) {
+      console.error("Failed to update attendance in DB", error);
+    }
   };
+
+
+
   const handleCancelAppointment = async (appointmentId) => {
     const appointment = selectedUser?.appointments?.find(
       (a) => String(a._id) === String(appointmentId),
@@ -142,7 +156,7 @@ export default function UsersAdminPage() {
         {/* Search */}
         <div className="lg:col-span-2 bg-card rounded-2xl p-6 shadow-card">
           <label className="block text-sm font-medium mb-2 text-muted-foreground">
-           بحث عن المستخدمين
+            بحث عن المستخدمين
           </label>
           <Input
             placeholder="ابحث بالاسم الأول أو اسم العائلة أو الاسم الكامل…"

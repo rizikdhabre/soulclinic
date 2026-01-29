@@ -44,7 +44,7 @@ export default function LoginBox() {
     }
   };
   return (
-    <div className="relative flex items-center justify-center min-h-screen bg-background overflow-hidden">
+    <div className="relative  overflow-visible flex items-center justify-center min-h-screen bg-background overflow-hidden">
       {/* Top accent (soft, not neon) */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[420px] h-[6px] bg-primary/40 rounded-full blur-md" />
 
@@ -60,10 +60,10 @@ export default function LoginBox() {
         {/* Glow toggle */}
         <div
           className="
-    flex justify-center mb-6
-    md:absolute md:top-6 md:-right-20
-    md:mb-0
-  "
+              flex justify-center mb-6
+              md:absolute md:top-6 md:-right-20
+              md:mb-0
+            "
         >
           <button
             onClick={() => setGlow(!glow)}
@@ -110,7 +110,7 @@ export default function LoginBox() {
             ${glow ? "text-primary" : "text-foreground"}
           `}
         >
-         مرحبًا بعودتك
+          مرحبًا بعودتك
         </h2>
 
         {/* Username */}
@@ -160,7 +160,7 @@ export default function LoginBox() {
       }
     `}
           >
-          تسجيل الدخول
+            تسجيل الدخول
           </button>
         )}
       </motion.div>

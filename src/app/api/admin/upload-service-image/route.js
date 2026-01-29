@@ -3,8 +3,6 @@ import { bucket } from "@/lib/firebaseAdmin";
 
 export async function POST(req) {
   try {
-
-
     const formData = await req.formData();
 
     const image = formData.get("image");
@@ -12,22 +10,16 @@ export async function POST(req) {
     const serviceIndex = formData.get("serviceIndex");
 
     if (!image) {
-      return NextResponse.json(
-        { error: "No image provided" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "No image provided" }, { status: 400 });
     }
 
     if (!image.type.startsWith("image/")) {
-      return NextResponse.json(
-        { error: "Invalid file type" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Invalid file type" }, { status: 400 });
     }
 
     const buffer = Buffer.from(await image.arrayBuffer());
 
-    const filePath = `treatments/${treatmentId}/services/${serviceIndex}/main.jpg`;
+    const filePath = `services/${treatmentId}/${serviceIndex}.jpg`;
     const file = bucket.file(filePath);
 
     await file.save(buffer, {
@@ -46,9 +38,6 @@ export async function POST(req) {
     });
   } catch (err) {
     console.error("UPLOAD ERROR:", err);
-    return NextResponse.json(
-      { error: "Upload failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Upload failed" }, { status: 500 });
   }
 }

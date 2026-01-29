@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ArrowRight, Sparkles, Leaf, Heart } from "lucide-react";
+import { ArrowLeft , Sparkles, Leaf, Heart } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import Image from "next/image";
@@ -31,28 +31,23 @@ const HomePage = () => {
 
         <div className="container mx-auto px-6 pb-12 relative z-10">
           <div className="max-w-4xl mx-auto text-center">
-            {/* LOGO */}
             <motion.div
               initial={{ opacity: 0, y: -12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
-              className="flex justify-center mb-4"
+              className="w-full relative mb-10"
             >
-              <Image
-                src="/backgrounds/soulFirstpage.jpg"
-                alt="SoulClinic Logo"
-                width={300}
-                height={300}
-                priority
-                className="
-                rounded-2xl
-                object-contain
-                shadow-xl
-                md:w-[350px]
-                w-[180px]
-              "
-              />
+              <div className="relative w-full h-[45vh] md:h-[70vh] overflow-hidden">
+                <Image
+                  src="/backgrounds/HomePageImage.jpeg"
+                  alt="SoulClinic Hero"
+                  fill
+                  priority
+                  className="object-cover"
+                />
+              </div>
             </motion.div>
+            <div className="h-20 bg-gradient-to-b from-transparent to-background -mt-20" />
             <motion.h1
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
@@ -73,30 +68,19 @@ const HomePage = () => {
               <Button
                 asChild
                 size="xl"
-                className="group px-12 py-8 rounded-full text-5xl"
+                className="group px-12 py-8 rounded-full text-4xl"
               >
                 <Link
                   href="/dashboard"
                   className="font-semibold flex items-center"
                 >
                   احجز موعدك الآن
-                  <ArrowRight className="ml-7 w-10 h-10 group-hover:translate-x-1 transition-transform" />
+                  <ArrowLeft  className="ml-7 w-10 h-10 group-hover:translate-x-1 transition-transform" />
                 </Link>
               </Button>
             </motion.div>
           </div>
         </div>
-
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 1 }}
-          className="absolute bottom-8 left-1/2 -translate-x-1/2"
-        >
-          <div className="flex flex-col items-center gap-2 text-foreground/60">
-            <ParticleSphere size={190} enableZoom={false} autoRotate={false} />
-          </div>
-        </motion.div>
 
         {/* Scroll Indicator */}
         {/* <motion.div
@@ -114,6 +98,19 @@ const HomePage = () => {
           </motion.div>
         </motion.div> */}
       </section>
+
+      <motion.div
+  initial={{ opacity: 0, y: 30 }}
+  animate={{ opacity: 1, y: 0 }}
+  transition={{ delay: 0.8 }}
+  className="py-24 flex justify-center"
+>
+  <ParticleSphere
+    size={160}
+    enableZoom={false}
+    autoRotate={false}
+  />
+</motion.div>
 
       {/* Features Section */}
       <section className="py-24 bg-background">
