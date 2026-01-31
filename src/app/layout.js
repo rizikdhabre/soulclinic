@@ -16,21 +16,69 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "SoulClinc",
-  description: "not now",
+  metadataBase: new URL("https://soulclinc.net"),
+
+  title: {
+    default: "عيادة SOUL | استعادة التوازن وشفاء الجسد",
+    template: "%s | SoulClinc",
+  },
+
+  description:
+    "عيادة SOUL تقدم علاجات طبيعية متخصصة مثل الحجامة، الإبر الصينية، المساج الطبي والعلاجات الشمولية لاستعادة التوازن الجسدي والنفسي.",
+
+  keywords: [
+    "عيادة سول",
+    "علاجات طبيعية",
+    "حجامة",
+    "إبر صينية",
+    "مساج طبي",
+    "علاج بالطاقة",
+    "دير حنا",
+    "SoulClinc",
+    "Natural Healing",
+    "Cupping Therapy",
+    "Acupuncture",
+    "Medical Massage",
+    "Holistic Wellness",
+  ],
+
+  alternates: {
+    canonical: "/",
+  },
+
+  openGraph: {
+    title: "عيادة SOUL | استعادة التوازن وشفاء الجسد",
+    description:
+      "علاجات طبيعية تشمل الحجامة، الإبر الصينية، المساج الطبي والعلاج الشمولي.",
+    url: "https://soulclinc.net",
+    siteName: "SoulClinc",
+    locale: "ar_AR",
+    type: "website",
+  },
+
+  twitter: {
+    card: "summary",
+    title: "عيادة SOUL",
+    description: "علاجات طبيعية متخصصة لاستعادة التوازن الجسدي والنفسي.",
+  },
+
+  robots: {
+    index: true,
+    follow: true,
+  },
 };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="ar" dir="rtl"> 
+    <html lang="ar" dir="rtl">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <Header/>
+        <Header />
         {children}
         <ContactButtonsWrapper />
-         <Toaster richColors position="top-right" />
-        <Footer/>
+        <Toaster richColors position="top-right" />
+        <Footer />
       </body>
     </html>
   );
