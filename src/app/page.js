@@ -8,8 +8,10 @@ import Image from "next/image";
 import ParticleSphere from "@/components/ui/ParticleSphere";
 import axios from "axios";
 import { useEffect, useState } from "react";
+import NeonLoader from "@/components/ui/loading";
 
 const HomePage = () => {
+  const [loadingImg, setLoadingImg] = useState(true);
   const [heroImage, setHeroImage] = useState(null);
 
   useEffect(() => {
@@ -57,14 +59,28 @@ const HomePage = () => {
               className="w-full relative mb-10"
             >
               <div className="relative w-full h-[45vh] md:h-[70vh] overflow-hidden">
+                {/* Loader */}
+                {(loadingImg || !heroImage) && (
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/70 backdrop-blur-sm transition-opacity duration-500">
+                    <NeonLoader width={260} height={70} />
+                    <p className="mt-4 text-muted-foreground text-lg animate-pulse">
+                      جاري تحميل الصورة...
+                    </p>
+                  </div>
+                )}
+
+                {/* Image */}
                 {heroImage && (
                   <Image
                     src={heroImage}
                     alt="SoulClinic Hero"
                     fill
                     priority
-                    className="object-cover"
                     sizes="100vw"
+                    className={`object-cover transition-opacity duration-700 ${
+                      loadingImg ? "opacity-0" : "opacity-100"
+                    }`}
+                    onLoadingComplete={() => setLoadingImg(false)}
                   />
                 )}
               </div>

@@ -44,8 +44,7 @@ export default function LoginBox() {
     }
   };
   return (
-    <div className="relative  overflow-visible flex items-center justify-center min-h-screen bg-background overflow-hidden">
-      {/* Top accent (soft, not neon) */}
+    <div className="relative  overflow-visible flex items-center justify-center min-h-screen bg-background">
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[420px] h-[6px] bg-primary/40 rounded-full blur-md" />
 
       <motion.div
