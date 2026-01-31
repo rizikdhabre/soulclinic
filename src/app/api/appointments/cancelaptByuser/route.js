@@ -23,6 +23,7 @@ export async function DELETE(req) {
 
     const firstName = user.firstName || "";
     const lastName = user.lastName || "";
+    const fullName = `${firstName} ${lastName}`.trim();
 
     await usersCollection.updateOne(
       { phone },
@@ -52,9 +53,7 @@ export async function DELETE(req) {
       to: process.env.TWILIO_WHATSAPP_TO,
       templateSid: process.env.TWILIO_TEMPLATE_CANCEL_CUSTUMER,
       variables: {
-        1: firstName,
-        2: lastName,
-        3: phone,
+        1: fullName || "غير معروف",
         4: date,
         5: time,
       },

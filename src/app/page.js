@@ -1,13 +1,32 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ArrowLeft , Sparkles, Leaf, Heart } from "lucide-react";
+import { ArrowLeft, Sparkles, Leaf, Heart } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import Image from "next/image";
 import ParticleSphere from "@/components/ui/ParticleSphere";
+import axios from "axios";
+import { useEffect, useState } from "react";
 
 const HomePage = () => {
+  const [heroImage, setHeroImage] = useState(null);
+
+  useEffect(() => {
+    const fetchHeroImage = async () => {
+      try {
+        const res = await axios.get("/api/admin/upload-hero-image");
+        if (res.data?.heroImageUrl) {
+          setHeroImage(res.data.heroImageUrl);
+        }
+      } catch (err) {
+        console.error("Failed to fetch hero image", err);
+      }
+    };
+
+    fetchHeroImage();
+  }, []);
+
   return (
     <div className="min-h-screen">
       {/* Hero Section */}
@@ -38,13 +57,16 @@ const HomePage = () => {
               className="w-full relative mb-10"
             >
               <div className="relative w-full h-[45vh] md:h-[70vh] overflow-hidden">
-                <Image
-                  src="/backgrounds/HomePageImage.jpeg"
-                  alt="SoulClinic Hero"
-                  fill
-                  priority
-                  className="object-cover"
-                />
+                {heroImage && (
+                  <Image
+                    src={heroImage}
+                    alt="SoulClinic Hero"
+                    fill
+                    priority
+                    className="object-cover"
+                    sizes="100vw"
+                  />
+                )}
               </div>
             </motion.div>
             <div className="h-20 bg-gradient-to-b from-transparent to-background -mt-20" />
@@ -75,7 +97,7 @@ const HomePage = () => {
                   className="font-semibold flex items-center"
                 >
                   احجز موعدك الآن
-                  <ArrowLeft  className="ml-7 w-10 h-10 group-hover:translate-x-1 transition-transform" />
+                  <ArrowLeft className="ml-7 w-10 h-10 group-hover:translate-x-1 transition-transform" />
                 </Link>
               </Button>
             </motion.div>
@@ -99,18 +121,14 @@ const HomePage = () => {
         </motion.div> */}
       </section>
 
-      <motion.div
-  initial={{ opacity: 0, y: 30 }}
-  animate={{ opacity: 1, y: 0 }}
-  transition={{ delay: 0.8 }}
-  className="py-24 flex justify-center"
->
-  <ParticleSphere
-    size={160}
-    enableZoom={false}
-    autoRotate={false}
-  />
-</motion.div>
+      {/* <motion.div
+        initial={{ opacity: 0, y: 30 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.8 }}
+        className="py-24 flex justify-center"
+      >
+        <ParticleSphere size={160} enableZoom={false} autoRotate={false} />
+      </motion.div> */}
 
       {/* Features Section */}
       <section className="py-24 bg-background">

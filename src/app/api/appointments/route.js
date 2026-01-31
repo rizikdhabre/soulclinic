@@ -87,7 +87,7 @@ async function upsertUserData({
   try {
     const fullName = `${firstName || ""} ${lastName || ""}`.trim();
 
-    await sendAppointmentConfirmationToCustomer({
+    const res= await sendAppointmentConfirmationToCustomer({
       phone,
       firstName,
       lastName,
@@ -96,17 +96,22 @@ async function upsertUserData({
       time,
     });
 
-    await sendWhatsAppTemplate({
+    console.log("WhatsApp customer notify response:", res);
+
+   const resAdmin = await sendWhatsAppTemplate({
       to: process.env.TWILIO_WHATSAPP_TO,
       templateSid: process.env.TWILIO_TEMPLATE_NEW_APPOINTMENT_ADMIN,
       variables: {
         1: fullName || "غير معروف",
-        2: phone,
         3: title,
         4: date,
         5: time,
       },
     });
+
+    console.log("WhatsApp admin notify response:", resAdmin);
+
+    
   } catch (err) {
     // ❗ Do NOT break booking flow if WhatsApp fails
     console.error("WhatsApp admin notify failed:", err);
