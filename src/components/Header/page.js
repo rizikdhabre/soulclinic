@@ -91,7 +91,7 @@ const Header = () => {
             "
             >
               <Image
-                src="/LogoSoul.PNG"
+                src="/logo.PNG"
                 alt="Soul Logo"
                 width={300}
                 height={300}

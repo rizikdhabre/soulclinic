@@ -46,6 +46,10 @@ export const metadata = {
     canonical: "/",
   },
 
+  icons: {
+    icon: "/favicon.ico",
+  },
+
   openGraph: {
     title: "عيادة SOUL | استعادة التوازن وشفاء الجسد",
     description:
@@ -74,6 +78,18 @@ export default function RootLayout({ children }) {
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "Organization",
+              name: "SoulClinc",
+              url: "https://soulclinc.net",
+              logo: "https://soulclinc.net/logo.png",
+            }),
+          }}
+        />
         <Header />
         {children}
         <ContactButtonsWrapper />

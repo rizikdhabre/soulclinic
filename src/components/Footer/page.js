@@ -26,7 +26,7 @@ const Footer = () => {
     "
               >
                 <Image
-                  src="/LogoSoul.PNG"
+                  src="/logo.PNG"
                   alt="Soul Logo"
                   fill
                   className="object-contain rounded-full"
