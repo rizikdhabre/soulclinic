@@ -33,7 +33,6 @@ export function AppointmentForm({
     data.lastName &&
     data.phone;
 
-  // STEP 1 — Send OTP
   const handleSendOTP = async (e) => {
     e.preventDefault();
     if (!canSubmit) return;

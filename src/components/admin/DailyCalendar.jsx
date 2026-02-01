@@ -71,9 +71,9 @@ const DailyCalendar = () => {
   const [expandedAppointmentId, setExpandedAppointmentId] = useState(null);
   const [timeConflictMessage, setTimeConflictMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [editBlockedMessage, setEditBlockedMessage] = useState("");
   const selectedDateKey = format(selectedDate, "yyyy-MM-dd");
 
-  //helper
   const findDuplicates = (arr) => {
     const seen = new Set();
     const duplicates = new Set();
@@ -86,6 +86,17 @@ const DailyCalendar = () => {
     return [...duplicates];
   };
 
+  const handleUnblockAll = async () => {
+    try {
+      await axios.post("/api/appointments/unblockAll", {
+        date: selectedDateKey,
+      });
+
+      setBlockedTimes([]);
+    } catch (err) {
+      console.error("Failed to unblock all times", err);
+    }
+  };
   const handleSaveChanges = async () => {
     try {
       setIsSaving(true);
@@ -368,6 +379,12 @@ const DailyCalendar = () => {
           </div>
         )}
 
+        {editBlockedMessage && (
+          <div className="mb-4 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {editBlockedMessage}
+          </div>
+        )}
+
         <div className="mt-6 mb-4 flex items-center justify-between">
           <h4 className="text-sm font-medium text-muted-foreground">
             {format(selectedDate, "MMMM d, yyyy")}
@@ -399,6 +416,13 @@ const DailyCalendar = () => {
               className="px-4 py-2 rounded-xl text-sm font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition"
             >
               حظر الكل
+            </button>
+
+            <button
+              onClick={handleUnblockAll}
+              className="px-4 py-2 rounded-xl text-sm font-medium bg-primary/10 text-primary hover:bg-primary/20 transition"
+            >
+              إلغاء حظر الكل
             </button>
           </div>
         </div>
@@ -434,8 +458,6 @@ const DailyCalendar = () => {
                       }
                     >
                       <Clock className="w-4 h-4 text-primary shrink-0" />
-
-                      {/* TIME */}
                       {editingAppointmentId === apt._id ? (
                         <input
                           type="time"
@@ -580,17 +602,32 @@ const DailyCalendar = () => {
                       <input
                         type="time"
                         value={draftTimeByIndex[row.time] ?? row.time}
-                        onChange={(e) =>
+                        disabled={row.blocked}
+                        onClick={() => {
+                          if (row.blocked) {
+                            setEditBlockedMessage(
+                              "قم بإلغاء حظر الوقت أولاً ثم حاول تعديله",
+                            );
+
+                            setTimeout(() => {
+                              setEditBlockedMessage("");
+                            }, 5000);
+                          }
+                        }}
+                        onChange={(e) => {
+                          if (row.blocked) return;
+
                           setDraftTimeByIndex((prev) => ({
                             ...prev,
                             [row.time]: e.target.value,
-                          }))
-                        }
-                        className="
-                border rounded px-2 py-1 text-sm
-                bg-background text-foreground
-                focus:outline-none focus:ring-2 focus:ring-primary
-              "
+                          }));
+                        }}
+                        className={`
+      border rounded px-2 py-1 text-sm
+      bg-background text-foreground
+      focus:outline-none focus:ring-2 focus:ring-primary
+      ${row.blocked ? "opacity-50 cursor-not-allowed" : ""}
+    `}
                       />
                     ) : (
                       <span className="font-semibold text-sm">{row.time}</span>

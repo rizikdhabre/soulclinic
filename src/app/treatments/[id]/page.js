@@ -10,8 +10,17 @@ export default function TreatmentDetails() {
   const isHujama = id === HUJAMA_ID;
   const [loading, setLoading] = useState(true);
 
+  const [expanded, setExpanded] = useState({});
+
   const [treatment, setTreatment] = useState(null);
   const [error, setError] = useState(null);
+
+  const toggleExpand = (index) => {
+    setExpanded((prev) => ({
+      ...prev,
+      [index]: !prev[index],
+    }));
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -81,28 +90,49 @@ export default function TreatmentDetails() {
       </div>
 
       {/* Services */}
-      <div className="grid md:grid-cols-2 gap-10">
+      <div className="grid md:grid-cols-3 gap-10">
         {treatment.services?.map((s, i) => (
           <div
             key={i}
             className="glass-card overflow-hidden hover:shadow-elevated transition"
           >
-            {s.imageUrl ? (
-              <img
-                src={s.imageUrl}
-                alt={s.title}
-                className="w-full h-56 object-cover"
-                loading="lazy"
-              />
-            ) : (
-              <div className="w-full h-56 bg-muted flex items-center justify-center text-sm text-muted-foreground">
-                No image available
-              </div>
-            )}
+            {/* IMAGE / PLACEHOLDER */}
+            <div className="w-full h-[340px] overflow-hidden">
+              {s.imageUrl ? (
+                <img
+                  src={s.imageUrl}
+                  alt={s.title}
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                />
+              ) : (
+                <div className="w-full h-full bg-muted flex items-center justify-center text-sm text-muted-foreground">
+                  No image available
+                </div>
+              )}
+            </div>
 
+            {/* CONTENT */}
             <div className="p-6">
               <h3 className="text-xl font-semibold mb-2">{s.title}</h3>
-              <p className="text-subtle mb-4">{s.description}</p>
+              <div className="mb-4">
+                <p
+                  className={`text-subtle transition-all ${
+                    expanded[i] ? "" : "line-clamp-3"
+                  }`}
+                >
+                  {s.description}
+                </p>
+
+                {s.description.length > 10 && (
+                  <button
+                    onClick={() => toggleExpand(i)}
+                    className="mt-2 text-sm text-primary hover:underline"
+                  >
+                    {expanded[i] ? "عرض أقل" : "عرض المزيد"}
+                  </button>
+                )}
+              </div>
 
               <div className="flex flex-col gap-4 text-sm font-medium">
                 <div className="flex justify-between">

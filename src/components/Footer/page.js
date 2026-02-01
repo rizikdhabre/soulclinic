@@ -19,7 +19,7 @@ const Footer = () => {
               <div
                 className="
       relative
-      w-14 h-14
+      w-20 h-20
       rounded-full
       overflow-hidden
       shadow-sm
@@ -79,9 +79,36 @@ const Footer = () => {
             صُنع بـ <Heart className="w-4 h-4 text-accent fill-accent" /> من أجل
             صحتك ورفاهيتك
           </p>
-          <p className="text-sm text-muted-foreground ">
+          <p className="text-sm text-muted-foreground">
             تم التطوير بواسطة{" "}
-            <a href="https://www.instagram.com/rizikdhabre1/">Rizik Dhabre</a>
+            <a
+              href="https://www.instagram.com/rizikdhabre1/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="
+                    inline-flex
+                    items-center
+                    gap-1
+                    px-3
+                    py-1
+                    rounded-full
+                    border
+                    border-primary/30
+                    text-primary
+                    font-medium
+                    transition-all
+                    duration-300
+                    hover:bg-primary
+                    hover:text-primary-foreground
+                    hover:shadow-lg
+                    hover:scale-105
+                    focus:outline-none
+                    focus:ring-2
+                    focus:ring-primary/40
+                  "
+            >
+              Rizik Dhabre
+            </a>
           </p>
         </motion.div>
       </div>

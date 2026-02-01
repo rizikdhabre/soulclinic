@@ -4,6 +4,22 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { motion, AnimatePresence } from "framer-motion";
 import NeonLoader from "@/components/ui/loading";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+
+import { CSS } from "@dnd-kit/utilities";
 
 const emptyService = {
   title: "",
@@ -16,7 +32,37 @@ const emptyService = {
   cupsCount: "",
 };
 
+function SortableRow({ id, children }) {
+  const { attributes, listeners, setNodeRef, transform, transition } =
+    useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <tr ref={setNodeRef} style={style}>
+      <td
+        className="border px-2 cursor-grab active:cursor-grabbing select-none touch-none"
+        {...attributes}
+        {...listeners}
+      >
+        <span className="text-xl">⋮⋮</span>
+      </td>
+      {children}
+    </tr>
+  );
+}
+
 export default function AdminTreatmentsPage() {
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 4,
+      },
+    }),
+  );
   const HUJAMA_ID = "6971f64c9b98d43b59cbb4a0";
   const isHujama = (treatment) => treatment._id === HUJAMA_ID;
 
@@ -47,6 +93,26 @@ export default function AdminTreatmentsPage() {
 
   const [confirmDelete, setConfirmDelete] = useState(null);
 
+  const handleServiceDragEnd = async (event, treatment) => {
+    const { active, over } = event;
+
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = active.id;
+    const newIndex = over.id;
+
+    const reorderedServices = arrayMove(treatment.services, oldIndex, newIndex);
+    setTreatments((prev) =>
+      prev.map((t) =>
+        t._id === treatment._id ? { ...t, services: reorderedServices } : t,
+      ),
+    );
+    await axios.put("/api/admin/treatments/services/reorder", {
+      treatmentId: treatment._id,
+      services: reorderedServices,
+    });
+  };
+
   useEffect(() => {
     fetchTreatments();
   }, []);
@@ -76,7 +142,6 @@ export default function AdminTreatmentsPage() {
       console.error("Failed to save title/description:", error);
     }
   };
-
   const addTreatment = async () => {
     try {
       setIsAdding(true);
@@ -352,167 +417,185 @@ export default function AdminTreatmentsPage() {
                     </div>
 
                     <div className="relative w-full overflow-x-auto">
-                      <table className="w-full min-w-[900px] relative order border-border border-collapse">
-                        <thead className="border border-border">
-                          <tr className="border-b border border-border">
-                            <th className="text-left py-2 border border-border">
-                              اسم الخدمة
-                            </th>
-                            <th className="text-start py-2 border border-border">
-                              المدة
-                            </th>
-                            <th className="text-start py-2 border border-border">
-                              السعر
-                            </th>
-                            <th className="text-start py-2 border border-border">
-                              الوصف
-                            </th>
-                            {hujama && (
-                              <th className="border p-2">عدد الكووس</th>
-                            )}
-                            <th className="text-start py-2 border border-border">
-                              الصورة
-                            </th>
-                            <th className="text-right py-2 border border-border">
-                              الإجراءات
-                            </th>
-                          </tr>
-                        </thead>
-
-                        <tbody>
-                          {(treatment.services || []).map((s, i) => (
-                            <tr
-                              key={i}
-                              className="border border-border align-top"
-                            >
-                              <td className="py-3 px-2 border border-border whitespace-nowrap">
-                                {s.title}
-                              </td>
-
-                              <td className="py-3 px-2 border border-border whitespace-nowrap">
-                                {s.duration}
-                              </td>
-
-                              <td className="py-3 px-2 border border-border whitespace-nowrap">
-                                {s.price} {s.currency}
-                              </td>
-
-                              <td className="py-3 px-2 border border-border">
-                                <div
-                                  className="
-                                    max-w-[240px] md:max-w-[320px]
-                                    break-words whitespace-normal
-                                    line-clamp-3 md:line-clamp-none
-                                    text-sm
-                                  "
-                                >
-                                  {s.description}
-                                </div>
-                              </td>
-
+                      <DndContext
+                        sensors={sensors}
+                        collisionDetection={closestCenter}
+                        onDragEnd={(event) =>
+                          handleServiceDragEnd(event, treatment)
+                        }
+                      >
+                        <table className="w-full min-w-[900px] relative order border-border border-collapse">
+                          <thead className="border border-border">
+                            <tr className="border-b border border-border">
+                              <th className="border p-2 w-10"></th>
+                              <th className="text-left py-2 border border-border">
+                                اسم الخدمة
+                              </th>
+                              <th className="text-start py-2 border border-border">
+                                المدة
+                              </th>
+                              <th className="text-start py-2 border border-border">
+                                السعر
+                              </th>
+                              <th className="text-start py-2 border border-border">
+                                الوصف
+                              </th>
                               {hujama && (
-                                <td className="border p-2 text-center">
-                                  {s.cupsCount || "—"}
-                                </td>
+                                <th className="border p-2">عدد الكووس</th>
                               )}
-
-                              <td className="py-3 px-2 border border-border">
-                                {s.imageUrl ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => setPreviewImage(s.imageUrl)}
-                                    className="block"
-                                  >
-                                    <img
-                                      src={s.imageUrl}
-                                      alt={s.title}
-                                      className="
-                                        object-cover rounded-lg border border-border
-                                        w-12 h-12
-                                        md:w-16 md:h-16
-                                      "
-                                    />
-                                  </button>
-                                ) : (
-                                  <span className="text-foreground/50">—</span>
-                                )}
-                              </td>
-
-                              <td className="relative z-50 text-right py-3 px-2 border border-border">
-                                <div className="relative inline-block">
-                                  <button
-                                    onClick={() =>
-                                      setServiceMenu(
-                                        serviceMenu === `${index}-${i}`
-                                          ? null
-                                          : `${index}-${i}`,
-                                      )
-                                    }
-                                    className="p-2 border border-border rounded-lg"
-                                  >
-                                    ⋮
-                                  </button>
-
-                                  <AnimatePresence>
-                                    {serviceMenu === `${index}-${i}` && (
-                                      <motion.div
-                                        initial={{ opacity: 0, y: -5 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        exit={{ opacity: 0, y: -5 }}
-                                        className="absolute end-0 mt-2 w-32 bg-background border border-border rounded-xl shadow-lg z-[9999]"
-                                      >
-                                        <button
-                                          onClick={() => {
-                                            setServiceEdit({
-                                              treatmentId: treatment._id,
-                                              index: i,
-                                              isHujama: hujama,
-                                            });
-                                            setServiceForm({
-                                              title: s.title ?? "",
-                                              description: s.description ?? "",
-                                              duration: s.duration ?? "",
-                                              price: s.price ?? "",
-                                              currency: s.currency ?? "ILS",
-                                              ...(hujama
-                                                ? {
-                                                    cupsCount:
-                                                      s.cupsCount ?? "",
-                                                  }
-                                                : {}),
-                                              imageUrl: s.imageUrl ?? "",
-                                              imagePath: s.imagePath ?? "",
-                                            });
-                                            setSelectedImage(null);
-                                            setServiceMenu(null);
-                                          }}
-                                          className="w-full text-left px-4 py-2 hover:bg-muted"
-                                        >
-                                          تعديل
-                                        </button>
-
-                                        <button
-                                          onClick={() => {
-                                            setConfirmDelete({
-                                              type: "service",
-                                              treatmentId: treatment._id,
-                                              serviceIndex: i,
-                                            });
-                                            setServiceMenu(null);
-                                          }}
-                                          className="w-full text-left px-4 py-2 text-destructive hover:bg-destructive/10"
-                                        >
-                                          حذف
-                                        </button>
-                                      </motion.div>
-                                    )}
-                                  </AnimatePresence>
-                                </div>
-                              </td>
+                              <th className="text-start py-2 border border-border">
+                                الصورة
+                              </th>
+                              <th className="text-right py-2 border border-border">
+                                الإجراءات
+                              </th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+
+                          <tbody>
+                            <SortableContext
+                              items={(treatment.services || []).map(
+                                (_, i) => i,
+                              )}
+                              strategy={verticalListSortingStrategy}
+                            >
+                              {(treatment.services || []).map((s, i) => (
+                                <SortableRow key={i} id={i}>
+                                  <td className="py-3 px-2 border border-border whitespace-nowrap">
+                                    {s.title}
+                                  </td>
+
+                                  <td className="py-3 px-2 border border-border whitespace-nowrap">
+                                    {s.duration}
+                                  </td>
+
+                                  <td className="py-3 px-2 border border-border whitespace-nowrap">
+                                    {s.price} {s.currency}
+                                  </td>
+
+                                  <td className="py-3 px-2 border border-border">
+                                    <div
+                                      className="
+                  max-w-[240px] md:max-w-[320px]
+                  break-words whitespace-normal
+                  line-clamp-3 md:line-clamp-none
+                  text-sm
+                "
+                                    >
+                                      {s.description}
+                                    </div>
+                                  </td>
+
+                                  {hujama && (
+                                    <td className="border p-2 text-center">
+                                      {s.cupsCount || "—"}
+                                    </td>
+                                  )}
+
+                                  <td className="py-3 px-2 border border-border">
+                                    {s.imageUrl ? (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setPreviewImage(s.imageUrl)
+                                        }
+                                        className="block"
+                                      >
+                                        <img
+                                          src={s.imageUrl}
+                                          alt={s.title}
+                                          className="
+                      object-cover rounded-lg border border-border
+                      w-12 h-12
+                      md:w-16 md:h-16
+                    "
+                                        />
+                                      </button>
+                                    ) : (
+                                      <span className="text-foreground/50">
+                                        —
+                                      </span>
+                                    )}
+                                  </td>
+
+                                  <td className="relative z-50 text-right py-3 px-2 border border-border">
+                                    <div className="relative inline-block">
+                                      <button
+                                        onClick={() =>
+                                          setServiceMenu(
+                                            serviceMenu === `${index}-${i}`
+                                              ? null
+                                              : `${index}-${i}`,
+                                          )
+                                        }
+                                        className="p-2 border border-border rounded-lg"
+                                      >
+                                        ⋮
+                                      </button>
+
+                                      <AnimatePresence>
+                                        {serviceMenu === `${index}-${i}` && (
+                                          <motion.div
+                                            initial={{ opacity: 0, y: -5 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            exit={{ opacity: 0, y: -5 }}
+                                            className="absolute end-0 mt-2 w-32 bg-background border border-border rounded-xl shadow-lg z-[9999]"
+                                          >
+                                            <button
+                                              onClick={() => {
+                                                setServiceEdit({
+                                                  treatmentId: treatment._id,
+                                                  index: i,
+                                                  isHujama: hujama,
+                                                });
+                                                setServiceForm({
+                                                  title: s.title ?? "",
+                                                  description:
+                                                    s.description ?? "",
+                                                  duration: s.duration ?? "",
+                                                  price: s.price ?? "",
+                                                  currency: s.currency ?? "ILS",
+                                                  ...(hujama
+                                                    ? {
+                                                        cupsCount:
+                                                          s.cupsCount ?? "",
+                                                      }
+                                                    : {}),
+                                                  imageUrl: s.imageUrl ?? "",
+                                                  imagePath: s.imagePath ?? "",
+                                                });
+                                                setSelectedImage(null);
+                                                setServiceMenu(null);
+                                              }}
+                                              className="w-full text-left px-4 py-2 hover:bg-muted"
+                                            >
+                                              تعديل
+                                            </button>
+
+                                            <button
+                                              onClick={() => {
+                                                setConfirmDelete({
+                                                  type: "service",
+                                                  treatmentId: treatment._id,
+                                                  serviceIndex: i,
+                                                });
+                                                setServiceMenu(null);
+                                              }}
+                                              className="w-full text-left px-4 py-2 text-destructive hover:bg-destructive/10"
+                                            >
+                                              حذف
+                                            </button>
+                                          </motion.div>
+                                        )}
+                                      </AnimatePresence>
+                                    </div>
+                                  </td>
+                                </SortableRow>
+                              ))}
+                            </SortableContext>
+                          </tbody>
+                        </table>
+                      </DndContext>
                     </div>
                   </motion.div>
                 )}
@@ -668,6 +751,29 @@ export default function AdminTreatmentsPage() {
               >
                 حفظ
               </button>
+              {serviceForm.imageUrl && !selectedImage && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await axios.post(
+                      "/api/admin/treatments/services/delete-image",
+                      {
+                        treatmentId: serviceEdit.treatmentId,
+                        serviceIndex: serviceEdit.index,
+                      },
+                    );
+
+                    setServiceForm((p) => ({
+                      ...p,
+                      imageUrl: "",
+                      imagePath: "",
+                    }));
+                  }}
+                  className="text-sm text-destructive underline"
+                >
+                  حذف الصورة
+                </button>
+              )}
             </div>
           </div>
         </div>

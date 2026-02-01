@@ -8,7 +8,7 @@ import DailyCalendar from "@/components/admin/DailyCalendar";
 import HujamahStatsCard from "@/components/admin/HujamahStatsCard";
 import IncomeStatsCard from "@/components/admin/IncomeStatsCard";
 import HeroImageUploader from "@/components/admin/HeroImageUploader";
-
+import MonthlyBlocker from "@/components/admin/MonthlyBlocker";
 export default function AdminProfilePage() {
   const [openPassword, setOpenPassword] = useState(false);
 
@@ -37,7 +37,10 @@ export default function AdminProfilePage() {
           <HeroImageUploader />
         </section>
 
-        {/* DAILY + STATS */}
+        <section>
+          <MonthlyBlocker />
+        </section>
+
         <section className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-12 items-start">
           <div>
             <DailyCalendar />

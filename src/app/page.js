@@ -13,7 +13,21 @@ import NeonLoader from "@/components/ui/loading";
 const HomePage = () => {
   const [loadingImg, setLoadingImg] = useState(true);
   const [heroImage, setHeroImage] = useState(null);
+  const [gregorianDate, setGregorianDate] = useState("");
+  const [hijriDate, setHijriDate] = useState("");
 
+  useEffect(() => {
+    const today = new Date();
+    const gregorian = today.toLocaleDateString("en-GB");
+    const hijri = new Intl.DateTimeFormat("ar-SA-u-ca-islamic-nu-latn", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }).format(today);
+
+    setGregorianDate(`${gregorian} ميلادي`);
+    setHijriDate(`${hijri} `);
+  }, []);
   useEffect(() => {
     const fetchHeroImage = async () => {
       try {
@@ -117,6 +131,17 @@ const HomePage = () => {
                 </Link>
               </Button>
             </motion.div>
+          </div>
+              <p className="text-s text-center tracking-widest text-muted-foreground mt-5">
+      اليوم
+    </p>
+          <div className="mt-2 text-center">
+            <p className="text-sm md:text-base text-muted-foreground tracking-wide">
+              {gregorianDate}
+            </p>
+            <p className="text-sm md:text-base text-muted-foreground tracking-wide">
+              {hijriDate}
+            </p>
           </div>
         </div>
 
