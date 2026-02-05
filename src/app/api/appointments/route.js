@@ -59,7 +59,13 @@ async function upsertUserData({
       }
     : null;
 
-  const existingUser = await usersCollection.findOne({ phone });
+  const existingUser = await usersCollection.findOne(
+    { phone },
+    { projection: { firstName: 1, lastName: 1 } },
+  );
+  const adminFirstName = existingUser?.firstName || firstName;
+  const adminLastName = existingUser?.lastName || lastName;
+  const adminFullName = `${adminFirstName || ""} ${adminLastName || ""}`.trim();
 
   if (!existingUser) {
     await usersCollection.insertOne({
@@ -85,8 +91,6 @@ async function upsertUserData({
   }
 
   try {
-    const fullName = `${firstName || ""} ${lastName || ""}`.trim();
-
     await sendAppointmentConfirmationToCustomer({
       phone,
       firstName,
@@ -96,25 +100,18 @@ async function upsertUserData({
       time,
     });
 
-  
-
-   await sendWhatsAppTemplate({
+    await sendWhatsAppTemplate({
       to: process.env.TWILIO_WHATSAPP_TO,
       templateSid: process.env.TWILIO_TEMPLATE_NEW_APPOINTMENT_ADMIN,
       variables: {
         1: "صقر",
         2: title,
-        3: fullName,
+        3: adminFullName,
         4: date,
         5: time,
       },
     });
-
-
-
-    
   } catch (err) {
-    // ❗ Do NOT break booking flow if WhatsApp fails
     console.error("WhatsApp admin notify failed:", err);
   }
 }

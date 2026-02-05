@@ -6,13 +6,13 @@ import { UsersTable } from "@/components/admin/UsersTable";
 import { AppointmentsModal } from "@/components/admin/AppointmentsModal";
 import { AttendanceChart } from "@/components/admin/AttendanceChart";
 import { Input } from "@/components/ui/input";
+import NeonLoader from "@/components/ui/loading";
 
 export default function UsersAdminPage() {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
   const [selectedUser, setSelectedUser] = useState(null);
   const [loading, setLoading] = useState(true);
-
   /* ---------------- FETCH USERS ---------------- */
 
   useEffect(() => {
@@ -50,7 +50,6 @@ export default function UsersAdminPage() {
   };
 
   const handleToggleAttendance = async (appointmentId, attended) => {
-
     setUsers((prev) =>
       prev.map((u) => ({
         ...u,
@@ -70,9 +69,9 @@ export default function UsersAdminPage() {
           }
         : prev,
     );
-   
+
     try {
-      const res=await axios.patch("/api/admin/attendance", {
+      const res = await axios.patch("/api/admin/attendance", {
         appointmentId,
         attended,
       });
@@ -81,8 +80,6 @@ export default function UsersAdminPage() {
       console.error("Failed to update attendance in DB", error);
     }
   };
-
-
 
   const handleCancelAppointment = async (appointmentId) => {
     const appointment = selectedUser?.appointments?.find(
@@ -138,7 +135,11 @@ export default function UsersAdminPage() {
   /* ---------------- UI ---------------- */
 
   if (loading) {
-    return <div className="p-6 text-muted-foreground">Loading users…</div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <NeonLoader width={500} height={200} />
+      </div>
+    );
   }
 
   return (
