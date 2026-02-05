@@ -93,8 +93,8 @@ async function upsertUserData({
   try {
     await sendAppointmentConfirmationToCustomer({
       phone,
-      firstName,
-      lastName,
+      adminFirstName,
+      adminLastName,
       title,
       date,
       time,
