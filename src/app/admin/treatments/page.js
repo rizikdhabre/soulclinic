@@ -58,13 +58,14 @@ function SortableRow({ id, children }) {
 export default function AdminTreatmentsPage() {
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 4,
-      },
+      activationConstraint: { distance: 4 },
     }),
   );
+
   const HUJAMA_ID = "6971f64c9b98d43b59cbb4a0";
   const isHujama = (treatment) => treatment._id === HUJAMA_ID;
+
+  /* ===================== STATE ===================== */
 
   const [treatments, setTreatments] = useState([]);
   const [openIndex, setOpenIndex] = useState(null);
@@ -73,13 +74,14 @@ export default function AdminTreatmentsPage() {
   const [previewImage, setPreviewImage] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const [editedTitle, setEditedTitle] = useState("");
   const [editedDescription, setEditedDescription] = useState("");
   const [editingIndex, setEditingIndex] = useState(null);
-  const [editedTitle, setEditedTitle] = useState("");
 
   const [serviceEdit, setServiceEdit] = useState(null);
   const [serviceForm, setServiceForm] = useState(emptyService);
   const [selectedImage, setSelectedImage] = useState(null);
+
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
@@ -93,97 +95,160 @@ export default function AdminTreatmentsPage() {
 
   const [confirmDelete, setConfirmDelete] = useState(null);
 
-  const handleServiceDragEnd = async (event, treatment) => {
-    const { active, over } = event;
-
-    if (!over || active.id === over.id) return;
-
-    const oldIndex = active.id;
-    const newIndex = over.id;
-
-    const reorderedServices = arrayMove(treatment.services, oldIndex, newIndex);
-    setTreatments((prev) =>
-      prev.map((t) =>
-        t._id === treatment._id ? { ...t, services: reorderedServices } : t,
-      ),
-    );
-    await axios.put("/api/admin/treatments/services/reorder", {
-      treatmentId: treatment._id,
-      services: reorderedServices,
-    });
-  };
+  /* ===================== INITIAL FETCH ===================== */
 
   useEffect(() => {
+    const fetchTreatments = async () => {
+      setLoading(true);
+      try {
+        const res = await axios.get("/api/admin/treatments");
+        setTreatments(res.data);
+      } finally {
+        setLoading(false);
+      }
+    };
+
     fetchTreatments();
   }, []);
 
-  const fetchTreatments = async () => {
-    setLoading(true);
+  /* ===================== ADD TREATMENT ===================== */
+
+  const addTreatment = async () => {
+    if (isAdding) return;
+    if (!newTreatment.title.trim() || !newTreatment.description.trim()) return;
+
+    setIsAdding(true);
+
     try {
-      const res = await axios.get("/api/admin/treatments");
-      setTreatments(res.data);
+      const res = await axios.post("/api/admin/treatments", {
+        title: newTreatment.title,
+        description: newTreatment.description,
+        services: [],
+      });
+
+      const createdTreatment = {
+        _id: res.data.id,
+        title: newTreatment.title,
+        description: newTreatment.description,
+        services: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      setTreatments((prev) => [...prev, createdTreatment]);
+      setShowAddModal(false);
+      setNewTreatment({ title: "", description: "", services: [] });
+    } catch (err) {
+      console.error("Failed to add treatment:", err);
     } finally {
-      setLoading(false);
+      setIsAdding(false);
     }
   };
 
+  /* ===================== UPDATE TITLE / DESCRIPTION ===================== */
+
   const saveTitle = async (id) => {
+    if (isSaving) return;
+
+    const backup = treatments.find((t) => t._id === id);
+
+    setTreatments((prev) =>
+      prev.map((t) =>
+        t._id === id
+          ? { ...t, title: editedTitle, description: editedDescription }
+          : t,
+      ),
+    );
+
+    setEditingIndex(null);
+    setIsSaving(true);
+
     try {
-      setIsSaving(true);
       await axios.put("/api/admin/treatments", {
         id,
         title: editedTitle,
         description: editedDescription,
       });
-      setEditingIndex(null);
-      fetchTreatments();
-    } catch (error) {
+    } catch (err) {
+      console.error("Failed to update treatment:", err);
+      setTreatments((prev) => prev.map((t) => (t._id === id ? backup : t)));
+    } finally {
       setIsSaving(false);
-      console.error("Failed to save title/description:", error);
     }
   };
-  const addTreatment = async () => {
+
+  /* ===================== DELETE TREATMENT ===================== */
+
+  const confirmDeleteTreatment = async () => {
+    if (isDeleting || !confirmDelete?.id) return;
+
+    const backup = treatments.find((t) => t._id === confirmDelete.id);
+
+    setTreatments((prev) => prev.filter((t) => t._id !== confirmDelete.id));
+    setConfirmDelete(null);
+    setIsDeleting(true);
+
     try {
-      setIsAdding(true);
-
-      if (!newTreatment.title.trim()) return;
-
-      await axios.post("/api/admin/treatments", newTreatment);
-      setShowAddModal(false);
-      setNewTreatment({ title: "", description: "", services: [] });
-      setIsAdding(false);
-      fetchTreatments();
-    } catch (error) {
-      setIsAdding(false);
-      console.error("Failed to add treatment:", error);
+      await axios.delete("/api/admin/treatments", {
+        data: { id: backup._id },
+      });
+    } catch (err) {
+      console.error("Failed to delete treatment:", err);
+      setTreatments((prev) => [...prev, backup]);
+    } finally {
+      setIsDeleting(false);
     }
   };
+
+  /* ===================== SERVICE REORDER ===================== */
+
+  const handleServiceDragEnd = async (event, treatment) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const reorderedServices = arrayMove(treatment.services, active.id, over.id);
+
+    setTreatments((prev) =>
+      prev.map((t) =>
+        t._id === treatment._id ? { ...t, services: reorderedServices } : t,
+      ),
+    );
+
+    try {
+      await axios.put("/api/admin/treatments/services/reorder", {
+        treatmentId: treatment._id,
+        services: reorderedServices,
+      });
+    } catch (err) {
+      console.error("Failed to reorder services:", err);
+    }
+  };
+
+  /* ===================== SERVICE IMAGE UPLOAD ===================== */
 
   const uploadServiceImage = async (treatmentId, serviceIndex) => {
-    try {
-      const formData = new FormData();
-      formData.append("image", selectedImage);
-      formData.append("treatmentId", treatmentId);
-      formData.append("serviceIndex", serviceIndex);
+    const formData = new FormData();
+    formData.append("image", selectedImage);
+    formData.append("treatmentId", treatmentId);
+    formData.append("serviceIndex", serviceIndex);
 
-      const res = await axios.post("/api/admin/upload-service-image", formData);
-      return res.data;
-    } catch (error) {
-      console.error("Failed to upload image:", error);
-    }
+    const res = await axios.post("/api/admin/upload-service-image", formData);
+    return res.data;
   };
+
+  /* ===================== ADD / UPDATE SERVICE ===================== */
 
   const saveService = async (treatmentId) => {
     if (isSaving) return;
 
+    setIsSaving(true);
+
+    let imageData = {
+      url: serviceForm.imageUrl || "",
+      path: serviceForm.imagePath || "",
+    };
+
     try {
-      setIsSaving(true);
-
-      let imageData = {
-        url: serviceForm.imageUrl || "",
-        path: serviceForm.imagePath || "",
-      };
-
       if (selectedImage) {
         imageData = await uploadServiceImage(
           treatmentId,
@@ -202,61 +267,84 @@ export default function AdminTreatmentsPage() {
           treatmentId,
           service: payload,
         });
+
+        setTreatments((prev) =>
+          prev.map((t) =>
+            t._id === treatmentId
+              ? { ...t, services: [...t.services, payload] }
+              : t,
+          ),
+        );
       } else {
         await axios.put("/api/admin/treatments/services", {
           treatmentId,
           serviceIndex: serviceEdit.index,
           service: payload,
         });
+
+        setTreatments((prev) =>
+          prev.map((t) =>
+            t._id === treatmentId
+              ? {
+                  ...t,
+                  services: t.services.map((s, i) =>
+                    i === serviceEdit.index ? payload : s,
+                  ),
+                }
+              : t,
+          ),
+        );
       }
 
       setServiceEdit(null);
       setServiceForm(emptyService);
       setSelectedImage(null);
       setServiceMenu(null);
-      await fetchTreatments();
-    } catch (error) {
-      console.error("Failed to save service:", error);
+    } catch (err) {
+      console.error("Failed to save service:", err);
     } finally {
       setIsSaving(false);
     }
   };
 
-  const confirmDeleteTreatment = async () => {
-    if (isDeleting) return;
-    if (!confirmDelete?.id) return;
-
-    try {
-      setIsDeleting(true);
-
-      await axios.delete("/api/admin/treatments", {
-        data: { id: confirmDelete.id },
-      });
-
-      setConfirmDelete(null);
-      await fetchTreatments();
-    } catch (error) {
-      console.error("Failed to delete treatment:", error);
-    } finally {
-      setIsDeleting(false);
-    }
-  };
+  /* ===================== DELETE SERVICE ===================== */
 
   const confirmDeleteService = async () => {
+    if (isDeleting) return;
+
+    const { treatmentId, serviceIndex } = confirmDelete;
+    const treatment = treatments.find((t) => t._id === treatmentId);
+    const backup = treatment?.services?.[serviceIndex];
+
+    setTreatments((prev) =>
+      prev.map((t) =>
+        t._id === treatmentId
+          ? {
+              ...t,
+              services: t.services.filter((_, i) => i !== serviceIndex),
+            }
+          : t,
+      ),
+    );
+
+    setConfirmDelete(null);
+    setIsDeleting(true);
+
     try {
-      setIsDeleting(true);
       await axios.delete("/api/admin/treatments/services", {
-        data: {
-          treatmentId: confirmDelete.treatmentId,
-          serviceIndex: confirmDelete.serviceIndex,
-        },
+        data: { treatmentId, serviceIndex },
       });
-      setConfirmDelete(null);
+    } catch (err) {
+      console.error("Failed to delete service:", err);
+      setTreatments((prev) =>
+        prev.map((t) =>
+          t._id === treatmentId
+            ? { ...t, services: [...t.services, backup] }
+            : t,
+        ),
+      );
+    } finally {
       setIsDeleting(false);
-      fetchTreatments();
-    } catch (error) {
-      setIsDeleting(false);
-      console.error("Failed to delete service:", error);
     }
   };
 
