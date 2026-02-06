@@ -37,12 +37,30 @@ export default function UsersAdminPage() {
     return fullName.includes(search.toLowerCase());
   });
 
-  const allAppointments = users.flatMap((u) => u.appointments || []);
-  const attendedCount = allAppointments.filter((a) => a.attended).length;
-  const totalCount = allAppointments.length;
-  const attendanceRate =
-    totalCount === 0 ? 0 : Math.round((attendedCount / totalCount) * 100);
+  /* Data for attendance */
 
+  const today = new Date().toISOString().split("T")[0];
+
+  const allAppointments = users.flatMap((u) => u.appointments || []);
+
+  const completedAppointments = allAppointments.filter((a) => a.date <= today);
+
+  const futureAppointments = allAppointments.filter((a) => a.date > today);
+
+  const attendedCount = completedAppointments.filter(
+    (a) => a.attended === true,
+  ).length;
+
+  const notAttendedCount = completedAppointments.filter(
+    (a) => a.attended === false,
+  ).length;
+
+  const completedCount = completedAppointments.length;
+
+  const attendanceRate =
+    completedCount === 0
+      ? 0
+      : Math.round((attendedCount / completedCount) * 100);
   /* ---------------- HANDLERS ---------------- */
 
   const handleViewAppointments = (user) => {
@@ -86,8 +104,7 @@ export default function UsersAdminPage() {
       (a) => String(a._id) === String(appointmentId),
     );
     if (!appointment) return;
-
-    //  Optimistic UI: remove immediately from users + selectedUser
+    r;
     setUsers((prev) =>
       prev.map((u) => ({
         ...u,
@@ -118,7 +135,6 @@ export default function UsersAdminPage() {
       });
     } catch (error) {
       console.error("Failed to cancel appointment", error);
-      // (optional) if you want: refetch user appointments here
     }
   };
 
@@ -166,11 +182,11 @@ export default function UsersAdminPage() {
           />
         </div>
 
-        {/* Stats */}
         <AttendanceChart
           rate={attendanceRate}
           attended={attendedCount}
-          total={totalCount}
+          missed={notAttendedCount}
+          upcoming={futureAppointments.length}
         />
       </div>
 
@@ -186,7 +202,6 @@ export default function UsersAdminPage() {
         />
       )}
 
-      {/* Appointments Modal */}
       {selectedUser && (
         <AppointmentsModal
           user={selectedUser}

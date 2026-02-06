@@ -245,7 +245,7 @@ export const AppointmentsModal = ({
                                       : "text-destructive",
                                   )}
                                 >
-                                  {apt.attended ? "Attended" : "Did not attend"}
+                                  {apt.attended ? "حضر" : "لم يحضر"}
                                 </span>
                               </>
                             )}
