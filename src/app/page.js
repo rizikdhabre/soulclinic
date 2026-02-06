@@ -17,14 +17,16 @@ const HomePage = () => {
   const [hijriDate, setHijriDate] = useState("");
 
   useEffect(() => {
-    const today = new Date();
-    const gregorian = today.toLocaleDateString("en-GB");
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const gregorian = now.toLocaleDateString("en-GB");
     const hijri = new Intl.DateTimeFormat("ar-SA-u-ca-islamic-nu-latn", {
       day: "numeric",
       month: "long",
       year: "numeric",
-    }).format(today);
-
+      timeZone: "Asia/Jerusalem",
+    }).format(yesterday);
     setGregorianDate(`${gregorian} ميلادي`);
     setHijriDate(`${hijri} `);
   }, []);
@@ -132,9 +134,9 @@ const HomePage = () => {
               </Button>
             </motion.div>
           </div>
-              <p className="text-s text-center tracking-widest text-muted-foreground mt-5">
-      اليوم
-    </p>
+          <p className="text-s text-center tracking-widest text-muted-foreground mt-5">
+            اليوم
+          </p>
           <div className="mt-2 text-center">
             <p className="text-sm md:text-base text-muted-foreground tracking-wide">
               {gregorianDate}
