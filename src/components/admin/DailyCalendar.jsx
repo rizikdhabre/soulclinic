@@ -312,6 +312,15 @@ const DailyCalendar = () => {
     }
   };
 
+  const formatPhoneIL = (phone) => {
+    if (!phone) return "";
+    if (phone.startsWith("+972")) {
+      return "0" + phone.slice(4);
+    }
+
+    return clean;
+  };
+
   /* ---------- render ---------- */
 
   return (
@@ -490,8 +499,17 @@ const DailyCalendar = () => {
                       {/* DESKTOP ONLY */}
                       <div className="hidden md:flex items-center gap-3">
                         <span className="text-xs bg-secondary px-2 py-1 rounded-lg">
-                          {apt.duration} min
+                          {apt.duration} دقيقه
                         </span>
+                        {apt.phone && (
+                          <a
+                            href={`tel:${apt.phone}`}
+                            className="flex items-center gap-1 text-xs text-primary hover:underline"
+                            dir="ltr"
+                          >
+                            الرقم: {formatPhoneIL(apt.phone)}
+                          </a>
+                        )}
 
                         {apt.status && (
                           <span className={getStatusBadgeClass(apt.status)}>
@@ -543,6 +561,15 @@ const DailyCalendar = () => {
                         <div>
                           ⏱ <strong>{apt.duration} min</strong>
                         </div>
+                        {apt.phone && (
+                          <a
+                            href={`tel:${(apt.phone)}`}
+                            className="block font-semibold text-primary"
+                            dir="ltr"
+                          >
+                            الرقم: {formatPhoneIL(apt.phone)}
+                          </a>
+                        )}
 
                         {apt.status && (
                           <span className={getStatusBadgeClass(apt.status)}>

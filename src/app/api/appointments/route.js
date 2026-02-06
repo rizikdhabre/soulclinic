@@ -140,6 +140,7 @@ export async function GET(req) {
           "appointments.duration": 1,
           "appointments.firstName": 1,
           "appointments.lastName": 1,
+           "appointments.phone": 1,
         },
       },
     );

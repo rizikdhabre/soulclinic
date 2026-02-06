@@ -46,32 +46,32 @@ export default function AdminLayout({ children }) {
 
   return (
     <div className="pt-32 min-h-screen">
- {/* Floating Admin Toggle – Mobile */}
-<div className="fixed md:hidden z-40 right-0 top-32 flex items-center">
-  {/* ARROW – ALWAYS VISIBLE */}
-  <button
-    onClick={() => setCollapsed((c) => !c)}
-    className="
+      {/* Floating Admin Toggle – Mobile */}
+      <div className="fixed md:hidden z-40 right-0 top-32 flex items-center">
+        {/* ARROW – ALWAYS VISIBLE */}
+        <button
+          onClick={() => setCollapsed((c) => !c)}
+          className="
       bg-background border border-r-0
       rounded-l-lg
       px-2 py-3
       shadow-md
       z-50
     "
-  >
-    {collapsed ? "◀" : "▶"}
-  </button>
+        >
+          {collapsed ? "◀" : "▶"}
+        </button>
 
-  {/* SLIDING BUTTON – ONLY THIS MOVES */}
-  <div
-    className={`
+        {/* SLIDING BUTTON – ONLY THIS MOVES */}
+        <div
+          className={`
       transition-transform duration-300
       ${collapsed ? "translate-x-full" : "translate-x-0"}
     `}
-  >
-    <button
-      onClick={() => setOpen(true)}
-      className="
+        >
+          <button
+            onClick={() => setOpen(true)}
+            className="
         flex items-center gap-2
         px-4 py-3
         bg-background border
@@ -79,16 +79,32 @@ export default function AdminLayout({ children }) {
         shadow-md
         whitespace-nowrap
       "
-    >
-      ☰ قائمة الإدارة
-    </button>
-  </div>
-</div>
-
+          >
+            ☰ قائمة الإدارة
+          </button>
+        </div>
+      </div>
 
       <div className="flex">
-        <aside className="hidden md:block w-64 border-l bg-background px-4 py-6">
-          <SidebarContent />
+        <aside
+          className={`
+    hidden md:flex flex-col
+    border-l bg-background
+    transition-all duration-300
+    ${collapsed ? "w-16 px-2" : "w-64 px-4"}
+    py-6
+  `}
+        >
+          {/* Collapse Button */}
+          <button
+            onClick={() => setCollapsed((c) => !c)}
+            className="mb-6 flex justify-center"
+          >
+            {collapsed ? "◀" : "▶"}
+          </button>
+
+          {/* Hide content when collapsed */}
+          {!collapsed && <SidebarContent />}
         </aside>
         <AnimatePresence>
           {open && (
