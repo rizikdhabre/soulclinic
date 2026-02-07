@@ -489,11 +489,18 @@ const DailyCalendar = () => {
                       )}
 
                       {/* NAME */}
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <User className="w-4 h-4 text-muted-foreground shrink-0" />
-                        <span className="text-sm truncate">
-                          {apt.firstName} {apt.lastName}
-                        </span>
+                      <div className="flex items-start gap-2 flex-1 min-w-0">
+                        <User className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium truncate">
+                            {apt.firstName} {apt.lastName}
+                          </div>
+                          {apt.title && (
+                            <div className="text-xs text-muted-foreground truncate">
+                              {apt.title}
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       {/* DESKTOP ONLY */}
@@ -558,12 +565,17 @@ const DailyCalendar = () => {
                     {/* ---------- MOBILE EXPANDED DETAILS ---------- */}
                     {isExpanded && (
                       <div className="mt-3 pt-3 border-t space-y-2 text-sm md:hidden">
+                        {apt.title && (
+                          <div className="font-medium text-foreground">
+                           {apt.title}
+                          </div>
+                        )}
                         <div>
-                          ⏱ <strong>{apt.duration} min</strong>
+                          <strong>{apt.duration} دقيقه</strong>
                         </div>
                         {apt.phone && (
                           <a
-                            href={`tel:${(apt.phone)}`}
+                            href={`tel:${apt.phone}`}
                             className="block font-semibold text-primary"
                             dir="ltr"
                           >

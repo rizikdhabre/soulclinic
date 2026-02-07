@@ -1,6 +1,7 @@
 import { getCollection } from "@/lib/db";
 import { ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
+import { normalizeIsraeliPhone } from "@/lib/phone";
 export async function GET() {
   try {
     const collection = await getCollection("usersData");
@@ -23,19 +24,51 @@ export async function GET() {
 
 export async function POST(req) {
   try {
-    const body = await req.json(); 
-
+    const body = await req.json();
     const { userId, firstName, lastName } = body;
 
     if (!userId || !firstName || !lastName) {
       return NextResponse.json({ error: "Missing fields" }, { status: 400 });
     }
 
-    const collection = await getCollection("usersData");
+    const usersCollection = await getCollection("usersData");
+    const appointmentsCollection = await getCollection("appointments");
 
-    await collection.updateOne(
+    const result = await usersCollection.findOneAndUpdate(
       { _id: new ObjectId(userId) },
       { $set: { firstName, lastName } },
+      { returnDocument: "after", projection: { phone: 1 } }
+    );
+
+    const updatedUser = result?.value ?? result;
+
+    if (!updatedUser?.phone) {
+      return NextResponse.json(
+        { error: "User phone not found" },
+        { status: 404 }
+      );
+    }
+
+    const phone = normalizeIsraeliPhone(updatedUser.phone);
+
+    if (!phone) {
+      return NextResponse.json(
+        { error: "Invalid phone number" },
+        { status: 400 }
+      );
+    }
+
+    await appointmentsCollection.updateMany(
+      { "appointments.phone": phone },
+      {
+        $set: {
+          "appointments.$[apt].firstName": firstName,
+          "appointments.$[apt].lastName": lastName,
+        },
+      },
+      {
+        arrayFilters: [{ "apt.phone": phone }],
+      }
     );
 
     return NextResponse.json({ success: true });
@@ -43,7 +76,7 @@ export async function POST(req) {
     console.error("Update name error:", error);
     return NextResponse.json(
       { error: "Failed to update name" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

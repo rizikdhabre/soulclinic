@@ -2,6 +2,8 @@ import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { sendWhatsAppTemplate } from "@/lib/whatsapp";
+import { normalizeIsraeliPhone } from "@/lib/phone";
+
 /* ---------------- HELPER ---------------- */
 
 export async function sendAppointmentConfirmationToCustomer({
@@ -93,7 +95,7 @@ async function upsertUserData({
   try {
     await sendAppointmentConfirmationToCustomer({
       phone,
-      firstName:adminFirstName,
+      firstName: adminFirstName,
       lastName: adminLastName,
       title,
       date,
@@ -124,11 +126,15 @@ export async function GET(req) {
     const date = searchParams.get("date");
     const isAdmin = searchParams.get("admin") === "true";
 
-    if (!date) return NextResponse.json([]);
+    if (!date) {
+      return NextResponse.json(
+        isAdmin ? { appointments: [], blockedTimes: [], editedTimes: [] } : [],
+      );
+    }
 
-    const collection = await getCollection("appointments");
+    const appointmentsCollection = await getCollection("appointments");
 
-    const day = await collection.findOne(
+    const day = await appointmentsCollection.findOne(
       { date },
       {
         projection: {
@@ -140,18 +146,17 @@ export async function GET(req) {
           "appointments.duration": 1,
           "appointments.firstName": 1,
           "appointments.lastName": 1,
-           "appointments.phone": 1,
+          "appointments.phone": 1,
         },
       },
     );
 
     if (!day) {
       return NextResponse.json(
-        isAdmin ? { appointments: [], blockedTimes: [] } : [],
+        isAdmin ? { appointments: [], blockedTimes: [], editedTimes: [] } : [],
       );
     }
-
-    if (isAdmin) {
+    if (!isAdmin) {
       return NextResponse.json({
         appointments: day.appointments || [],
         blockedTimes: day.blockedTimes || [],
@@ -159,8 +164,46 @@ export async function GET(req) {
       });
     }
 
+    const usersCollection = await getCollection("usersData");
+
+    const appointments = Array.isArray(day.appointments)
+      ? day.appointments
+      : [];
+
+    const normalizedAppointments = appointments.map((a) => ({
+      ...a,
+      phone: normalizeIsraeliPhone(a.phone),
+    }));
+
+    const phones = [
+      ...new Set(normalizedAppointments.map((a) => a.phone).filter(Boolean)),
+    ];
+
+    const users = await usersCollection
+      .find(
+        { phone: { $in: phones } },
+        { projection: { phone: 1, appointments: 1 } },
+      )
+      .toArray();
+
+    const titleMap = new Map();
+
+    for (const user of users) {
+      const userPhone = normalizeIsraeliPhone(user.phone);
+      for (const apt of user.appointments || []) {
+        if (!apt?.date || !apt?.time) continue;
+        const key = `${userPhone}_${apt.date}_${apt.time}`;
+        titleMap.set(key, apt.title || null);
+      }
+    }
+
+    const enrichedAppointments = normalizedAppointments.map((apt) => ({
+      ...apt,
+      title: titleMap.get(`${apt.phone}_${date}_${apt.time}`) || null,
+    }));
+
     return NextResponse.json({
-      appointments: day.appointments || [],
+      appointments: enrichedAppointments,
       blockedTimes: day.blockedTimes || [],
       editedTimes: day.editedTimes || [],
     });
@@ -172,7 +215,6 @@ export async function GET(req) {
     );
   }
 }
-
 /* ---------------- POST ---------------- */
 
 export async function POST(req) {
