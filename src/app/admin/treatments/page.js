@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import axios from "axios";
 import { motion, AnimatePresence } from "framer-motion";
 import NeonLoader from "@/components/ui/loading";
@@ -11,14 +11,12 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-
 import {
   SortableContext,
   useSortable,
   verticalListSortingStrategy,
   arrayMove,
 } from "@dnd-kit/sortable";
-
 import { CSS } from "@dnd-kit/utilities";
 
 const emptyService = {
@@ -32,6 +30,36 @@ const emptyService = {
   cupsCount: "",
 };
 
+const makeKey = () => {
+  if (typeof crypto !== "undefined" && crypto.randomUUID)
+    return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const ensureServiceKeys = (treatments) =>
+  (treatments || []).map((t) => ({
+    ...t,
+    services: (t.services || []).map((s) => ({
+      ...s,
+      __key: s.__key || s._id || s.imagePath || makeKey(),
+    })),
+  }));
+
+const stripClientKeys = (services) =>
+  (services || []).map(({ __key, ...rest }) => rest);
+
+function SortableHandleCell({ listeners, attributes }) {
+  return (
+    <td
+      className="border px-2 cursor-grab active:cursor-grabbing select-none touch-none"
+      {...attributes}
+      {...listeners}
+    >
+      <span className="text-xl">⋮⋮</span>
+    </td>
+  );
+}
+
 function SortableRow({ id, children }) {
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id });
@@ -43,15 +71,40 @@ function SortableRow({ id, children }) {
 
   return (
     <tr ref={setNodeRef} style={style}>
-      <td
-        className="border px-2 cursor-grab active:cursor-grabbing select-none touch-none"
-        {...attributes}
-        {...listeners}
-      >
-        <span className="text-xl">⋮⋮</span>
-      </td>
+      <SortableHandleCell attributes={attributes} listeners={listeners} />
       {children}
     </tr>
+  );
+}
+
+function SortableCard({ id, children }) {
+  const { attributes, listeners, setNodeRef, transform, transition } =
+    useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="border border-border rounded-xl p-3 bg-background"
+    >
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          className="shrink-0 cursor-grab active:cursor-grabbing select-none touch-none border border-border rounded-lg px-2 py-1"
+          {...attributes}
+          {...listeners}
+          aria-label="Drag"
+        >
+          ⋮⋮
+        </button>
+        <div className="flex-1">{children}</div>
+      </div>
+    </div>
   );
 }
 
@@ -63,7 +116,7 @@ export default function AdminTreatmentsPage() {
   );
 
   const HUJAMA_ID = "6971f64c9b98d43b59cbb4a0";
-  const isHujama = (treatment) => treatment._id === HUJAMA_ID;
+  const isHujama = useCallback((treatment) => treatment?._id === HUJAMA_ID, []);
 
   /* ===================== STATE ===================== */
 
@@ -85,6 +138,7 @@ export default function AdminTreatmentsPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+  const [expandedDesc, setExpandedDesc] = useState(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [newTreatment, setNewTreatment] = useState({
@@ -95,25 +149,25 @@ export default function AdminTreatmentsPage() {
 
   const [confirmDelete, setConfirmDelete] = useState(null);
 
-  /* ===================== INITIAL FETCH ===================== */
+  /* ===================== FETCH ===================== */
+
+  const fetchTreatments = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await axios.get("/api/admin/treatments");
+      setTreatments(ensureServiceKeys(res.data));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const fetchTreatments = async () => {
-      setLoading(true);
-      try {
-        const res = await axios.get("/api/admin/treatments");
-        setTreatments(res.data);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchTreatments();
-  }, []);
+  }, [fetchTreatments]);
 
   /* ===================== ADD TREATMENT ===================== */
 
-  const addTreatment = async () => {
+  const addTreatment = useCallback(async () => {
     if (isAdding) return;
     if (!newTreatment.title.trim() || !newTreatment.description.trim()) return;
 
@@ -143,47 +197,52 @@ export default function AdminTreatmentsPage() {
     } finally {
       setIsAdding(false);
     }
-  };
+  }, [isAdding, newTreatment]);
 
   /* ===================== UPDATE TITLE / DESCRIPTION ===================== */
 
-  const saveTitle = async (id) => {
-    if (isSaving) return;
+  const saveTitle = useCallback(
+    async (id) => {
+      if (isSaving) return;
 
-    const backup = treatments.find((t) => t._id === id);
+      const backup = treatments.find((t) => t._id === id);
 
-    setTreatments((prev) =>
-      prev.map((t) =>
-        t._id === id
-          ? { ...t, title: editedTitle, description: editedDescription }
-          : t,
-      ),
-    );
+      // optimistic
+      setTreatments((prev) =>
+        prev.map((t) =>
+          t._id === id
+            ? { ...t, title: editedTitle, description: editedDescription }
+            : t,
+        ),
+      );
 
-    setEditingIndex(null);
-    setIsSaving(true);
+      setEditingIndex(null);
+      setIsSaving(true);
 
-    try {
-      await axios.put("/api/admin/treatments", {
-        id,
-        title: editedTitle,
-        description: editedDescription,
-      });
-    } catch (err) {
-      console.error("Failed to update treatment:", err);
-      setTreatments((prev) => prev.map((t) => (t._id === id ? backup : t)));
-    } finally {
-      setIsSaving(false);
-    }
-  };
+      try {
+        await axios.put("/api/admin/treatments", {
+          id,
+          title: editedTitle,
+          description: editedDescription,
+        });
+      } catch (err) {
+        console.error("Failed to update treatment:", err);
+        setTreatments((prev) => prev.map((t) => (t._id === id ? backup : t)));
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [isSaving, treatments, editedTitle, editedDescription],
+  );
 
   /* ===================== DELETE TREATMENT ===================== */
 
-  const confirmDeleteTreatment = async () => {
+  const confirmDeleteTreatment = useCallback(async () => {
     if (isDeleting || !confirmDelete?.id) return;
 
     const backup = treatments.find((t) => t._id === confirmDelete.id);
 
+    // optimistic
     setTreatments((prev) => prev.filter((t) => t._id !== confirmDelete.id));
     setConfirmDelete(null);
     setIsDeleting(true);
@@ -198,130 +257,118 @@ export default function AdminTreatmentsPage() {
     } finally {
       setIsDeleting(false);
     }
-  };
-
-  /* ===================== SERVICE REORDER ===================== */
-
-  const handleServiceDragEnd = async (event, treatment) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const reorderedServices = arrayMove(treatment.services, active.id, over.id);
-
-    setTreatments((prev) =>
-      prev.map((t) =>
-        t._id === treatment._id ? { ...t, services: reorderedServices } : t,
-      ),
-    );
-
-    try {
-      await axios.put("/api/admin/treatments/services/reorder", {
-        treatmentId: treatment._id,
-        services: reorderedServices,
-      });
-    } catch (err) {
-      console.error("Failed to reorder services:", err);
-    }
-  };
+  }, [isDeleting, confirmDelete, treatments]);
 
   /* ===================== SERVICE IMAGE UPLOAD ===================== */
 
-  const uploadServiceImage = async (treatmentId, serviceIndex) => {
-    const formData = new FormData();
-    formData.append("image", selectedImage);
-    formData.append("treatmentId", treatmentId);
-    formData.append("serviceIndex", serviceIndex);
+  const uploadServiceImage = useCallback(
+    async (treatmentId, serviceIndex) => {
+      const formData = new FormData();
+      formData.append("image", selectedImage);
+      formData.append("treatmentId", treatmentId);
+      formData.append("serviceIndex", serviceIndex);
 
-    const res = await axios.post("/api/admin/upload-service-image", formData);
-    return res.data;
-  };
+      const res = await axios.post("/api/admin/upload-service-image", formData);
+      return res.data;
+    },
+    [selectedImage],
+  );
 
   /* ===================== ADD / UPDATE SERVICE ===================== */
 
-  const saveService = async (treatmentId) => {
-    if (isSaving) return;
+  const saveService = useCallback(
+    async (treatmentId) => {
+      if (isSaving) return;
 
-    setIsSaving(true);
+      setIsSaving(true);
 
-    let imageData = {
-      url: serviceForm.imageUrl || "",
-      path: serviceForm.imagePath || "",
-    };
-
-    try {
-      if (selectedImage) {
-        imageData = await uploadServiceImage(
-          treatmentId,
-          serviceEdit.index ?? Date.now(),
-        );
-      }
-
-      const payload = {
-        ...serviceForm,
-        imageUrl: imageData.url,
-        imagePath: imageData.path,
+      let imageData = {
+        url: serviceForm.imageUrl || "",
+        path: serviceForm.imagePath || "",
       };
 
-      if (serviceEdit.index === null) {
-        await axios.post("/api/admin/treatments/services", {
-          treatmentId,
-          service: payload,
-        });
+      try {
+        if (selectedImage) {
+          imageData = await uploadServiceImage(
+            treatmentId,
+            serviceEdit.index ?? Date.now(),
+          );
+        }
 
-        setTreatments((prev) =>
-          prev.map((t) =>
-            t._id === treatmentId
-              ? { ...t, services: [...t.services, payload] }
-              : t,
-          ),
-        );
-      } else {
-        await axios.put("/api/admin/treatments/services", {
-          treatmentId,
-          serviceIndex: serviceEdit.index,
-          service: payload,
-        });
+        const payload = {
+          ...serviceForm,
+          __key: serviceForm.__key || makeKey(),
+          imageUrl: imageData.url,
+          imagePath: imageData.path,
+        };
 
-        setTreatments((prev) =>
-          prev.map((t) =>
-            t._id === treatmentId
-              ? {
-                  ...t,
-                  services: t.services.map((s, i) =>
-                    i === serviceEdit.index ? payload : s,
-                  ),
-                }
-              : t,
-          ),
-        );
+        if (serviceEdit.index === null) {
+          // server
+          await axios.post("/api/admin/treatments/services", {
+            treatmentId,
+            service: stripClientKeys([payload])[0],
+          });
+
+          // optimistic
+          setTreatments((prev) =>
+            prev.map((t) =>
+              t._id === treatmentId
+                ? { ...t, services: [...(t.services || []), payload] }
+                : t,
+            ),
+          );
+        } else {
+          await axios.put("/api/admin/treatments/services", {
+            treatmentId,
+            serviceIndex: serviceEdit.index,
+            service: stripClientKeys([payload])[0],
+          });
+
+          setTreatments((prev) =>
+            prev.map((t) =>
+              t._id === treatmentId
+                ? {
+                    ...t,
+                    services: (t.services || []).map((s, i) =>
+                      i === serviceEdit.index ? payload : s,
+                    ),
+                  }
+                : t,
+            ),
+          );
+        }
+
+        setServiceEdit(null);
+        setServiceForm(emptyService);
+        setSelectedImage(null);
+        setServiceMenu(null);
+      } catch (err) {
+        console.error("Failed to save service:", err);
+      } finally {
+        setIsSaving(false);
       }
-
-      setServiceEdit(null);
-      setServiceForm(emptyService);
-      setSelectedImage(null);
-      setServiceMenu(null);
-    } catch (err) {
-      console.error("Failed to save service:", err);
-    } finally {
-      setIsSaving(false);
-    }
-  };
+    },
+    [isSaving, serviceForm, selectedImage, uploadServiceImage, serviceEdit],
+  );
 
   /* ===================== DELETE SERVICE ===================== */
 
-  const confirmDeleteService = async () => {
+  const confirmDeleteService = useCallback(async () => {
     if (isDeleting) return;
+    const { treatmentId, serviceIndex } = confirmDelete || {};
+    if (!treatmentId && treatmentId !== "") return;
+    if (serviceIndex === null || serviceIndex === undefined) return;
 
-    const { treatmentId, serviceIndex } = confirmDelete;
     const treatment = treatments.find((t) => t._id === treatmentId);
     const backup = treatment?.services?.[serviceIndex];
 
+    // optimistic
     setTreatments((prev) =>
       prev.map((t) =>
         t._id === treatmentId
           ? {
               ...t,
-              services: t.services.filter((_, i) => i !== serviceIndex),
+              services: (t.services || []).filter((_, i) => i !== serviceIndex),
             }
           : t,
       ),
@@ -336,17 +383,55 @@ export default function AdminTreatmentsPage() {
       });
     } catch (err) {
       console.error("Failed to delete service:", err);
+      // rollback (best-effort insert back)
       setTreatments((prev) =>
         prev.map((t) =>
           t._id === treatmentId
-            ? { ...t, services: [...t.services, backup] }
+            ? { ...t, services: [...(t.services || []), backup] }
             : t,
         ),
       );
     } finally {
       setIsDeleting(false);
     }
-  };
+  }, [isDeleting, confirmDelete, treatments]);
+
+  /* ===================== SERVICE REORDER (DRAG) ===================== */
+
+  const handleServiceDragEnd = useCallback(
+    async (event, treatment) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+
+      const services = treatment.services || [];
+      const oldIndex = services.findIndex((s) => s.__key === active.id);
+      const newIndex = services.findIndex((s) => s.__key === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+
+      const reorderedServices = arrayMove(services, oldIndex, newIndex);
+
+      // optimistic
+      setTreatments((prev) =>
+        prev.map((t) =>
+          t._id === treatment._id ? { ...t, services: reorderedServices } : t,
+        ),
+      );
+
+      try {
+        await axios.put("/api/admin/treatments/services/reorder", {
+          treatmentId: treatment._id,
+          services: stripClientKeys(reorderedServices),
+        });
+      } catch (err) {
+        console.error("Failed to reorder services:", err);
+        // rollback by refetching just in case
+        fetchTreatments();
+      }
+    },
+    [fetchTreatments],
+  );
+
+  /* ===================== RENDER ===================== */
 
   if (loading) {
     return (
@@ -373,6 +458,8 @@ export default function AdminTreatmentsPage() {
         {treatments.map((treatment, index) => {
           const isOpen = openIndex === index;
           const hujama = isHujama(treatment);
+
+          const sortableItems = (treatment.services || []).map((s) => s.__key);
 
           return (
             <div
@@ -409,12 +496,30 @@ export default function AdminTreatmentsPage() {
                   </div>
                 ) : (
                   <div className="w-full">
-                    <h2 className="text-2xl font-semibold">
+                    <h2 className="text-2xl font-semibold break-words line-clamp-2">
                       {treatment.title}
                     </h2>
-                    <p className="text-foreground/70 mt-1">
+                    {/* Description */}
+                    <p
+                      className={`
+                        text-foreground/70 mt-1
+                        [overflow-wrap:anywhere]
+                        ${expandedDesc === index ? "" : "line-clamp-3"}
+                        md:line-clamp-none
+                      `}
+                    >
                       {treatment.description}
                     </p>
+                    {treatment.description?.length > 100 && (
+                      <button
+                        onClick={() =>
+                          setExpandedDesc(expandedDesc === index ? null : index)
+                        }
+                        className="md:hidden mt-2 text-sm text-primary underline"
+                      >
+                        {expandedDesc === index ? "إظهار أقل" : "اقرأ المزيد"}
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -495,7 +600,7 @@ export default function AdminTreatmentsPage() {
                             index: null,
                             isHujama: hujama,
                           });
-                          setServiceForm(emptyService);
+                          setServiceForm({ ...emptyService, __key: makeKey() });
                           setSelectedImage(null);
                         }}
                         className="px-4 py-2 bg-primary text-primary-foreground rounded-lg"
@@ -504,187 +609,317 @@ export default function AdminTreatmentsPage() {
                       </button>
                     </div>
 
-                    <div className="relative w-full overflow-x-auto">
-                      <DndContext
-                        sensors={sensors}
-                        collisionDetection={closestCenter}
-                        onDragEnd={(event) =>
-                          handleServiceDragEnd(event, treatment)
-                        }
+                    <DndContext
+                      sensors={sensors}
+                      collisionDetection={closestCenter}
+                      onDragEnd={(event) =>
+                        handleServiceDragEnd(event, treatment)
+                      }
+                    >
+                      <SortableContext
+                        items={sortableItems}
+                        strategy={verticalListSortingStrategy}
                       >
-                        <table className="w-full min-w-[900px] relative order border-border border-collapse">
-                          <thead className="border border-border">
-                            <tr className="border-b border border-border">
-                              <th className="border p-2 w-10"></th>
-                              <th className="text-left py-2 border border-border">
-                                اسم الخدمة
-                              </th>
-                              <th className="text-start py-2 border border-border">
-                                المدة
-                              </th>
-                              <th className="text-start py-2 border border-border">
-                                السعر
-                              </th>
-                              <th className="text-start py-2 border border-border">
-                                الوصف
-                              </th>
-                              {hujama && (
-                                <th className="border p-2">عدد الكووس</th>
-                              )}
-                              <th className="text-start py-2 border border-border">
-                                الصورة
-                              </th>
-                              <th className="text-right py-2 border border-border">
-                                الإجراءات
-                              </th>
-                            </tr>
-                          </thead>
+                        {/* ===== Desktop / Tablet: Table ===== */}
+                        <div className="hidden md:block">
+                          <div className="relative w-full overflow-x-auto rounded-xl border border-border">
+                            <table className="w-full min-w-[900px] border-collapse bg-background">
+                              <thead className="border-b border-border">
+                                <tr className="border-b border-border">
+                                  <th className="border p-2 w-10"></th>
+                                  <th className="text-left py-2 border border-border">
+                                    اسم الخدمة
+                                  </th>
+                                  <th className="text-start py-2 border border-border">
+                                    المدة
+                                  </th>
+                                  <th className="text-start py-2 border border-border">
+                                    السعر
+                                  </th>
+                                  <th className="text-start py-2 border border-border">
+                                    الوصف
+                                  </th>
+                                  {hujama && (
+                                    <th className="border p-2">عدد الكووس</th>
+                                  )}
+                                  <th className="text-start py-2 border border-border">
+                                    الصورة
+                                  </th>
+                                  <th className="text-right py-2 border border-border">
+                                    الإجراءات
+                                  </th>
+                                </tr>
+                              </thead>
 
-                          <tbody>
-                            <SortableContext
-                              items={(treatment.services || []).map(
-                                (_, i) => i,
-                              )}
-                              strategy={verticalListSortingStrategy}
-                            >
-                              {(treatment.services || []).map((s, i) => (
-                                <SortableRow key={i} id={i}>
-                                  <td className="py-3 px-2 border border-border whitespace-nowrap">
-                                    {s.title}
-                                  </td>
+                              <tbody>
+                                {(treatment.services || []).map((s, i) => (
+                                  <SortableRow key={s.__key} id={s.__key}>
+                                    <td className="py-3 px-2 border border-border whitespace-nowrap">
+                                      {s.title}
+                                    </td>
 
-                                  <td className="py-3 px-2 border border-border whitespace-nowrap">
-                                    {s.duration}
-                                  </td>
+                                    <td className="py-3 px-2 border border-border whitespace-nowrap">
+                                      {s.duration}
+                                    </td>
 
-                                  <td className="py-3 px-2 border border-border whitespace-nowrap">
-                                    {s.price} {s.currency}
-                                  </td>
+                                    <td className="py-3 px-2 border border-border whitespace-nowrap">
+                                      {s.price} {s.currency}
+                                    </td>
 
-                                  <td className="py-3 px-2 border border-border">
-                                    <div
-                                      className="
-                  max-w-[240px] md:max-w-[320px]
-                  break-words whitespace-normal
-                  line-clamp-3 md:line-clamp-none
-                  text-sm
-                "
+                                    <td className="py-3 px-2 border border-border">
+                                      <div className="max-w-[320px] break-words whitespace-normal text-sm">
+                                        {s.description}
+                                      </div>
+                                    </td>
+
+                                    {hujama && (
+                                      <td className="border p-2 text-center">
+                                        {s.cupsCount || "—"}
+                                      </td>
+                                    )}
+
+                                    <td className="py-3 px-2 border border-border">
+                                      {s.imageUrl ? (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setPreviewImage(s.imageUrl)
+                                          }
+                                          className="block"
+                                        >
+                                          <img
+                                            src={s.imageUrl}
+                                            alt={s.title}
+                                            className="object-cover rounded-lg border border-border w-12 h-12 md:w-16 md:h-16"
+                                          />
+                                        </button>
+                                      ) : (
+                                        <span className="text-foreground/50">
+                                          —
+                                        </span>
+                                      )}
+                                    </td>
+
+                                    <td className="relative z-50 text-right py-3 px-2 border border-border">
+                                      <div className="relative inline-block">
+                                        <button
+                                          onClick={() =>
+                                            setServiceMenu(
+                                              serviceMenu === `${index}-${i}`
+                                                ? null
+                                                : `${index}-${i}`,
+                                            )
+                                          }
+                                          className="p-2 border border-border rounded-lg"
+                                        >
+                                          ⋮
+                                        </button>
+
+                                        <AnimatePresence>
+                                          {serviceMenu === `${index}-${i}` && (
+                                            <motion.div
+                                              initial={{ opacity: 0, y: -5 }}
+                                              animate={{ opacity: 1, y: 0 }}
+                                              exit={{ opacity: 0, y: -5 }}
+                                              className="absolute end-0 mt-2 w-32 bg-background border border-border rounded-xl shadow-lg z-[9999]"
+                                            >
+                                              <button
+                                                onClick={() => {
+                                                  setServiceEdit({
+                                                    treatmentId: treatment._id,
+                                                    index: i,
+                                                    isHujama: hujama,
+                                                  });
+                                                  setServiceForm({
+                                                    __key: s.__key,
+                                                    title: s.title ?? "",
+                                                    description:
+                                                      s.description ?? "",
+                                                    duration: s.duration ?? "",
+                                                    price: s.price ?? "",
+                                                    currency:
+                                                      s.currency ?? "ILS",
+                                                    ...(hujama
+                                                      ? {
+                                                          cupsCount:
+                                                            s.cupsCount ?? "",
+                                                        }
+                                                      : {}),
+                                                    imageUrl: s.imageUrl ?? "",
+                                                    imagePath:
+                                                      s.imagePath ?? "",
+                                                  });
+                                                  setSelectedImage(null);
+                                                  setServiceMenu(null);
+                                                }}
+                                                className="w-full text-left px-4 py-2 hover:bg-muted"
+                                              >
+                                                تعديل
+                                              </button>
+
+                                              <button
+                                                onClick={() => {
+                                                  setConfirmDelete({
+                                                    type: "service",
+                                                    treatmentId: treatment._id,
+                                                    serviceIndex: i,
+                                                  });
+                                                  setServiceMenu(null);
+                                                }}
+                                                className="w-full text-left px-4 py-2 text-destructive hover:bg-destructive/10"
+                                              >
+                                                حذف
+                                              </button>
+                                            </motion.div>
+                                          )}
+                                        </AnimatePresence>
+                                      </div>
+                                    </td>
+                                  </SortableRow>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        {/* ===== Mobile: Cards (no overflow, fully readable) ===== */}
+                        <div className="md:hidden space-y-3">
+                          {(treatment.services || []).map((s, i) => (
+                            <SortableCard key={s.__key} id={s.__key}>
+                              <div className="flex items-start gap-3">
+                                <div className="flex-1">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div>
+                                      <div className="font-semibold">
+                                        {s.title}
+                                      </div>
+                                      <div className="text-sm text-foreground/70">
+                                        {s.duration
+                                          ? `${s.duration} دقيقة`
+                                          : "—"}{" "}
+                                        •{" "}
+                                        {s.price
+                                          ? `${s.price} ${s.currency}`
+                                          : "—"}
+                                      </div>
+                                    </div>
+
+                                    <button
+                                      onClick={() =>
+                                        setServiceMenu(
+                                          serviceMenu === `${index}-${i}`
+                                            ? null
+                                            : `${index}-${i}`,
+                                        )
+                                      }
+                                      className="p-2 border border-border rounded-lg shrink-0"
                                     >
+                                      ⋮
+                                    </button>
+                                  </div>
+
+                                  {s.description ? (
+                                    <div className="text-sm mt-2 break-words whitespace-normal">
                                       {s.description}
                                     </div>
-                                  </td>
-
-                                  {hujama && (
-                                    <td className="border p-2 text-center">
-                                      {s.cupsCount || "—"}
-                                    </td>
+                                  ) : (
+                                    <div className="text-sm mt-2 text-foreground/50">
+                                      —
+                                    </div>
                                   )}
 
-                                  <td className="py-3 px-2 border border-border">
+                                  {hujama && (
+                                    <div className="text-sm mt-2">
+                                      <span className="text-foreground/70">
+                                        عدد الكووس:{" "}
+                                      </span>
+                                      {s.cupsCount || "—"}
+                                    </div>
+                                  )}
+
+                                  <div className="mt-3 flex items-center gap-3">
                                     {s.imageUrl ? (
                                       <button
                                         type="button"
                                         onClick={() =>
                                           setPreviewImage(s.imageUrl)
                                         }
-                                        className="block"
                                       >
                                         <img
                                           src={s.imageUrl}
                                           alt={s.title}
-                                          className="
-                      object-cover rounded-lg border border-border
-                      w-12 h-12
-                      md:w-16 md:h-16
-                    "
+                                          className="object-cover rounded-lg border border-border w-14 h-14"
                                         />
                                       </button>
                                     ) : (
-                                      <span className="text-foreground/50">
-                                        —
-                                      </span>
+                                      <div className="text-sm text-foreground/50">
+                                        لا توجد صورة
+                                      </div>
                                     )}
-                                  </td>
+                                  </div>
 
-                                  <td className="relative z-50 text-right py-3 px-2 border border-border">
-                                    <div className="relative inline-block">
-                                      <button
-                                        onClick={() =>
-                                          setServiceMenu(
-                                            serviceMenu === `${index}-${i}`
-                                              ? null
-                                              : `${index}-${i}`,
-                                          )
-                                        }
-                                        className="p-2 border border-border rounded-lg"
+                                  <AnimatePresence>
+                                    {serviceMenu === `${index}-${i}` && (
+                                      <motion.div
+                                        initial={{ opacity: 0, y: -5 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -5 }}
+                                        className="mt-3 w-full bg-background border border-border rounded-xl shadow-lg overflow-hidden"
                                       >
-                                        ⋮
-                                      </button>
+                                        <button
+                                          onClick={() => {
+                                            setServiceEdit({
+                                              treatmentId: treatment._id,
+                                              index: i,
+                                              isHujama: hujama,
+                                            });
+                                            setServiceForm({
+                                              __key: s.__key,
+                                              title: s.title ?? "",
+                                              description: s.description ?? "",
+                                              duration: s.duration ?? "",
+                                              price: s.price ?? "",
+                                              currency: s.currency ?? "ILS",
+                                              ...(hujama
+                                                ? {
+                                                    cupsCount:
+                                                      s.cupsCount ?? "",
+                                                  }
+                                                : {}),
+                                              imageUrl: s.imageUrl ?? "",
+                                              imagePath: s.imagePath ?? "",
+                                            });
+                                            setSelectedImage(null);
+                                            setServiceMenu(null);
+                                          }}
+                                          className="w-full text-left px-4 py-3 hover:bg-muted"
+                                        >
+                                          تعديل
+                                        </button>
 
-                                      <AnimatePresence>
-                                        {serviceMenu === `${index}-${i}` && (
-                                          <motion.div
-                                            initial={{ opacity: 0, y: -5 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            exit={{ opacity: 0, y: -5 }}
-                                            className="absolute end-0 mt-2 w-32 bg-background border border-border rounded-xl shadow-lg z-[9999]"
-                                          >
-                                            <button
-                                              onClick={() => {
-                                                setServiceEdit({
-                                                  treatmentId: treatment._id,
-                                                  index: i,
-                                                  isHujama: hujama,
-                                                });
-                                                setServiceForm({
-                                                  title: s.title ?? "",
-                                                  description:
-                                                    s.description ?? "",
-                                                  duration: s.duration ?? "",
-                                                  price: s.price ?? "",
-                                                  currency: s.currency ?? "ILS",
-                                                  ...(hujama
-                                                    ? {
-                                                        cupsCount:
-                                                          s.cupsCount ?? "",
-                                                      }
-                                                    : {}),
-                                                  imageUrl: s.imageUrl ?? "",
-                                                  imagePath: s.imagePath ?? "",
-                                                });
-                                                setSelectedImage(null);
-                                                setServiceMenu(null);
-                                              }}
-                                              className="w-full text-left px-4 py-2 hover:bg-muted"
-                                            >
-                                              تعديل
-                                            </button>
-
-                                            <button
-                                              onClick={() => {
-                                                setConfirmDelete({
-                                                  type: "service",
-                                                  treatmentId: treatment._id,
-                                                  serviceIndex: i,
-                                                });
-                                                setServiceMenu(null);
-                                              }}
-                                              className="w-full text-left px-4 py-2 text-destructive hover:bg-destructive/10"
-                                            >
-                                              حذف
-                                            </button>
-                                          </motion.div>
-                                        )}
-                                      </AnimatePresence>
-                                    </div>
-                                  </td>
-                                </SortableRow>
-                              ))}
-                            </SortableContext>
-                          </tbody>
-                        </table>
-                      </DndContext>
-                    </div>
+                                        <button
+                                          onClick={() => {
+                                            setConfirmDelete({
+                                              type: "service",
+                                              treatmentId: treatment._id,
+                                              serviceIndex: i,
+                                            });
+                                            setServiceMenu(null);
+                                          }}
+                                          className="w-full text-left px-4 py-3 text-destructive hover:bg-destructive/10"
+                                        >
+                                          حذف
+                                        </button>
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
+                                </div>
+                              </div>
+                            </SortableCard>
+                          ))}
+                        </div>
+                      </SortableContext>
+                    </DndContext>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -693,6 +928,7 @@ export default function AdminTreatmentsPage() {
         })}
       </div>
 
+      {/* ===== Preview Image ===== */}
       {previewImage && (
         <div
           className="fixed inset-0 z-[99999] bg-black/80 flex items-center justify-center"
@@ -706,6 +942,7 @@ export default function AdminTreatmentsPage() {
         </div>
       )}
 
+      {/* ===== Add Treatment Modal ===== */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]">
           <div className="bg-background p-6 rounded-2xl w-full max-w-lg">
@@ -722,10 +959,7 @@ export default function AdminTreatmentsPage() {
               placeholder="الوصف"
               value={newTreatment.description}
               onChange={(e) =>
-                setNewTreatment((p) => ({
-                  ...p,
-                  description: e.target.value,
-                }))
+                setNewTreatment((p) => ({ ...p, description: e.target.value }))
               }
               className="border border-border bg-background text-foreground placeholder:text-foreground/50 px-3 py-2 rounded w-full mb-4 min-h-[110px]"
               style={{ WebkitTextFillColor: "var(--foreground)" }}
@@ -744,6 +978,7 @@ export default function AdminTreatmentsPage() {
         </div>
       )}
 
+      {/* ===== Service Modal ===== */}
       {serviceEdit && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]">
           <div className="bg-background p-6 rounded-2xl w-full max-w-lg space-y-3">
@@ -785,10 +1020,7 @@ export default function AdminTreatmentsPage() {
                 style={{ WebkitTextFillColor: "var(--foreground)" }}
                 value={serviceForm.cupsCount}
                 onChange={(e) =>
-                  setServiceForm((p) => ({
-                    ...p,
-                    cupsCount: e.target.value,
-                  }))
+                  setServiceForm((p) => ({ ...p, cupsCount: e.target.value }))
                 }
               />
             )}
@@ -801,6 +1033,7 @@ export default function AdminTreatmentsPage() {
                 setServiceForm((p) => ({ ...p, description: e.target.value }))
               }
             />
+
             <div className="space-y-2">
               <input
                 type="file"
@@ -822,7 +1055,7 @@ export default function AdminTreatmentsPage() {
               )}
             </div>
 
-            <div className="flex justify-end gap-3 pt-2">
+            <div className="flex justify-end gap-3 pt-2 flex-wrap">
               <button
                 onClick={() => {
                   setServiceEdit(null);
@@ -832,6 +1065,7 @@ export default function AdminTreatmentsPage() {
               >
                 إلغاء
               </button>
+
               <button
                 onClick={() => saveService(serviceEdit.treatmentId)}
                 disabled={isSaving}
@@ -839,6 +1073,7 @@ export default function AdminTreatmentsPage() {
               >
                 حفظ
               </button>
+
               {serviceForm.imageUrl && !selectedImage && (
                 <button
                   type="button"
@@ -867,6 +1102,7 @@ export default function AdminTreatmentsPage() {
         </div>
       )}
 
+      {/* ===== Confirm Delete ===== */}
       {confirmDelete && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]">
           <div className="bg-background p-6 rounded-xl">
