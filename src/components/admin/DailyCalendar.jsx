@@ -495,11 +495,9 @@ const DailyCalendar = () => {
                           <div className="text-sm font-medium truncate">
                             {apt.firstName} {apt.lastName}
                           </div>
-                          {apt.title && (
                             <div className="text-xs text-muted-foreground truncate">
                               {apt.title}
                             </div>
-                          )}
                         </div>
                       </div>
 
@@ -565,11 +563,9 @@ const DailyCalendar = () => {
                     {/* ---------- MOBILE EXPANDED DETAILS ---------- */}
                     {isExpanded && (
                       <div className="mt-3 pt-3 border-t space-y-2 text-sm md:hidden">
-                        {apt.title && (
                           <div className="font-medium text-foreground">
                            {apt.title}
                           </div>
-                        )}
                         <div>
                           <strong>{apt.duration} دقيقه</strong>
                         </div>
