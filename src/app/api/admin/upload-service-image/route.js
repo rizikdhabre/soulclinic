@@ -31,9 +31,10 @@ export async function POST(req) {
     await file.makePublic();
 
     const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filePath}`;
+    const cacheBustedUrl = `${publicUrl}?v=${Date.now()}`;
 
     return NextResponse.json({
-      url: publicUrl,
+      url: cacheBustedUrl,
       path: filePath,
     });
   } catch (err) {

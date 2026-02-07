@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import axios from "axios";
 import { motion, AnimatePresence } from "framer-motion";
 import NeonLoader from "@/components/ui/loading";
@@ -502,15 +502,17 @@ export default function AdminTreatmentsPage() {
                     {/* Description */}
                     <p
                       className={`
-                        text-foreground/70 mt-1
-                        [overflow-wrap:anywhere]
-                        ${expandedDesc === index ? "" : "line-clamp-3"}
-                        md:line-clamp-none
-                      `}
+                  text-foreground/70 mt-1
+                  [overflow-wrap:anywhere]
+                  ${expandedDesc === index ? "" : "line-clamp-3"}
+                  md:line-clamp-none
+                `}
                     >
                       {treatment.description}
                     </p>
-                    {treatment.description?.length > 100 && (
+
+                    {/* Read more (mobile only) */}
+                    {treatment.description?.length > 120 && (
                       <button
                         onClick={() =>
                           setExpandedDesc(expandedDesc === index ? null : index)
