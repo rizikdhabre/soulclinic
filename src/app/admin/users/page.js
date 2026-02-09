@@ -104,7 +104,6 @@ export default function UsersAdminPage() {
       (a) => String(a._id) === String(appointmentId),
     );
     if (!appointment) return;
-    r;
     setUsers((prev) =>
       prev.map((u) => ({
         ...u,
