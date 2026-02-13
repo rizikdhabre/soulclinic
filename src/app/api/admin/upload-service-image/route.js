@@ -7,19 +7,27 @@ export async function POST(req) {
 
     const image = formData.get("image");
     const treatmentId = formData.get("treatmentId");
-    const serviceIndex = formData.get("serviceIndex");
 
     if (!image) {
-      return NextResponse.json({ error: "No image provided" }, { status: 400 });
+      return NextResponse.json({ error: "لم يتم اختيار صورة" }, { status: 400 });
     }
 
     if (!image.type.startsWith("image/")) {
-      return NextResponse.json({ error: "Invalid file type" }, { status: 400 });
+      return NextResponse.json({ error: "الملف يجب أن يكون صورة فقط" }, { status: 400 });
+    }
+
+    const MAX_SIZE = 5 * 1024 * 1024;
+
+    if (image.size > MAX_SIZE) {
+      return NextResponse.json(
+        { error: "حجم الصورة كبير جدًا (الحد الأقصى 5 ميجابايت)" },
+        { status: 400 }
+      );
     }
 
     const buffer = Buffer.from(await image.arrayBuffer());
 
-    const filePath = `services/${treatmentId}/${serviceIndex}.jpg`;
+    const filePath = `services/${treatmentId}/${Date.now()}.jpg`;
     const file = bucket.file(filePath);
 
     await file.save(buffer, {

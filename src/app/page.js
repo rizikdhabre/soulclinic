@@ -121,12 +121,18 @@ const HomePage = () => {
             >
               <Button
                 asChild
-                size="xl"
-                className="group px-12 py-8 rounded-full text-4xl"
+                size="xlg"
+                className="group px-10 py-6 rounded-full text-2xl
+             bg-[#0F2A23]
+             hover:bg-[#0c221c]
+             text-[#D4AF37]
+             border-2 border-[#D4AF37]
+             transition-all duration-300
+             hover:shadow-[0_0_25px_rgba(212,175,55,0.35)]"
               >
                 <Link
                   href="/dashboard"
-                  className="font-semibold flex items-center"
+                  className="font-semibold flex items-center gap-4"
                 >
                   احجز موعدك الآن
                   <ArrowLeft className="ml-7 w-10 h-10 group-hover:translate-x-1 transition-transform" />
