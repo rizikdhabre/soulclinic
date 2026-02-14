@@ -23,6 +23,7 @@ export const AppointmentsModal = ({
   const [editingId, setEditingId] = useState(null);
   const [editingText, setEditingText] = useState("");
   const [appointments, setAppointments] = useState(user.appointments || []);
+  const [appointmentToConfirm, setAppointmentToConfirm] = useState(null);
 
   useEffect(() => {
     setAppointments(user.appointments || []);
@@ -44,6 +45,18 @@ export const AppointmentsModal = ({
     } catch (err) {
       console.error("Failed to add admin note", err);
     }
+  };
+
+  const confirmCancel = () => {
+    if (!appointmentToConfirm) return;
+
+    const id = appointmentToConfirm._id;
+
+    setAppointments((prev) => prev.filter((a) => String(a._id) !== String(id)));
+
+    onCancelAppointment(id);
+
+    setAppointmentToConfirm(null);
   };
 
   const saveEdit = async (noteId) => {
@@ -112,6 +125,7 @@ export const AppointmentsModal = ({
         <>
           {/* Backdrop */}
           <motion.div
+            key="main-modal-wrapper"
             className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -257,14 +271,7 @@ export const AppointmentsModal = ({
                                 className="text-destructive hover:bg-destructive/10"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setAppointments((prev) =>
-                                    prev.filter(
-                                      (a) => String(a._id) !== String(apt._id),
-                                    ),
-                                  );
-
-                                  // backend + parent sync
-                                  onCancelAppointment(apt._id);
+                                  setAppointmentToConfirm(apt);
                                 }}
                               >
                                 الغاء الموعد
@@ -297,9 +304,9 @@ export const AppointmentsModal = ({
 
                     {appointmentNotes.length > 0 ? (
                       <div className="space-y-2">
-                        {appointmentNotes.map((note, idx) => (
+                        {appointmentNotes.map((note) => (
                           <div
-                            key={idx}
+                            key={`${note.date}-${note.time}-${note.text}`}
                             className="rounded-lg border bg-card p-3 text-sm"
                           >
                             <p className="text-foreground">{note.text}</p>
@@ -308,7 +315,7 @@ export const AppointmentsModal = ({
                       </div>
                     ) : (
                       <p className="text-sm text-muted-foreground italic">
-                      لا توجد ملاحظات لهذا الموعد
+                        لا توجد ملاحظات لهذا الموعد
                       </p>
                     )}
                   </div>
@@ -318,7 +325,7 @@ export const AppointmentsModal = ({
               {/* ADMIN NOTES */}
               <div className="mt-8 border-t border-border pt-6">
                 <h3 className="text-sm md:text-base font-semibold text-foreground mb-3">
-                 ملاحظات الإدارة
+                  ملاحظات الإدارة
                 </h3>
 
                 {/* Add note */}
@@ -349,7 +356,7 @@ export const AppointmentsModal = ({
                 <div className="space-y-3">
                   {adminNotes.length === 0 && (
                     <p className="text-sm text-muted-foreground italic">
-                    لا توجد ملاحظات إدارية بعد
+                      لا توجد ملاحظات إدارية بعد
                     </p>
                   )}
 
@@ -419,11 +426,57 @@ export const AppointmentsModal = ({
 
               {/* Footer */}
               <div className="border-t border-border px-4 py-3 text-center text-sm text-muted-foreground bg-muted/30">
-                 إجمالي المواعيد: {user.appointments.length} 
+                إجمالي المواعيد: {user.appointments.length}
               </div>
             </motion.div>
           </motion.div>
         </>
+      )}
+
+      {appointmentToConfirm && (
+        <motion.div
+          key="confirm-modal"
+          className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
+            className="bg-card rounded-2xl p-6 w-full max-w-md space-y-5 border border-border shadow-xl"
+          >
+            <h2 className="text-lg font-semibold text-center text-foreground">
+              هل أنت متأكد أنك تريد إلغاء هذا الموعد؟
+            </h2>
+
+            <div className="text-center text-sm text-muted-foreground">
+              <p>{appointmentToConfirm.title}</p>
+              <p>
+                {appointmentToConfirm.date} — {appointmentToConfirm.time}
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <Button
+                variant="destructive"
+                className="flex-1"
+                onClick={confirmCancel}
+              >
+                نعم، إلغاء
+              </Button>
+
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setAppointmentToConfirm(null)}
+              >
+                تراجع
+              </Button>
+            </div>
+          </motion.div>
+        </motion.div>
       )}
     </AnimatePresence>
   );

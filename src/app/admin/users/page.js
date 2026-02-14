@@ -61,6 +61,17 @@ export default function UsersAdminPage() {
     completedCount === 0
       ? 0
       : Math.round((attendedCount / completedCount) * 100);
+
+
+     const missedAppointments = users.flatMap((u) =>
+  (u.appointments || [])
+    .filter((a) => a.date <= today && a.attended === false)
+    .map((a) => ({
+      fullName: `${u.firstName} ${u.lastName}`,
+      date: a.date,
+      time: a.time,
+    }))
+);   
   /* ---------------- HANDLERS ---------------- */
 
   const handleViewAppointments = (user) => {
@@ -186,6 +197,7 @@ export default function UsersAdminPage() {
           attended={attendedCount}
           missed={notAttendedCount}
           upcoming={futureAppointments.length}
+          missedAppointments={missedAppointments}
         />
       </div>
 
