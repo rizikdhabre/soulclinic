@@ -15,6 +15,15 @@ const HomePage = () => {
   const [heroImage, setHeroImage] = useState(null);
   const [gregorianDate, setGregorianDate] = useState("");
   const [hijriDate, setHijriDate] = useState("");
+  const [showPerfumeBubble, setShowPerfumeBubble] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowPerfumeBubble(false);
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     const now = new Date();
@@ -111,6 +120,44 @@ const HomePage = () => {
               اكتشف طريقك إلى{" "}
               <span className="text-primary">السلام الداخلي</span>
             </motion.h1>
+
+            {showPerfumeBubble && (
+              <motion.div
+                initial={{ scale: 0, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0, opacity: 0 }}
+                transition={{ type: "spring", stiffness: 120 }}
+                className="fixed bottom-6 right-6 z-50"
+              >
+                <Link href="/perfumes">
+                  <div
+                    className="relative w-36 h-36 rounded-full 
+                    bg-gradient-to-br from-[#0F2A23] to-[#123c30]
+                    border-2 border-[#D4AF37]
+                    text-[#D4AF37]
+                    shadow-[0_0_30px_rgba(212,175,55,0.4)]
+                    flex items-center justify-center
+                    text-center p-3
+                    cursor-pointer
+                    hover:scale-105
+                    transition-all duration-300
+                  "
+                  >
+                    <motion.div
+                      animate={{ rotate: [0, 5, -5, 0] }}
+                      transition={{ repeat: Infinity, duration: 4 }}
+                      className="text-sm leading-relaxed font-semibold"
+                    >
+                       عطورنا الجديدة
+                      <br />
+                      متوفرة الآن!
+                      <br />
+                      اضغط هنا 
+                    </motion.div>
+                  </div>
+                </Link>
+              </motion.div>
+            )}
 
             {/* CTA Buttons */}
             <motion.div

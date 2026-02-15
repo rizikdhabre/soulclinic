@@ -52,7 +52,6 @@ export default function PerfumesPage() {
 
   return (
     <main className="relative w-full bg-background text-foreground">
-
       <section
         id="perfume-categories"
         className="px-6 md:px-16 py-20 space-y-24"
@@ -60,16 +59,14 @@ export default function PerfumesPage() {
         {categories.map((category) => (
           <div key={category._id} className="space-y-12">
             {/* Category Header */}
-            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-              <div className="space-y-2">
-                <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
-                  {category.name}
-                </h2>
-              </div>
+            <div className="space-y-6 text-center">
+              <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
+                {category.name}
+              </h2>
 
               <Link
                 href={`/perfumes/${category.name.toLowerCase()}`}
-                className="text-sm text-accent hover:underline whitespace-nowrap"
+                className="inline-flex items-center justify-center px-6 py-2 rounded-full border border-accent text-accent text-lg font-medium hover:bg-accent hover:text-background transition-all duration-300"
               >
                 عرض الكل ←
               </Link>
