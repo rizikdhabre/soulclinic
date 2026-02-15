@@ -9,6 +9,7 @@ const adminSections = [
   { title: "صفحة العلاجات", href: "/admin/treatments" },
   { title: "المستخدمون", href: "/admin/users" },
   { title: "الملف الشخصي", href: "/admin/profile" },
+  { title: "صفحه العطور", href: "/admin/perfumes" },
 ];
 
 const containerVariants = {

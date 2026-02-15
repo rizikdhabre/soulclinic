@@ -9,21 +9,24 @@ const Dashboard = () => {
   const [treatments, setTreatments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loaderSize, setLoaderSize] = useState({ w: 260, h: 70 });
-  const getLoaderSize = () => {
-    if (typeof window === "undefined") return { w: 260, h: 70 };
 
-    useEffect(() => {
-      setLoaderSize(getLoaderSize());
+  useEffect(() => {
+    const calculateSize = () => {
+      const width = window.innerWidth;
+      if (width < 640) return { w: 220, h: 60 };
+      if (width < 1024) return { w: 280, h: 70 };
+      return { w: 360, h: 80 };
+    };
 
-      const onResize = () => setLoaderSize(getLoaderSize());
-      window.addEventListener("resize", onResize);
-      return () => window.removeEventListener("resize", onResize);
-    }, []);
-    const width = window.innerWidth;
-    if (width < 640) return { w: 220, h: 60 };
-    if (width < 1024) return { w: 280, h: 70 };
-    return { w: 360, h: 80 };
-  };
+    setLoaderSize(calculateSize());
+
+    const onResize = () => {
+      setLoaderSize(calculateSize());
+    };
+
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     const fetchTreatments = async () => {

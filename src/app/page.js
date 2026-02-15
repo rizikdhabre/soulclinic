@@ -96,7 +96,7 @@ const HomePage = () => {
                     className={`object-cover transition-opacity duration-700 ${
                       loadingImg ? "opacity-0" : "opacity-100"
                     }`}
-                    onLoadingComplete={() => setLoadingImg(false)}
+                    onLoad={() => setLoadingImg(false)}
                   />
                 )}
               </div>

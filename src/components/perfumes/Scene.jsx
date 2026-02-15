@@ -17,6 +17,7 @@ export default function Scene() {
 
   return (
     <Canvas
+     dpr={[1, 1.5]}       
       camera={{ position: [0, 0, 10], fov: 45 }}
       className="absolute inset-0"
     >

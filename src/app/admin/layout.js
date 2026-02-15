@@ -11,6 +11,7 @@ const navItems = [
   { label: "الملف الشخصي", href: "/admin/profile" },
   { label: "العلاجات", href: "/admin/treatments" },
   { label: "المستخدمون", href: "/admin/users" },
+  { label: "العطور", href: "/admin/perfumes" },
 ];
 
 export default function AdminLayout({ children }) {

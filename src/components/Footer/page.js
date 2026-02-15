@@ -29,6 +29,7 @@ const Footer = () => {
                   src="/logo.PNG"
                   alt="Soul Logo"
                   fill
+                  sizes="80px"
                   className="object-contain rounded-full"
                 />
               </div>
