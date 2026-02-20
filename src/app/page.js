@@ -15,16 +15,15 @@ const HomePage = () => {
   const [heroImage, setHeroImage] = useState(null);
   const [gregorianDate, setGregorianDate] = useState("");
   const [hijriDate, setHijriDate] = useState("");
-  const [showPerfumeBubble, setShowPerfumeBubble] = useState(true);
+  const [bubblePhase, setBubblePhase] = useState("hero");
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      setShowPerfumeBubble(false);
+      setBubblePhase("floating");
     }, 5000);
 
     return () => clearTimeout(timer);
   }, []);
-
   useEffect(() => {
     const now = new Date();
     const yesterday = new Date(now);
@@ -121,43 +120,90 @@ const HomePage = () => {
               <span className="text-primary">السلام الداخلي</span>
             </motion.h1>
 
-            {showPerfumeBubble && (
-              <motion.div
-                initial={{ scale: 0, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0, opacity: 0 }}
-                transition={{ type: "spring", stiffness: 120 }}
-                className="fixed bottom-6 right-6 z-50"
-              >
-                <Link href="/perfumes">
-                  <div
-                    className="relative w-36 h-36 rounded-full 
-                    bg-gradient-to-br from-[#0F2A23] to-[#123c30]
-                    border-2 border-[#D4AF37]
-                    text-[#D4AF37]
-                    shadow-[0_0_30px_rgba(212,175,55,0.4)]
-                    flex items-center justify-center
-                    text-center p-3
-                    cursor-pointer
-                    hover:scale-105
-                    transition-all duration-300
-                  "
-                  >
+            <motion.div
+              initial={false}
+              animate={
+                bubblePhase === "hero"
+                  ? {
+                      x: 0,
+                      y: 0,
+                      scale: 1,
+                      rotate: 0,
+                    }
+                  : {
+                      x:
+                        typeof window !== "undefined"
+                          ? -window.innerWidth +
+                            (window.innerWidth < 768 ? 100 : 110)
+                          : -320,
+                      y: -73,
+                      scale: 1.1,
+                      rotate: 0,
+                    }
+              }
+              transition={
+                bubblePhase === "hero"
+                  ? { duration: 0.6 }
+                  : {
+                      duration: 1.8, 
+                      ease: "easeInOut",
+                    }
+              }
+              className="fixed bottom-6 right-6 z-[9999]"
+            >
+              <Link href="/perfumes">
+                <motion.div
+                  className={`
+        ${bubblePhase === "hero" ? "w-26 h-26" : "w-[56px] h-[56px]"}
+        relative
+        rounded-full
+        bg-gradient-to-br from-[#0F2A23] to-[#123c30]
+        border-2 border-[#D4AF37]
+        text-[#D4AF37]
+        shadow-[0_0_30px_rgba(212,175,55,0.4)]
+        flex items-center justify-center
+        text-center
+        cursor-pointer
+        overflow-visible
+      `}
+                >
+                  {bubblePhase === "floating" && (
+                    <span
+                      className="
+            absolute
+            -right-28
+            top-1/2
+            -translate-y-1/2
+            w-32
+            h-[4px]
+            bg-gradient-to-l
+            from-yellow-400/90
+            via-yellow-300/70
+            to-transparent
+            blur-md
+            rotate-[-18deg]
+          "
+                    />
+                  )}
+
+                  {bubblePhase === "hero" ? (
                     <motion.div
                       animate={{ rotate: [0, 5, -5, 0] }}
                       transition={{ repeat: Infinity, duration: 4 }}
-                      className="text-sm leading-relaxed font-semibold"
+                      className="text-sm leading-relaxed font-semibold p-3"
                     >
-                       عطورنا الجديدة
+                      عطورنا 
                       <br />
                       متوفرة الآن!
                       <br />
-                      اضغط هنا 
+                      اضغط هنا
                     </motion.div>
-                  </div>
-                </Link>
-              </motion.div>
-            )}
+                  ) : (
+                    <span className="text-xs font-bold">عطور</span>
+                  )}
+                </motion.div>
+              </Link>
+            </motion.div>
 
             {/* CTA Buttons */}
             <motion.div

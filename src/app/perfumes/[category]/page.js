@@ -127,17 +127,18 @@ export default function CategoryPage() {
                   </h3>
 
                   {perfume.description && (
-                    <p className="text-xs text-muted-foreground truncate h-5">
-                      {perfume.description || ""}
+                    <p className="text-xs text-muted-foreground">
+                      اضغط لعرض الوصف
                     </p>
                   )}
 
                   <div className="flex items-center justify-between pt-1">
                     <span className="text-[11px] uppercase tracking-[0.15em] text-muted-foreground">
-                      {perfume.size} ml
+                      {perfume.size} مل
                     </span>
-                    <span className="font-serif text-lg text-primary">
-                      {perfume.price} NIS
+                    <span className="text-accent font-semibold">
+                      {perfume.price} ₪
+                                  
                     </span>
                   </div>
                 </div>

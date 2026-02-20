@@ -106,7 +106,7 @@ export default function PerfumesPage() {
                     </p>
 
                     <p className="text-accent font-semibold">
-                      {perfume.price} NIS
+                      {perfume.price} ₪
                     </p>
                   </div>
                 </div>
