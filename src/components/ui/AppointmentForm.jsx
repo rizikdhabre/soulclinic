@@ -47,6 +47,20 @@ export function AppointmentForm({
     setLoading(true);
 
     try {
+      if (process.env.NODE_ENV === "development") {
+        setConfirmation({
+          confirm: async (code) => {
+            if (code === "123456") return true;
+            throw new Error("Invalid code");
+          },
+        });
+
+        setData((d) => ({ ...d, phone: normalizedPhone }));
+        setStep("otp");
+        setLoading(false);
+        return;
+      }
+
       const confirm = await sendOTP(normalizedPhone);
       setConfirmation(confirm);
       setData((d) => ({ ...d, phone: normalizedPhone }));
@@ -92,158 +106,163 @@ export function AppointmentForm({
     <>
       <div id="recaptcha-container" />
 
-      {/* FORM STEP */}
-      {step === "form" && (
-        <form
-          onSubmit={handleSendOTP}
-          className="space-y-4 rounded-2xl bg-card p-6 border border-border"
-        >
-          <input
-            placeholder="الاسم الأول"
-            value={data.firstName}
-            onChange={(e) => setData({ ...data, firstName: e.target.value })}
-            className="
+      <div className="w-full md:w-auto min-h-[70vh] md:min-h-0 flex items-center justify-center md:block px-4 md:px-0">
+        <div className="w-full max-w-md md:max-w-none">
+          {/* FORM STEP */}
+          {step === "form" && (
+            <form
+              onSubmit={handleSendOTP}
+              className="
+            space-y-4 rounded-2xl bg-card p-6 border border-border
+            min-h-[350px] md:min-h-0
+            flex flex-col justify-center md:block
+          "
+            >
+              <input
+                placeholder="الاسم الأول"
+                value={data.firstName}
+                onChange={(e) =>
+                  setData({ ...data, firstName: e.target.value })
+                }
+                className="
               w-full rounded-xl border px-4 py-3
-              bg-background
-              text-foreground
+              bg-background text-foreground
               placeholder:text-muted-foreground
               border-border
-              focus:outline-none
-              focus:ring-2
-              focus:ring-primary/40
+              focus:outline-none focus:ring-2 focus:ring-primary/40
             "
-          />
-          <input
-            placeholder="اسم العائلة"
-            value={data.lastName}
-            onChange={(e) => setData({ ...data, lastName: e.target.value })}
-            className="
+              />
+
+              <input
+                placeholder="اسم العائلة"
+                value={data.lastName}
+                onChange={(e) => setData({ ...data, lastName: e.target.value })}
+                className="
               w-full rounded-xl border px-4 py-3
-              bg-background
-              text-foreground
+              bg-background text-foreground
               placeholder:text-muted-foreground
               border-border
-              focus:outline-none
-              focus:ring-2
-              focus:ring-primary/40
-  "
-          />
+              focus:outline-none focus:ring-2 focus:ring-primary/40
+            "
+              />
 
-          <input
-            placeholder="رقم الهاتف"
-            value={data.phone}
-            onChange={(e) => setData({ ...data, phone: e.target.value })}
-            className="
-    w-full rounded-xl border px-4 py-3
-    bg-background
-    text-foreground
-    placeholder:text-muted-foreground
-    border-border
-    focus:outline-none
-    focus:ring-2
-    focus:ring-primary/40
-  "
-          />
+              <input
+                placeholder="رقم الهاتف"
+                value={data.phone}
+                onChange={(e) => setData({ ...data, phone: e.target.value })}
+                className="
+              w-full rounded-xl border px-4 py-3
+              bg-background text-foreground
+              placeholder:text-muted-foreground
+              border-border
+              focus:outline-none focus:ring-2 focus:ring-primary/40
+            "
+              />
 
-          <textarea
-            placeholder="إضافة ملاحظة (اختياري)"
-            value={data.note}
-            onChange={(e) => setData({ ...data, note: e.target.value })}
-            rows={4}
-            className="
-    w-full rounded-xl border px-4 py-3
-    bg-background
-    text-foreground
-    placeholder:text-muted-foreground
-    border-border
-    focus:outline-none
-    focus:ring-2
-    focus:ring-primary/40
-    resize-none
-  "
-          />
-          {message && (
+              <textarea
+                placeholder="إضافة ملاحظة (اختياري)"
+                value={data.note}
+                onChange={(e) => setData({ ...data, note: e.target.value })}
+                rows={4}
+                className="
+              w-full rounded-xl border px-4 py-3
+              bg-background text-foreground
+              placeholder:text-muted-foreground
+              border-border
+              focus:outline-none focus:ring-2 focus:ring-primary/40
+              resize-none
+            "
+              />
+
+              {message && (
+                <div
+                  className={`
+                rounded-xl px-4 py-3 text-sm
+                ${
+                  messageType === "error"
+                    ? "bg-red-500/10 text-red-600"
+                    : messageType === "success"
+                      ? "bg-green-500/10 text-green-600"
+                      : "bg-primary/10 text-primary"
+                }
+              `}
+                >
+                  {message}
+                </div>
+              )}
+
+              {bookingError && (
+                <div className="rounded-xl bg-red-500/10 text-red-600 px-4 py-3 text-sm">
+                  {bookingError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={!canSubmit || loading}
+                className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
+              >
+                {loading ? "جارٍ إرسال الرمز..." : "تأكيد الموعد"}
+              </button>
+            </form>
+          )}
+
+          {/* OTP STEP */}
+          {step === "otp" && (
             <div
-              className={`
-      rounded-xl px-4 py-3 text-sm
-      ${
-        messageType === "error"
-          ? "bg-red-500/10 text-red-600"
-          : messageType === "success"
-            ? "bg-green-500/10 text-green-600"
-            : "bg-primary/10 text-primary"
-      }
-    `}
+              className="
+            space-y-4 rounded-2xl bg-card p-6 border border-border
+            min-h-[350px] md:min-h-0
+            flex flex-col justify-center md:block
+          "
             >
-              {message}
+              <input
+                placeholder="Enter verification code"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+                className="
+              w-full rounded-xl border px-4 py-3
+              bg-background text-foreground
+              placeholder:text-muted-foreground
+              border-border
+              focus:outline-none focus:ring-2 focus:ring-primary/40
+            "
+              />
+
+              {message && (
+                <div
+                  className={`
+                rounded-xl px-4 py-3 text-sm
+                ${
+                  messageType === "error"
+                    ? "bg-red-500/10 text-red-600"
+                    : messageType === "success"
+                      ? "bg-green-500/10 text-green-600"
+                      : "bg-primary/10 text-primary"
+                }
+              `}
+                >
+                  {message}
+                </div>
+              )}
+
+              {bookingError && (
+                <div className="rounded-xl bg-red-500/10 text-red-600 px-4 py-3 text-sm">
+                  {bookingError}
+                </div>
+              )}
+
+              <button
+                onClick={handleVerifyOTP}
+                disabled={loading}
+                className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
+              >
+                {loading ? "جارٍ التحقق..." : "التحقق وحفظ الموعد"}
+              </button>
             </div>
           )}
-          {bookingError && (
-            <div className="rounded-xl bg-red-500/10 text-red-600 px-4 py-3 text-sm">
-              {bookingError}
-            </div>
-          )}
-          <button
-            type="submit"
-            disabled={!canSubmit || loading}
-            className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
-          >
-          {loading ? "جارٍ إرسال الرمز..." : "تأكيد الموعد"}
-          </button>
-        </form>
-      )}
-
-      {/* OTP STEP */}
-      {step === "otp" && (
-        <div className="space-y-4 rounded-2xl bg-card p-6 border border-border">
-          <input
-            placeholder="Enter verification code"
-            value={otp}
-            onChange={(e) => setOtp(e.target.value)}
-            className="
-    w-full rounded-xl border px-4 py-3
-    bg-background
-    text-foreground
-    placeholder:text-muted-foreground
-    border-border
-    focus:outline-none
-    focus:ring-2
-    focus:ring-primary/40
-  "
-          />
-
-          {message && (
-            <div
-              className={`
-      rounded-xl px-4 py-3 text-sm
-      ${
-        messageType === "error"
-          ? "bg-red-500/10 text-red-600"
-          : messageType === "success"
-            ? "bg-green-500/10 text-green-600"
-            : "bg-primary/10 text-primary"
-      }
-    `}
-            >
-              {message}
-            </div>
-          )}
-
-          {bookingError && (
-            <div className="rounded-xl bg-red-500/10 text-red-600 px-4 py-3 text-sm">
-              {bookingError}
-            </div>
-          )}
-
-          <button
-            onClick={handleVerifyOTP}
-            disabled={loading}
-            className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
-          >
-           {loading ? "جارٍ التحقق..." : "التحقق وحفظ الموعد"}
-          </button>
         </div>
-      )}
+      </div>
     </>
   );
 }

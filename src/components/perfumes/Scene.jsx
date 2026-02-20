@@ -1,7 +1,7 @@
 "use client";
 
 import { Canvas } from "@react-three/fiber";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import {
   Environment,
   Float,
@@ -12,12 +12,20 @@ import {
 import PerfumeModel from "./PerfumeModel";
 import Lights from "./Lights";
 
-export default function Scene() {
+export default function Scene({ onReady }) {
   const [clicked, setClicked] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  // When model is loaded → notify parent
+  useEffect(() => {
+    if (loaded && onReady) {
+      onReady();
+    }
+  }, [loaded, onReady]);
 
   return (
     <Canvas
-     dpr={[1, 1.5]}       
+      dpr={[1, 1.5]}
       camera={{ position: [0, 0, 10], fov: 45 }}
       className="absolute inset-0"
     >
@@ -27,7 +35,7 @@ export default function Scene() {
         <Lights />
 
         <Float speed={2} rotationIntensity={0.2} floatIntensity={0.4}>
-          <PerfumeModel clicked={clicked} setClicked={setClicked} />
+          <PerfumeModel clicked={clicked} setClicked={setClicked}  onLoaded={() => setLoaded(true)} />
         </Float>
 
         <ContactShadows

@@ -5,10 +5,16 @@ import { useRef, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
-export default function PerfumeModel({ clicked, setClicked }) {
+export default function PerfumeModel({ clicked, setClicked ,onLoaded}) {
   const { scene } = useGLTF("/models/perfume.glb");
   const logoTexture = useTexture("/soulogoperfume.PNG");
   const ref = useRef();
+
+    useEffect(() => {
+    if (scene && onLoaded) {
+      onLoaded();
+    }
+  }, [scene, onLoaded]);
 
   // Improve materials brightness
   useEffect(() => {
