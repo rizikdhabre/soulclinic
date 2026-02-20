@@ -16,7 +16,6 @@ export default function Scene({ onReady }) {
   const [clicked, setClicked] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
-  // When model is loaded → notify parent
   useEffect(() => {
     if (loaded && onReady) {
       onReady();

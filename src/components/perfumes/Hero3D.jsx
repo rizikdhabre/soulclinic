@@ -7,9 +7,15 @@ const Scene = dynamic(() => import("./Scene"), {
   ssr: false,
 });
 
-export default function Hero3D() {
+export default function Hero3D({ onIntroFinished }) {
   const [isScrolled, setIsScrolled] = useState(false);
   const [sceneReady, setSceneReady] = useState(false);
+
+  useEffect(() => {
+    if (sceneReady && onIntroFinished) {
+      onIntroFinished();
+    }
+  }, [sceneReady, onIntroFinished]);
 
   useEffect(() => {
     const handleScroll = () => {

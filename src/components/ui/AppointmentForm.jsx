@@ -90,18 +90,6 @@ export function AppointmentForm({
     }
   };
 
-  if (step === "success") {
-    return (
-      <div className="text-center py-12">
-        <Check className="mx-auto mb-4 text-green-500 w-8 h-8" />
-        <h3 className="text-lg font-semibold">Appointment Confirmed</h3>
-        <p className="text-muted-foreground mt-2">
-          {format(selectedDate, "PPP")} at {selectedTime}
-        </p>
-      </div>
-    );
-  }
-
   return (
     <>
       <div id="recaptcha-container" />
@@ -259,6 +247,23 @@ export function AppointmentForm({
               >
                 {loading ? "جارٍ التحقق..." : "التحقق وحفظ الموعد"}
               </button>
+            </div>
+          )}
+
+          {/* SUCCESS STEP */}
+          {step === "success" && (
+            <div
+              className="
+            space-y-4 rounded-2xl bg-card p-6 border border-border
+            min-h-[350px] md:min-h-0
+            flex flex-col justify-center items-center
+          "
+            >
+              <Check className="mb-4 text-green-500 w-8 h-8" />
+              <h3 className="text-lg font-semibold">تم الحجز بنجاح</h3>
+              <p className="text-muted-foreground mt-2 text-center">
+                {format(selectedDate, "PPP")} at {selectedTime}
+              </p>
             </div>
           )}
         </div>
