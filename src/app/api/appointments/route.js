@@ -238,12 +238,23 @@ export async function POST(req) {
       return NextResponse.json({ error: "Missing fields" }, { status: 400 });
     }
 
+    const normalizedPhone = normalizeIsraeliPhone(phone) || phone;
+
+    const usersCollection = await getCollection("usersData");
+    const existingUser = await usersCollection.findOne(
+      { phone: normalizedPhone },
+      { projection: { firstName: 1, lastName: 1 } },
+    );
+
+    const resolvedFirstName = existingUser?.firstName || firstName;
+    const resolvedLastName = existingUser?.lastName || lastName;
+
     const appointmentsCollection = await getCollection("appointments");
     const appointmentId = new ObjectId();
     const appointmentData = {
       _id: appointmentId,
-      firstName,
-      lastName,
+      firstName: resolvedFirstName,
+      lastName: resolvedLastName,
       phone,
       time,
       duration,
