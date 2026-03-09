@@ -247,6 +247,7 @@ export async function POST(req) {
       phone,
       time,
       duration,
+      reminderSent: false,
       ...(cupsCount ? { cupsCount } : {}),
     };
 

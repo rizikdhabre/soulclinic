@@ -25,6 +25,7 @@ export function AppointmentForm({
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
+  const [loadingStage, setLoadingStage] = useState(null); // "send" | "verify" | null
 
   const canSubmit =
     selectedDate &&
@@ -44,6 +45,8 @@ export function AppointmentForm({
       return;
     }
 
+    setLoadingStage("send");
+
     setLoading(true);
 
     try {
@@ -58,6 +61,7 @@ export function AppointmentForm({
         setData((d) => ({ ...d, phone: normalizedPhone }));
         setStep("otp");
         setLoading(false);
+        setLoadingStage(null);
         return;
       }
 
@@ -70,12 +74,14 @@ export function AppointmentForm({
       setMessage("Too many attempts. Please wait a bit and try again.");
     } finally {
       setLoading(false);
+      setLoadingStage(null);
     }
   };
 
   const handleVerifyOTP = async () => {
     if (!otp || !confirmation) return;
 
+    setLoadingStage("verify");
     setLoading(true);
 
     try {
@@ -87,12 +93,37 @@ export function AppointmentForm({
       setMessage("Invalid verification code. Please try again.");
     } finally {
       setLoading(false);
+      setLoadingStage(null);
     }
   };
 
   return (
     <>
       <div id="recaptcha-container" />
+
+      {loading && loadingStage === "send" && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            dir="rtl"
+            className="w-full max-w-md rounded-2xl bg-card border border-border p-6 shadow-xl"
+          >
+            <div className="text-base font-semibold">
+              انتظر، نحن نرسل لك رمزًا
+            </div>
+            <div className="mt-2 text-sm text-muted-foreground">
+              لا تغادر الصفحة حتى تقوم بإدخال الرمز وإتمام التأكيد.
+            </div>
+
+            <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              <div className="h-full w-1/2 animate-pulse bg-primary" />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="w-full md:w-auto min-h-[70vh] md:min-h-0 flex items-center justify-center md:block px-4 md:px-0">
         <div className="w-full max-w-md md:max-w-none">
