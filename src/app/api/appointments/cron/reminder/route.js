@@ -3,8 +3,8 @@ import { sendWhatsAppTemplate } from "@/lib/whatsapp";
 import { normalizeIsraeliPhone } from "@/lib/phone";
 
 const TZ = "Asia/Jerusalem";
-const WINDOW_MINUTES = 5;  
-const REMINDER_HOURS = 2;  // 2 hours before
+const WINDOW_MINUTES = 5;
+const REMINDER_HOURS = 2; // 2 hours before
 
 function getIsraelNow(req) {
   // Dev testing: allow ?testTime=2026-02-24T08:35:00
@@ -13,7 +13,6 @@ function getIsraelNow(req) {
   const base = testTime ? new Date(testTime) : new Date();
   return new Date(base.toLocaleString("en-US", { timeZone: TZ }));
 }
-
 
 function buildIsraelDateTime(dateStr, timeStr) {
   const [yyyy, mm, dd] = (dateStr || "").split("-").map(Number);
@@ -39,15 +38,21 @@ export async function GET(req) {
     const israelNow = getIsraelNow(req);
 
     // window: now+2h -> now+2h+5m
-    const targetStart = new Date(israelNow.getTime() + REMINDER_HOURS * 60 * 60 * 1000);
-    const targetEnd = new Date(targetStart.getTime() + WINDOW_MINUTES * 60 * 1000);
+
+    const targetStart = new Date(
+      israelNow.getTime() + REMINDER_HOURS * 60 * 60 * 1000 - 60 * 1000,
+    );
+
+    const targetEnd = new Date(
+      targetStart.getTime() + WINDOW_MINUTES * 60 * 1000,
+    );
     const date = targetStart.toISOString().split("T")[0]; // "YYYY-MM-DD"
 
     const appointmentsCollection = await getCollection("appointments");
 
     const day = await appointmentsCollection.findOne(
       { date },
-      { projection: { appointments: 1 } }
+      { projection: { appointments: 1 } },
     );
 
     if (!day?.appointments?.length) {
@@ -55,7 +60,10 @@ export async function GET(req) {
         success: true,
         date,
         sent: 0,
-        window: { from: targetStart.toISOString(), to: targetEnd.toISOString() },
+        window: {
+          from: targetStart.toISOString(),
+          to: targetEnd.toISOString(),
+        },
       });
     }
 
@@ -84,9 +92,12 @@ export async function GET(req) {
         } else {
           await sendWhatsAppTemplate({
             to: toWhatsApp,
-            templateSid: process.env.TWILIO_TEMPLATE_APPOINTMENT_CUSTUMER_REMINDER,
+            templateSid:
+              process.env.TWILIO_TEMPLATE_APPOINTMENT_CUSTUMER_REMINDER,
             variables: {
-              1: `${apt.firstName || ""} ${apt.lastName || ""}`.trim() || "عزيزي الزبون",
+              1:
+                `${apt.firstName || ""} ${apt.lastName || ""}`.trim() ||
+                "عزيزي الزبون",
               2: date,
               3: apt.time,
             },
@@ -94,8 +105,12 @@ export async function GET(req) {
         }
 
         await appointmentsCollection.updateOne(
-          { date, "appointments._id": apt._id, "appointments.reminderSent": false },
-          { $set: { "appointments.$.reminderSent": true } }
+          {
+            date,
+            "appointments._id": apt._id,
+            "appointments.reminderSent": false,
+          },
+          { $set: { "appointments.$.reminderSent": true } },
         );
 
         sent++;
