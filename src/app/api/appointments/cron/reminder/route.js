@@ -3,7 +3,7 @@ import { sendWhatsAppTemplate } from "@/lib/whatsapp";
 import { normalizeIsraeliPhone } from "@/lib/phone";
 
 const TZ = "Asia/Jerusalem";
-const WINDOW_MINUTES = 5;  // run every 5 minutes
+const WINDOW_MINUTES = 5;  
 const REMINDER_HOURS = 2;  // 2 hours before
 
 function getIsraelNow(req) {
