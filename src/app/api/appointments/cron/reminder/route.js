@@ -33,11 +33,9 @@ export async function GET(req) {
     }
 
     const { searchParams } = new URL(req.url);
-    const dryRun = searchParams.get("dryRun") === "1"; // dev: don’t send WA
+    const dryRun = searchParams.get("dryRun") === "1";
 
     const israelNow = getIsraelNow(req);
-
-    // window: now+2h -> now+2h+5m
 
     const targetStart = new Date(
       israelNow.getTime() + REMINDER_HOURS * 60 * 60 * 1000 - 60 * 1000,
@@ -47,6 +45,14 @@ export async function GET(req) {
       targetStart.getTime() + WINDOW_MINUTES * 60 * 1000,
     );
     const date = targetStart.toISOString().split("T")[0]; // "YYYY-MM-DD"
+    console.log(
+      "[cron-reminder] nowIsrael=%s targetStart=%s targetEnd=%s dateUTC=%s req=%s",
+      israelNow.toString(),
+      targetStart.toString(),
+      targetEnd.toString(),
+      date,
+      req.url,
+    );
 
     const appointmentsCollection = await getCollection("appointments");
 
