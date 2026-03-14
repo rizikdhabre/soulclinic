@@ -72,6 +72,8 @@ export async function GET(req) {
       { projection: { appointments: 1 } },
     );
 
+    console.log(`This is the Day ${JSON.stringify(day)}`);
+
     if (!day?.appointments?.length) {
       return Response.json({
         success: true,
@@ -88,9 +90,15 @@ export async function GET(req) {
     const debug = [];
 
     for (const apt of day.appointments) {
+
+      console.log(`Checking appointment ${apt._id} at ${apt.time} for reminder...`);
       if (apt?.reminderSent === true) continue;
       const aptDateTime = buildIsraelDateTime(date, apt.time);
       if (!aptDateTime) continue;
+
+      console.log(`Appointment ${apt._id} datetime is ${aptDateTime.toISOString()}, comparing with target window from ${targetStart.toISOString()} to ${targetEnd.toISOString()}`);
+
+      
 
       if (aptDateTime >= targetStart && aptDateTime < targetEnd) {
         const phone = normalizeIsraeliPhone(apt.phone);
