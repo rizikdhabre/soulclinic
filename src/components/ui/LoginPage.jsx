@@ -7,6 +7,8 @@ import { Phone, ShieldCheck, KeyRound } from "lucide-react";
 import { normalizeIsraeliPhone } from "@/lib/phone";
 import { sendOTP } from "@/lib/phoneAuth";
 
+const IS_DEV = process.env.NODE_ENV === "development";
+
 export default function LoginPage() {
   const router = useRouter();
 
@@ -19,7 +21,7 @@ export default function LoginPage() {
 
   const normalizedPhone = useMemo(
     () => normalizeIsraeliPhone(rawPhone),
-    [rawPhone]
+    [rawPhone],
   );
 
   const canSend = !!normalizedPhone && !loading;
@@ -34,6 +36,12 @@ export default function LoginPage() {
 
     try {
       setLoading(true);
+
+      if (IS_DEV) {
+        setStep("otp");
+        return;
+      }
+
       const confirmation = await sendOTP(normalizedPhone);
       window.__otpConfirmation = confirmation;
       setStep("otp");
@@ -50,6 +58,18 @@ export default function LoginPage() {
     try {
       setLoading(true);
 
+      if (IS_DEV) {
+        if (otp.trim() === "123456") {
+          router.push(
+            `/userAppointments?phone=${encodeURIComponent(normalizedPhone)}`,
+          );
+          return;
+        } else {
+          setError("رمز غير صحيح. (في وضع التطوير الرمز هو 123456)");
+          return;
+        }
+      }
+
       const confirmation = window.__otpConfirmation;
       if (!confirmation) {
         setError("جلسة التحقق انتهت. أعد إرسال الرمز.");
@@ -58,8 +78,9 @@ export default function LoginPage() {
       }
 
       await confirmation.confirm(otp.trim());
-      router.push(`/userAppointments?phone=${encodeURIComponent(normalizedPhone)}`);
-
+      router.push(
+        `/userAppointments?phone=${encodeURIComponent(normalizedPhone)}`,
+      );
     } catch (e) {
       console.error(e);
       setError("رمز غير صحيح. حاول مرة أخرى.");
@@ -71,7 +92,9 @@ export default function LoginPage() {
   return (
     <div dir="rtl" className="w-full">
       <div className="text-center mb-8">
-        <h2 className="heading-section text-foreground mb-2">استخراج مواعيدك</h2>
+        <h2 className="heading-section text-foreground mb-2">
+          استخراج مواعيدك
+        </h2>
         <p className="text-subtle">
           أدخل رقم الهاتف، ثم أدخل رمز التحقق للوصول إلى مواعيدك.
         </p>
@@ -142,7 +165,9 @@ export default function LoginPage() {
               <p className="text-subtle">
                 تم إرسال رمز إلى رقمك. أدخل الرمز للمتابعة.
               </p>
-              <p className="mt-1 text-xs text-foreground/60">{normalizedPhone}</p>
+              <p className="mt-1 text-xs text-foreground/60">
+                {normalizedPhone}
+              </p>
             </div>
 
             <div>
