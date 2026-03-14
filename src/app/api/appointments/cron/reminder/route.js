@@ -37,6 +37,24 @@ export async function GET(req) {
 
     const israelNow = getIsraelNow(req);
 
+    const sysNow = new Date();
+    console.log(
+      "[cron-reminder][tz-check] sysNowISO=%s sysNowToString=%s israelFmt=%s localeWithTZ=%s",
+      sysNow.toISOString(),
+      sysNow.toString(),
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: TZ,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }).format(sysNow),
+      sysNow.toLocaleString("en-US", { timeZone: TZ }),
+    );
+
     const targetStart = new Date(
       israelNow.getTime() + REMINDER_HOURS * 60 * 60 * 1000 - 60 * 1000,
     );
@@ -45,14 +63,7 @@ export async function GET(req) {
       targetStart.getTime() + WINDOW_MINUTES * 60 * 1000,
     );
     const date = targetStart.toISOString().split("T")[0]; // "YYYY-MM-DD"
-    console.log(
-      "[cron-reminder] nowIsrael=%s targetStart=%s targetEnd=%s dateUTC=%s req=%s",
-      israelNow.toString(),
-      targetStart.toString(),
-      targetEnd.toString(),
-      date,
-      req.url,
-    );
+    console.log("[cron-reminder][date-check] dateUTC=%s", date);
 
     const appointmentsCollection = await getCollection("appointments");
 
