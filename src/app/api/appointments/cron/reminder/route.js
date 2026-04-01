@@ -82,29 +82,12 @@ export async function GET(req) {
     const queryDate =
       targetMinutes >= 1440 ? getNextDate(israel.date) : israel.date;
 
-    console.log(
-      "[cron-reminder] israelDate=%s israelTime=%s:%s targetMin=%d window=[%s..%s] queryDate=%s dryRun=%s",
-      israel.date,
-      String(israel.hour).padStart(2, "0"),
-      String(israel.minute).padStart(2, "0"),
-      targetMinutes,
-      minutesToTime(windowStart),
-      minutesToTime(windowEnd),
-      queryDate,
-      dryRun,
-    );
 
     const appointmentsCollection = await getCollection("appointments");
 
     const day = await appointmentsCollection.findOne(
       { date: queryDate },
       { projection: { appointments: 1 } },
-    );
-
-    console.log(
-      "[cron-reminder] found=%d appointments for date=%s",
-      day?.appointments?.length || 0,
-      queryDate,
     );
 
     if (!day?.appointments?.length) {
@@ -138,15 +121,6 @@ export async function GET(req) {
       const isMatch =
         compareMinutes >= windowStart && compareMinutes < windowEnd;
 
-      console.log(
-        "[cron-reminder][check] aptId=%s time=%s aptMin=%d window=[%d..%d] match=%s",
-        String(apt._id),
-        apt.time,
-        aptMinutes,
-        windowStart,
-        windowEnd,
-        isMatch,
-      );
 
       if (isMatch) {
         const phone = normalizeIsraeliPhone(apt.phone);
@@ -167,12 +141,6 @@ export async function GET(req) {
         }
 
         try {
-          console.log(
-            "[cron-reminder][send] to=%s name=%s",
-            toWhatsApp,
-            name,
-          );
-
           await sendWhatsAppTemplate({
             to: toWhatsApp,
             templateSid:
@@ -191,7 +159,6 @@ export async function GET(req) {
           );
 
           sent++;
-          console.log("[cron-reminder][send] success to=%s", toWhatsApp);
         } catch (e) {
           failed++;
           errors.push({

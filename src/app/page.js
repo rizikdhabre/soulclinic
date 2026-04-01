@@ -9,6 +9,7 @@ import ParticleSphere from "@/components/ui/ParticleSphere";
 import axios from "axios";
 import { useEffect, useState } from "react";
 import NeonLoader from "@/components/ui/loading";
+import Error from "@/components/ui/Error"
 
 const HomePage = () => {
   const [loadingImg, setLoadingImg] = useState(true);
@@ -55,6 +56,7 @@ const HomePage = () => {
 
   return (
     <div className="min-h-screen">
+        <Error />
       {/* Hero Section */}
       <section className="relative min-h-screen flex items-center justify-center overflow-hidden wellness-gradient">
         {/* Floating Elements */}
