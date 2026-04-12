@@ -56,7 +56,7 @@ const HomePage = () => {
 
   return (
     <div className="min-h-screen">
-        <Error />
+        {/* <Error /> */}
       {/* Hero Section */}
       <section className="relative min-h-screen flex items-center justify-center overflow-hidden wellness-gradient">
         {/* Floating Elements */}
