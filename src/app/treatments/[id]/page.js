@@ -6,7 +6,7 @@ import NeonLoader from "@/components/ui/loading";
 export default function TreatmentDetails() {
   const { id } = useParams();
   const router = useRouter();
-  const HUJAMA_ID = "6971f64c9b98d43b59cbb4a0";
+  const HUJAMA_ID = "69dbaf697f07ea94b798a89f";
   const isHujama = id === HUJAMA_ID;
   const [loading, setLoading] = useState(true);
 

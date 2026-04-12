@@ -62,16 +62,16 @@ export default function UsersAdminPage() {
       ? 0
       : Math.round((attendedCount / completedCount) * 100);
 
-
-     const missedAppointments = users.flatMap((u) =>
-  (u.appointments || [])
-    .filter((a) => a.date <= today && a.attended === false)
-    .map((a) => ({
-      fullName: `${u.firstName} ${u.lastName}`,
-      date: a.date,
-      time: a.time,
-    }))
-);   
+  const missedAppointments = users.flatMap((u) =>
+    (u.appointments || [])
+      .filter((a) => a.date <= today && a.attended === false)
+      .map((a) => ({
+        fullName: `${u.firstName} ${u.lastName}`,
+        date: a.date,
+        time: a.time,
+        appointmentId: a._id,
+      })),
+  );
   /* ---------------- HANDLERS ---------------- */
 
   const handleViewAppointments = (user) => {
@@ -198,6 +198,7 @@ export default function UsersAdminPage() {
           missed={notAttendedCount}
           upcoming={futureAppointments.length}
           missedAppointments={missedAppointments}
+          handleToggleAttendance={handleToggleAttendance}
         />
       </div>
 
