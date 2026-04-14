@@ -47,21 +47,32 @@ export async function GET(req) {
     const offset = Number(searchParams.get("offset") || 0);
     const limit = Number(searchParams.get("limit") || 20);
 
-    if (type !== "attended") {
+    if (type !== "attended" && type !== "upcoming") {
       return NextResponse.json({ items: [], hasMore: false });
     }
 
     const usersCollection = await getCollection("usersData");
     const today = new Date().toISOString().split("T")[0];
 
+    const matchStage =
+      type === "upcoming"
+        ? {
+            "appointments.attended": { $ne: true },
+            "appointments.date": { $gte: today },
+          }
+        : {
+            "appointments.attended": true,
+            "appointments.date": { $lte: today },
+          };
+
+    const sortStage =
+      type === "upcoming"
+        ? { date: 1, time: 1 }
+        : { date: -1, time: -1 };
+
     const pipeline = [
       { $unwind: "$appointments" },
-      {
-        $match: {
-          "appointments.attended": true,
-          "appointments.date": { $lte: today },
-        },
-      },
+      { $match: matchStage },
       {
         $project: {
           _id: 0,
@@ -76,7 +87,7 @@ export async function GET(req) {
           },
         },
       },
-      { $sort: { date: -1, time: -1 } },
+      { $sort: sortStage },
       { $skip: offset },
       { $limit: limit + 1 },
     ];
