@@ -10,12 +10,13 @@ import axios from "axios";
 import { useEffect, useState } from "react";
 import NeonLoader from "@/components/ui/loading";
 import Error from "@/components/ui/Error"
+import HijriCuppingTable from "@/components/ui/HijriCuppingTable";
+
+
 
 const HomePage = () => {
   const [loadingImg, setLoadingImg] = useState(true);
   const [heroImage, setHeroImage] = useState(null);
-  const [gregorianDate, setGregorianDate] = useState("");
-  const [hijriDate, setHijriDate] = useState("");
   const [bubblePhase, setBubblePhase] = useState("hero");
 
   useEffect(() => {
@@ -24,20 +25,6 @@ const HomePage = () => {
     }, 5000);
 
     return () => clearTimeout(timer);
-  }, []);
-  useEffect(() => {
-    const now = new Date();
-    const yesterday = new Date(now);
-    yesterday.setDate(now.getDate() - 1);
-    const gregorian = now.toLocaleDateString("en-GB");
-    const hijri = new Intl.DateTimeFormat("ar-SA-u-ca-islamic-nu-latn", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-      timeZone: "Asia/Jerusalem",
-    }).format(yesterday);
-    setGregorianDate(`${gregorian} ميلادي`);
-    setHijriDate(`${hijri} `);
   }, []);
   useEffect(() => {
     const fetchHeroImage = async () => {
@@ -84,6 +71,7 @@ const HomePage = () => {
               transition={{ duration: 0.6 }}
               className="w-full relative mb-10"
             >
+
               <div className="relative w-full h-[45vh] md:h-[70vh] overflow-hidden">
                 {/* Loader */}
                 {(loadingImg || !heroImage) && (
@@ -235,18 +223,10 @@ const HomePage = () => {
               </Button>
             </motion.div>
           </div>
-          <p className="text-s text-center tracking-widest text-muted-foreground mt-5">
-            اليوم
-          </p>
-          <div className="mt-2 text-center">
-            <p className="text-sm md:text-base text-muted-foreground tracking-wide">
-              {gregorianDate}
-            </p>
-            <p className="text-sm md:text-base text-muted-foreground tracking-wide">
-              {hijriDate}
-            </p>
-          </div>
+          <HijriCuppingTable />
         </div>
+
+
 
         {/* Scroll Indicator */}
         {/* <motion.div
