@@ -59,7 +59,7 @@ export default function HijriCuppingTable() {
       }
 
       const displayDate = new Date(currentDate);
-      displayDate.setDate(currentDate.getDate() + 1);
+      displayDate.setDate(currentDate.getDate() );
 
       results.push({
         hijri: hijriLabelFormatter.format(currentDate),
@@ -73,8 +73,7 @@ export default function HijriCuppingTable() {
   return (
     <div className="mt-10 w-full max-w-2xl mx-auto px-4" dir="rtl">
       <h2 className="text-center text-xl md:text-2xl font-semibold mb-4 text-foreground">
-        أفضل أيام الحجامة هي الأيام الفردية في الشهر الهجري: 17، 19، 21
-      </h2>
+        تواريخ الحجامة السُنية للشهر الهجري      </h2>
 
       <div className="overflow-hidden rounded-2xl border border-muted bg-background/70 backdrop-blur-sm shadow-sm">
         <table className="w-full text-center">
