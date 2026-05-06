@@ -25,3 +25,11 @@ export function normalizeIsraeliPhone(input) {
 
   return israeliMobileRegex.test(normalized) ? normalized : null;
 }
+
+export function getWhatsAppLink(input) {
+  const normalized = normalizeIsraeliPhone(input);
+
+  if (!normalized) return "https://wa.me/";
+
+  return `https://wa.me/${normalized.slice(1)}`;
+}

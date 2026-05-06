@@ -12,7 +12,6 @@ export const AttendanceChart = ({
   attended,
   missed,
   upcoming,
-  missedAppointments,
   handleToggleAttendance,
 }) => {
   const [showMissed, setShowMissed] = useState(false);
@@ -118,7 +117,7 @@ export const AttendanceChart = ({
             </div>
 
             <MissedAppointmentsList
-              missedAppointments={missedAppointments}
+              isOpen={showMissed}
               onToggleAttendance={handleToggleAttendance}
             />
           </div>

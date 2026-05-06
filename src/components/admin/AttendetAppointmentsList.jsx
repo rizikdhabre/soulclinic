@@ -2,6 +2,8 @@
 
 import axios from "axios";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getWhatsAppLink } from "@/lib/phone";
+import { mergeUniqueAppointments } from "@/lib/utils";
 
 const PAGE_FETCH = 20;
 const PAGE_SHOW = 10;
@@ -14,23 +16,25 @@ export default function AttendetAppointmentsList({ isOpen }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const getWhatsAppLink = (phone) => {
-    const digits = String(phone || "").replace(/\D/g, "");
-    const normalized = digits.startsWith("0")
-      ? `972${digits.slice(1)}`
-      : digits;
-
-    return `https://wa.me/${normalized}`;
-  };
-
   const listRef = useRef(null);
+  const loadingRef = useRef(false);
+  const hasMoreRef = useRef(true);
+  const offsetRef = useRef(0);
+  const requestedOffsetsRef = useRef(new Set());
 
   const visibleItems = useMemo(() => {
     return items.slice(0, visibleCount);
   }, [items, visibleCount]);
 
   const fetchBatch = async (nextOffset) => {
-    if (loading || !hasMore) return;
+    const requestKey = String(nextOffset);
+
+    if (loadingRef.current || !hasMoreRef.current) return;
+    if (requestedOffsetsRef.current.has(requestKey)) return;
+
+    loadingRef.current = true;
+    requestedOffsetsRef.current.add(requestKey);
+    let completed = false;
 
     try {
       setLoading(true);
@@ -47,17 +51,32 @@ export default function AttendetAppointmentsList({ isOpen }) {
       const data = res.data;
       const newItems = Array.isArray(data.items) ? data.items : [];
 
-      setItems((prev) => [...prev, ...newItems]);
-      setOffset(nextOffset + newItems.length);
+      setItems((prev) => mergeUniqueAppointments(prev, newItems));
+
+      const nextServerOffset = nextOffset + newItems.length;
+      offsetRef.current = nextServerOffset;
+      setOffset(nextServerOffset);
+
+      hasMoreRef.current = Boolean(data.hasMore);
       setHasMore(Boolean(data.hasMore));
+      completed = true;
     } catch (error) {
       setError("تعذر تحميل البيانات");
     } finally {
+      if (!completed) {
+        requestedOffsetsRef.current.delete(requestKey);
+      }
+
+      loadingRef.current = false;
       setLoading(false);
     }
   };
 
   const resetAndLoad = async () => {
+    requestedOffsetsRef.current.clear();
+    loadingRef.current = false;
+    hasMoreRef.current = true;
+    offsetRef.current = 0;
     setItems([]);
     setVisibleCount(0);
     setOffset(0);
@@ -84,8 +103,8 @@ export default function AttendetAppointmentsList({ isOpen }) {
 
     const remainingAfterShow = items.length - nextVisible;
 
-    if (remainingAfterShow < PAGE_SHOW && hasMore && !loading) {
-      await fetchBatch(offset);
+    if (remainingAfterShow < PAGE_SHOW && hasMoreRef.current && !loadingRef.current) {
+      await fetchBatch(offsetRef.current);
     }
   };
 
@@ -106,8 +125,8 @@ export default function AttendetAppointmentsList({ isOpen }) {
         return;
       }
 
-      if (hasMore) {
-        fetchBatch(offset);
+      if (hasMoreRef.current) {
+        fetchBatch(offsetRef.current);
       }
     };
 

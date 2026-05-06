@@ -47,7 +47,7 @@ export async function GET(req) {
     const offset = Number(searchParams.get("offset") || 0);
     const limit = Number(searchParams.get("limit") || 20);
 
-    if (type !== "attended" && type !== "upcoming") {
+    if (type !== "attended" && type !== "upcoming" && type !== "missed") {
       return NextResponse.json({ items: [], hasMore: false });
     }
 
@@ -60,6 +60,11 @@ export async function GET(req) {
             "appointments.attended": { $ne: true },
             "appointments.date": { $gte: today },
           }
+        : type === "missed"
+          ? {
+              "appointments.attended": false,
+              "appointments.date": { $lte: today },
+            }
         : {
             "appointments.attended": true,
             "appointments.date": { $lte: today },
@@ -67,8 +72,8 @@ export async function GET(req) {
 
     const sortStage =
       type === "upcoming"
-        ? { date: 1, time: 1 }
-        : { date: -1, time: -1 };
+        ? { date: 1, time: 1, appointmentId: 1 }
+        : { date: -1, time: -1, appointmentId: -1 };
 
     const pipeline = [
       { $unwind: "$appointments" },

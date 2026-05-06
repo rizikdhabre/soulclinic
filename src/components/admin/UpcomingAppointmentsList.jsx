@@ -2,6 +2,8 @@
 
 import axios from "axios";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getWhatsAppLink } from "@/lib/phone";
+import { mergeUniqueAppointments } from "@/lib/utils";
 
 const PAGE_FETCH = 20;
 const PAGE_SHOW = 10;
@@ -15,13 +17,24 @@ export default function UpcomingAppointmentsList({ isOpen }) {
   const [error, setError] = useState("");
 
   const listRef = useRef(null);
+  const loadingRef = useRef(false);
+  const hasMoreRef = useRef(true);
+  const offsetRef = useRef(0);
+  const requestedOffsetsRef = useRef(new Set());
 
   const visibleItems = useMemo(() => {
     return items.slice(0, visibleCount);
   }, [items, visibleCount]);
 
   const fetchBatch = async (nextOffset) => {
-    if (loading || !hasMore) return;
+    const requestKey = String(nextOffset);
+
+    if (loadingRef.current || !hasMoreRef.current) return;
+    if (requestedOffsetsRef.current.has(requestKey)) return;
+
+    loadingRef.current = true;
+    requestedOffsetsRef.current.add(requestKey);
+    let completed = false;
 
     try {
       setLoading(true);
@@ -38,17 +51,32 @@ export default function UpcomingAppointmentsList({ isOpen }) {
       const data = res.data;
       const newItems = Array.isArray(data.items) ? data.items : [];
 
-      setItems((prev) => [...prev, ...newItems]);
-      setOffset(nextOffset + newItems.length);
+      setItems((prev) => mergeUniqueAppointments(prev, newItems));
+
+      const nextServerOffset = nextOffset + newItems.length;
+      offsetRef.current = nextServerOffset;
+      setOffset(nextServerOffset);
+
+      hasMoreRef.current = Boolean(data.hasMore);
       setHasMore(Boolean(data.hasMore));
+      completed = true;
     } catch (error) {
       setError("تعذر تحميل المواعيد القادمة");
     } finally {
+      if (!completed) {
+        requestedOffsetsRef.current.delete(requestKey);
+      }
+
+      loadingRef.current = false;
       setLoading(false);
     }
   };
 
   const resetAndLoad = async () => {
+    requestedOffsetsRef.current.clear();
+    loadingRef.current = false;
+    hasMoreRef.current = true;
+    offsetRef.current = 0;
     setItems([]);
     setVisibleCount(0);
     setOffset(0);
@@ -75,8 +103,8 @@ export default function UpcomingAppointmentsList({ isOpen }) {
 
     const remainingAfterShow = items.length - nextVisible;
 
-    if (remainingAfterShow < PAGE_SHOW && hasMore && !loading) {
-      await fetchBatch(offset);
+    if (remainingAfterShow < PAGE_SHOW && hasMoreRef.current && !loadingRef.current) {
+      await fetchBatch(offsetRef.current);
     }
   };
 
@@ -97,8 +125,8 @@ export default function UpcomingAppointmentsList({ isOpen }) {
         return;
       }
 
-      if (hasMore) {
-        fetchBatch(offset);
+      if (hasMoreRef.current) {
+        fetchBatch(offsetRef.current);
       }
     };
 
@@ -128,14 +156,33 @@ export default function UpcomingAppointmentsList({ isOpen }) {
           key={item.appointmentId || index}
           className="border rounded-xl p-4 flex justify-between items-center"
         >
-          <div>
-            <p className="font-medium">{item.fullName}</p>
+          <div className="min-w-0 flex-1 space-y-3">
+            <p className="font-medium break-words">{item.fullName}</p>
+
+            <div className="flex flex-wrap gap-2">
+              <a
+                href={`tel:${item.phone}`}
+                className="inline-flex items-center justify-center rounded-full border px-4 py-1.5 text-sm font-medium transition hover:bg-muted"
+              >
+                اتصال
+              </a>
+
+              <a
+                href={getWhatsAppLink(item.phone)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center rounded-full border px-4 py-1.5 text-sm font-medium text-green-600 transition hover:bg-green-50"
+              >
+                واتساب
+              </a>
+            </div>
+
             <p className="text-sm text-muted-foreground">
               {item.date} - {item.time}
             </p>
           </div>
 
-          <span className="text-muted-foreground text-sm font-medium">
+          <span className="text-muted-foreground text-sm font-medium shrink-0">
             لم يأتِ موعدها بعد
           </span>
         </div>
