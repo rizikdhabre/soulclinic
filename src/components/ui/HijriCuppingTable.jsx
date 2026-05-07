@@ -14,7 +14,7 @@ export default function HijriCuppingTable() {
     const yesterday = new Date(now);
     yesterday.setDate(now.getDate() - 1);
     const gregorian = now.toLocaleDateString("en-GB");
-    const hijri = new Intl.DateTimeFormat("ar-SA-u-ca-islamic-nu-latn", {
+    const hijri = new Intl.DateTimeFormat("ar-SA-u-ca-islamic-umalqura-nu-latn", {
       day: "numeric",
       month: "long",
       year: "numeric",
@@ -24,12 +24,12 @@ export default function HijriCuppingTable() {
     setGregorianDate(`${gregorian} ميلادي`);
     setHijriDate(`${hijri} `);
 
-    const hijriDayFormatter = new Intl.DateTimeFormat("en-u-ca-islamic-nu-latn", {
+    const hijriDayFormatter = new Intl.DateTimeFormat("en-u-ca-islamic-umalqura-nu-latn", {
       day: "numeric",
       timeZone: "Asia/Jerusalem",
     });
 
-    const hijriLabelFormatter = new Intl.DateTimeFormat("ar-SA-u-ca-islamic-nu-latn", {
+    const hijriLabelFormatter = new Intl.DateTimeFormat("ar-SA-u-ca-islamic-umalqura-nu-latn", {
       day: "numeric",
       month: "long",
       year: "numeric",
@@ -43,12 +43,12 @@ export default function HijriCuppingTable() {
       timeZone: "Asia/Jerusalem",
     });
 
-    const startDate = new Date(yesterday);
+    const startDate = new Date(now);
     startDate.setHours(12, 0, 0, 0);
 
     const results = [];
 
-    for (let offset = 1; offset <= 120 && results.length < 3; offset += 1) {
+    for (let offset = 0; offset <= 120 && results.length < 3; offset += 1) {
       const currentDate = new Date(startDate);
       currentDate.setDate(startDate.getDate() + offset);
 
@@ -58,12 +58,9 @@ export default function HijriCuppingTable() {
         continue;
       }
 
-      const displayDate = new Date(currentDate);
-      displayDate.setDate(currentDate.getDate() );
-
       results.push({
         hijri: hijriLabelFormatter.format(currentDate),
-        gregorian: gregorianFormatter.format(displayDate),
+        gregorian: gregorianFormatter.format(currentDate),
       });
     }
 
