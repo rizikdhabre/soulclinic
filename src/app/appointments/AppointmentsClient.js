@@ -31,7 +31,9 @@ export default function AppointmentsClient() {
   };
 
   const handleFormSubmit = async (data) => {
-    if (!selectedDate || !selectedTime) return;
+    if (!selectedDate || !selectedTime) {
+      return false;
+    }
 
     try {
       await axios.post("/api/appointments", {
@@ -46,15 +48,18 @@ export default function AppointmentsClient() {
         time: selectedTime,
          ...(cupsCount ? { cupsCount: Number(cupsCount) } : {}),
       });
+
+      return true;
     } catch (error) {
       if (error.response?.status === 409) {
         setBookingError(
           "This time slot was just booked. Please choose another time.",
         );
         setSelectedTime(null);
-        return;
+        return false;
       }
       setBookingError("Something went wrong. Please try again.");
+      return false;
     }
   };
 

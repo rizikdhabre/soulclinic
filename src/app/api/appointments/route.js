@@ -234,7 +234,7 @@ export async function POST(req) {
       cupsCount,
     } = body;
 
-    if (!firstName || !lastName || !phone || !date || !time) {
+    if (!phone || !date || !time) {
       return NextResponse.json({ error: "Missing fields" }, { status: 400 });
     }
 
@@ -246,6 +246,13 @@ export async function POST(req) {
       { projection: { firstName: 1, lastName: 1 } },
     );
 
+    if (!existingUser && (!firstName || !lastName)) {
+      return NextResponse.json(
+        { error: "Missing fields" },
+        { status: 400 },
+      );
+    }
+
     const resolvedFirstName = existingUser?.firstName || firstName;
     const resolvedLastName = existingUser?.lastName || lastName;
 
@@ -255,7 +262,7 @@ export async function POST(req) {
       _id: appointmentId,
       firstName: resolvedFirstName,
       lastName: resolvedLastName,
-      phone,
+      phone: normalizedPhone,
       time,
       duration,
       reminderSent: false,
@@ -275,7 +282,7 @@ export async function POST(req) {
     );
     await upsertUserData({
       appointmentId,
-      phone,
+      phone: normalizedPhone,
       firstName,
       lastName,
       note,

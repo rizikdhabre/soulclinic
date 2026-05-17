@@ -19,35 +19,27 @@ export function AppointmentForm({
     note: "",
   });
 
-  const [step, setStep] = useState("form");
+  const [step, setStep] = useState("phone");
   const [confirmation, setConfirmation] = useState(null);
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
-  const [loadingStage, setLoadingStage] = useState(null); // "send" | "verify" | null
+  const [loadingStage, setLoadingStage] = useState(null); // "lookup" | "send" | "verify" | null
+  const [existingUserName, setExistingUserName] = useState("");
 
-  const canSubmit =
-    selectedDate &&
-    selectedTime &&
-    data.firstName &&
-    data.lastName &&
-    data.phone;
+  const canStartFlow = selectedDate && selectedTime && data.phone;
+  const canSendOtpForNewUser = data.firstName && data.lastName;
 
-  const handleSendOTP = async (e) => {
-    e.preventDefault();
-    if (!canSubmit) return;
+  const showMessage = (type, text) => {
+    setMessageType(type);
+    setMessage(text);
+  };
 
-    const normalizedPhone = normalizeIsraeliPhone(data.phone);
-    if (!normalizedPhone) {
-      setMessageType("error");
-      setMessage("Please enter a valid Israeli phone number");
-      return;
-    }
-
+  const sendOtpForPhone = async (normalizedPhone) => {
     setLoadingStage("send");
-
     setLoading(true);
+    setMessage("");
 
     try {
       if (process.env.NODE_ENV === "development") {
@@ -69,28 +61,119 @@ export function AppointmentForm({
       setConfirmation(confirm);
       setData((d) => ({ ...d, phone: normalizedPhone }));
       setStep("otp");
-    } catch (err) {
-      setMessageType("error");
-      setMessage("Too many attempts. Please wait a bit and try again.");
+    } catch {
+      showMessage("error", "Too many attempts. Please wait a bit and try again.");
     } finally {
       setLoading(false);
       setLoadingStage(null);
     }
   };
 
+  const handleLookupUser = async (e) => {
+    e.preventDefault();
+
+    if (!canStartFlow || loading) return;
+
+    const normalizedPhone = normalizeIsraeliPhone(data.phone);
+
+    if (!normalizedPhone) {
+      showMessage("error", "Please enter a valid Israeli phone number");
+      return;
+    }
+
+    setLoadingStage("lookup");
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const response = await fetch(
+        `/api/appointments/user?phone=${encodeURIComponent(normalizedPhone)}`,
+        {
+          cache: "no-store",
+        },
+      );
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          payload.message || "Unable to validate this phone number right now.",
+        );
+      }
+
+      const firstName = payload.firstName || "";
+      const lastName = payload.lastName || "";
+      const fullName = `${firstName} ${lastName}`.trim();
+      const phone = payload.phone || normalizedPhone;
+
+      setData((current) => ({
+        ...current,
+        phone,
+        firstName,
+        lastName,
+      }));
+
+      if (payload.exists && firstName && lastName) {
+        setExistingUserName(fullName);
+        await sendOtpForPhone(phone);
+        return;
+      }
+
+      setExistingUserName(fullName);
+      setStep("details");
+      showMessage(
+        "info",
+        payload.exists
+          ? "أكمل الاسم لهذا الرقم ثم أرسل رمز التحقق."
+          : "هذا رقم جديد. أدخل الاسم الأول واسم العائلة ثم أرسل رمز التحقق.",
+      );
+    } catch (error) {
+      showMessage(
+        "error",
+        error.message || "Unable to check this number right now.",
+      );
+    } finally {
+      setLoading(false);
+      setLoadingStage(null);
+    }
+  };
+
+  const handleSendOtpForNewUser = async (e) => {
+    e.preventDefault();
+
+    if (!canSendOtpForNewUser || loading) return;
+
+    const normalizedPhone = normalizeIsraeliPhone(data.phone);
+
+    if (!normalizedPhone) {
+      showMessage("error", "Please enter a valid Israeli phone number");
+      setStep("phone");
+      return;
+    }
+
+    setData((current) => ({ ...current, phone: normalizedPhone }));
+    setExistingUserName("");
+    await sendOtpForPhone(normalizedPhone);
+  };
+
   const handleVerifyOTP = async () => {
-    if (!otp || !confirmation) return;
+    if (!otp.trim() || !confirmation) return;
 
     setLoadingStage("verify");
     setLoading(true);
+    setMessage("");
 
     try {
-      await confirmation.confirm(otp);
-      await onSubmit(data);
+      await confirmation.confirm(otp.trim());
+      const submitted = await onSubmit(data);
+
+      if (submitted === false) {
+        return;
+      }
+
       setStep("success");
     } catch {
-      setMessageType("error");
-      setMessage("Invalid verification code. Please try again.");
+      showMessage("error", "Invalid verification code. Please try again.");
     } finally {
       setLoading(false);
       setLoadingStage(null);
@@ -101,7 +184,7 @@ export function AppointmentForm({
     <>
       <div id="recaptcha-container" />
 
-      {loading && loadingStage === "send" && (
+      {loading && (loadingStage === "lookup" || loadingStage === "send") && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           role="dialog"
@@ -112,10 +195,14 @@ export function AppointmentForm({
             className="w-full max-w-md rounded-2xl bg-card border border-border p-6 shadow-xl"
           >
             <div className="text-base font-semibold">
-              انتظر، نحن نرسل لك رمزًا
+              {loadingStage === "lookup"
+                ? "نقوم بالتحقق من رقم الهاتف"
+                : "انتظر، نحن نرسل لك رمزًا"}
             </div>
             <div className="mt-2 text-sm text-muted-foreground">
-              لا تغادر الصفحة حتى تقوم بإدخال الرمز وإتمام التأكيد.
+              {loadingStage === "lookup"
+                ? "نبحث عن بياناتك أولاً حتى نحدد الخطوة التالية."
+                : "لا تغادر الصفحة حتى تقوم بإدخال الرمز وإتمام التأكيد."}
             </div>
 
             <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-muted">
@@ -127,16 +214,86 @@ export function AppointmentForm({
 
       <div className="w-full md:w-auto min-h-[70vh] md:min-h-0 flex items-center justify-center md:block px-4 md:px-0">
         <div className="w-full max-w-md md:max-w-none">
-          {/* FORM STEP */}
-          {step === "form" && (
+          {/* PHONE STEP */}
+          {step === "phone" && (
             <form
-              onSubmit={handleSendOTP}
+              onSubmit={handleLookupUser}
               className="
             space-y-4 rounded-2xl bg-card p-6 border border-border
             min-h-[350px] md:min-h-0
             flex flex-col justify-center md:block
           "
             >
+              <input
+                placeholder="رقم الهاتف"
+                value={data.phone}
+                onChange={(e) => {
+                  setData({ ...data, phone: e.target.value });
+                  setExistingUserName("");
+                }}
+                inputMode="tel"
+                autoComplete="tel"
+                className="
+              w-full rounded-xl border px-4 py-3
+              bg-background text-foreground
+              placeholder:text-muted-foreground
+              border-border
+              focus:outline-none focus:ring-2 focus:ring-primary/40
+            "
+              />
+
+              {message && (
+                <div
+                  className={`
+                rounded-xl px-4 py-3 text-sm
+                ${
+                  messageType === "error"
+                    ? "bg-red-500/10 text-red-600"
+                    : messageType === "success"
+                      ? "bg-green-500/10 text-green-600"
+                      : "bg-primary/10 text-primary"
+                }
+              `}
+                >
+                  {message}
+                </div>
+              )}
+
+              {bookingError && (
+                <div className="rounded-xl bg-red-500/10 text-red-600 px-4 py-3 text-sm">
+                  {bookingError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={!canStartFlow || loading}
+                className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
+              >
+                {loading ? "جارٍ التحقق..." : "تأكيد الموعد"}
+              </button>
+            </form>
+          )}
+
+          {/* DETAILS STEP */}
+          {step === "details" && (
+            <form
+              onSubmit={handleSendOtpForNewUser}
+              className="
+            space-y-4 rounded-2xl bg-card p-6 border border-border
+            min-h-[350px] md:min-h-0
+            flex flex-col justify-center md:block
+          "
+            >
+              <div className="rounded-xl bg-primary/10 px-4 py-3 text-sm text-primary">
+                <div>{data.phone}</div>
+                {existingUserName && (
+                  <div className="mt-1 text-muted-foreground">
+                    الاسم الحالي: {existingUserName}
+                  </div>
+                )}
+              </div>
+
               <input
                 placeholder="الاسم الأول"
                 value={data.firstName}
@@ -165,10 +322,76 @@ export function AppointmentForm({
             "
               />
 
+              {message && (
+                <div
+                  className={`
+                rounded-xl px-4 py-3 text-sm
+                ${
+                  messageType === "error"
+                    ? "bg-red-500/10 text-red-600"
+                    : messageType === "success"
+                      ? "bg-green-500/10 text-green-600"
+                      : "bg-primary/10 text-primary"
+                }
+              `}
+                >
+                  {message}
+                </div>
+              )}
+
+              {bookingError && (
+                <div className="rounded-xl bg-red-500/10 text-red-600 px-4 py-3 text-sm">
+                  {bookingError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <button
+                  type="submit"
+                  disabled={!canSendOtpForNewUser || loading}
+                  className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
+                >
+                  {loading ? "جارٍ إرسال الرمز..." : "إرسال رمز التحقق"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep("phone");
+                    setMessage("");
+                  }}
+                  className="w-full rounded-xl py-3 border border-border text-foreground"
+                >
+                  تغيير الرقم
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* OTP STEP */}
+          {step === "otp" && (
+            <div
+              className="
+            space-y-4 rounded-2xl bg-card p-6 border border-border
+            min-h-[350px] md:min-h-0
+            flex flex-col justify-center md:block
+          "
+            >
+              <div className="rounded-xl bg-primary/10 px-4 py-3 text-sm text-primary">
+                <div>{data.phone}</div>
+                <div className="mt-1 text-muted-foreground">
+                  {existingUserName
+                    ? `سنستخدم الاسم المسجل: ${existingUserName}`
+                    : `${data.firstName} ${data.lastName}`.trim()}
+                </div>
+              </div>
+
               <input
-                placeholder="رقم الهاتف"
-                value={data.phone}
-                onChange={(e) => setData({ ...data, phone: e.target.value })}
+                placeholder="أدخل رمز التحقق"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+                inputMode="numeric"
+                autoComplete="one-time-code"
                 className="
               w-full rounded-xl border px-4 py-3
               bg-background text-foreground
@@ -216,68 +439,29 @@ export function AppointmentForm({
                 </div>
               )}
 
-              <button
-                type="submit"
-                disabled={!canSubmit || loading}
-                className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
-              >
-                {loading ? "جارٍ إرسال الرمز..." : "تأكيد الموعد"}
-              </button>
-            </form>
-          )}
-
-          {/* OTP STEP */}
-          {step === "otp" && (
-            <div
-              className="
-            space-y-4 rounded-2xl bg-card p-6 border border-border
-            min-h-[350px] md:min-h-0
-            flex flex-col justify-center md:block
-          "
-            >
-              <input
-                placeholder="Enter verification code"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-                className="
-              w-full rounded-xl border px-4 py-3
-              bg-background text-foreground
-              placeholder:text-muted-foreground
-              border-border
-              focus:outline-none focus:ring-2 focus:ring-primary/40
-            "
-              />
-
-              {message && (
-                <div
-                  className={`
-                rounded-xl px-4 py-3 text-sm
-                ${
-                  messageType === "error"
-                    ? "bg-red-500/10 text-red-600"
-                    : messageType === "success"
-                      ? "bg-green-500/10 text-green-600"
-                      : "bg-primary/10 text-primary"
-                }
-              `}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <button
+                  onClick={handleVerifyOTP}
+                  disabled={loading}
+                  className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
                 >
-                  {message}
-                </div>
-              )}
+                  {loading ? "جارٍ التحقق..." : "التحقق وحفظ الموعد"}
+                </button>
 
-              {bookingError && (
-                <div className="rounded-xl bg-red-500/10 text-red-600 px-4 py-3 text-sm">
-                  {bookingError}
-                </div>
-              )}
-
-              <button
-                onClick={handleVerifyOTP}
-                disabled={loading}
-                className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
-              >
-                {loading ? "جارٍ التحقق..." : "التحقق وحفظ الموعد"}
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep("phone");
+                    setConfirmation(null);
+                    setOtp("");
+                    setExistingUserName("");
+                    setMessage("");
+                  }}
+                  className="w-full rounded-xl py-3 border border-border text-foreground"
+                >
+                  تغيير الرقم
+                </button>
+              </div>
             </div>
           )}
 
