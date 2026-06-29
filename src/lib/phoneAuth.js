@@ -2,6 +2,8 @@ import { RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
 import { auth } from "./firebase";
 
 const RECAPTCHA_CONTAINER_ID = "recaptcha-container";
+let recaptchaSendInProgress = false;
+let recaptchaClearRequested = false;
 
 function getCurrentDomain() {
   if (typeof window === "undefined") return "server";
@@ -16,6 +18,13 @@ function getRecaptchaContainer() {
 export function clearRecaptchaVerifier() {
   if (typeof window === "undefined") return;
 
+  if (recaptchaSendInProgress) {
+    recaptchaClearRequested = true;
+    return;
+  }
+
+  recaptchaClearRequested = false;
+
   const verifier = window.recaptchaVerifier;
 
   try {
@@ -26,11 +35,6 @@ export function clearRecaptchaVerifier() {
     console.warn("Failed to clear Firebase reCAPTCHA verifier", error);
   } finally {
     window.recaptchaVerifier = null;
-
-    const container = getRecaptchaContainer();
-    if (container) {
-      container.innerHTML = "";
-    }
   }
 }
 
@@ -52,7 +56,11 @@ function getOrCreateRecaptchaVerifier() {
       {
         size: "invisible",
         "expired-callback": () => {
-          clearRecaptchaVerifier();
+          recaptchaClearRequested = true;
+
+          if (!recaptchaSendInProgress) {
+            clearRecaptchaVerifier();
+          }
         },
       },
     );
@@ -76,6 +84,8 @@ function logOtpError(error, phone) {
 }
 
 export async function sendOTP(phone) {
+  let shouldClearVerifierAfterSend = false;
+
   try {
     console.debug("Firebase sendOTP started", {
       phone,
@@ -84,10 +94,18 @@ export async function sendOTP(phone) {
 
     const verifier = getOrCreateRecaptchaVerifier();
 
+    recaptchaSendInProgress = true;
     return await signInWithPhoneNumber(auth, phone, verifier);
   } catch (error) {
     logOtpError(error, phone);
-    clearRecaptchaVerifier();
+    shouldClearVerifierAfterSend = true;
     throw error;
+  } finally {
+    recaptchaSendInProgress = false;
+
+    if (shouldClearVerifierAfterSend || recaptchaClearRequested) {
+      recaptchaClearRequested = false;
+      clearRecaptchaVerifier();
+    }
   }
 }

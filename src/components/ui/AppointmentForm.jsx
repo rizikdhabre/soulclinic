@@ -16,6 +16,10 @@ function getOtpErrorMessage(error) {
   const code = error?.code || "otp/send-failed";
   const message = error?.message || "Failed to send OTP";
 
+  if (code === "auth/too-many-requests") {
+    return "تم إرسال طلبات كثيرة. انتظر قليلاً ثم حاول مرة أخرى.";
+  }
+
   return `${code}: ${message}`;
 }
 
