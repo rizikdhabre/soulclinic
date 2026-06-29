@@ -165,10 +165,13 @@ const Header = () => {
             >
               <X className="w-8 h-8 text-foreground" />
             </motion.button>
-
             {/* MENU */}
             <nav
-              className="relative z-10 h-full flex flex-col items-center justify-center"
+              className="
+              relative z-10 h-full w-full
+              flex flex-col items-center justify-center
+              px-6 gap-3
+            "
               onClick={(e) => e.stopPropagation()}
             >
               {menuItems.map((item, index) => {
@@ -176,7 +179,8 @@ const Header = () => {
 
                 return (
                   <motion.div
-                    key={item.name}
+                    key={item.path}
+                    className="w-full flex justify-center"
                     initial={{ opacity: 0, y: 30 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -30 }}
@@ -184,14 +188,24 @@ const Header = () => {
                   >
                     <Link
                       href={item.path}
-                      className={`block py-4 font-serif text-4xl md:text-5xl lg:text-6xl
-                  transition-colors duration-300
-                  ${
-                    isActive
-                      ? "text-primary"
-                      : "text-foreground hover:text-primary"
-                  }`}
                       onClick={() => setIsMenuOpen(false)}
+                      className={`
+            w-full max-w-xl
+            text-center
+            rounded-3xl
+            border
+            px-6 py-5
+            font-serif
+            text-3xl md:text-5xl
+            leading-tight
+            transition-all duration-300
+            select-none
+            ${
+              isActive
+                ? "text-primary border-primary/40 bg-primary/10 shadow-soft"
+                : "text-foreground border-foreground/10 bg-card/40 hover:text-primary hover:border-primary/30 hover:bg-primary/5"
+            }
+          `}
                     >
                       {item.name}
                     </Link>
