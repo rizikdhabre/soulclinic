@@ -14,12 +14,7 @@ function getOtpCooldownMessage(seconds) {
 
 function getOtpErrorMessage(error) {
   const code = error?.code || "otp/send-failed";
-  const message =
-    error?.message || "Unable to send verification code. Please try again.";
-
-  if (code === "auth/too-many-requests") {
-    return `${code}: ${message}`;
-  }
+  const message = error?.message || "Failed to send OTP";
 
   return `${code}: ${message}`;
 }
@@ -92,6 +87,7 @@ export function AppointmentForm({
         });
 
         setData((d) => ({ ...d, phone: normalizedPhone }));
+        setOtpCooldownSeconds(OTP_RESEND_COOLDOWN_SECONDS);
         setStep("otp");
         setLoading(false);
         setLoadingStage(null);
