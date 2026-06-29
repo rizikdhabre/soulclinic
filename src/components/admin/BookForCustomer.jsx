@@ -87,6 +87,7 @@ export default function BookForCustomer() {
   const [editedTimes, setEditedTimes] = useState([]);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [availabilityError, setAvailabilityError] = useState("");
+  const [availabilityRefreshKey, setAvailabilityRefreshKey] = useState(0);
   const [loadingTreatments, setLoadingTreatments] = useState(true);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -224,7 +225,7 @@ export default function BookForCustomer() {
     return () => {
       active = false;
     };
-  }, [form.date]);
+  }, [form.date, availabilityRefreshKey]);
 
   useEffect(() => {
     if (!form.time || !selectedService) return;
@@ -416,6 +417,14 @@ export default function BookForCustomer() {
       const result = await response.json().catch(() => ({}));
 
       if (!response.ok) {
+        if (response.status === 409) {
+          setForm((current) => ({ ...current, time: "" }));
+          setAvailabilityRefreshKey((key) => key + 1);
+          throw new Error(
+            "هذه الساعة تم حجزها أو لم تعد متاحة، اختر ساعة أخرى.",
+          );
+        }
+
         throw new Error(result.error || result.message || "فشل إنشاء الموعد");
       }
 

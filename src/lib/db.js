@@ -28,3 +28,8 @@ export async function getCollection(collectionName) {
     throw error;
   }
 }
+
+export async function getMongoClient() {
+  await connectDb();
+  return client;
+}

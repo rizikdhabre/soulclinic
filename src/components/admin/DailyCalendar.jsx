@@ -585,6 +585,14 @@ const DailyCalendar = () => {
                                 fetchDay();
                               } catch (err) {
                                 console.error("Failed to update", err);
+                                if (err.response?.status === 409) {
+                                  setTimeConflictMessage(
+                                    "هذه الساعة تم حجزها أو لم تعد متاحة، اختر ساعة أخرى.",
+                                  );
+                                  setTimeout(() => {
+                                    setTimeConflictMessage("");
+                                  }, 5000);
+                                }
                               }
                             }}
                             className="px-3 py-1 text-xs rounded bg-primary text-primary-foreground"
@@ -647,6 +655,14 @@ const DailyCalendar = () => {
                                 fetchDay();
                               } catch (err) {
                                 console.error("Failed to update", err);
+                                if (err.response?.status === 409) {
+                                  setTimeConflictMessage(
+                                    "هذه الساعة تم حجزها أو لم تعد متاحة، اختر ساعة أخرى.",
+                                  );
+                                  setTimeout(() => {
+                                    setTimeConflictMessage("");
+                                  }, 5000);
+                                }
                               }
                             }}
                             className="w-full px-3 py-2 text-xs rounded bg-primary text-primary-foreground"

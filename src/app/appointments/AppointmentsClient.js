@@ -18,6 +18,7 @@ export default function AppointmentsClient() {
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedTime, setSelectedTime] = useState(null);
   const [bookingError, setBookingError] = useState(null);
+  const [availabilityRefreshKey, setAvailabilityRefreshKey] = useState(0);
 
   const handleDateSelect = (date) => {
     setSelectedDate(date);
@@ -52,10 +53,9 @@ export default function AppointmentsClient() {
       return true;
     } catch (error) {
       if (error.response?.status === 409) {
-        setBookingError(
-          "This time slot was just booked. Please choose another time.",
-        );
+        setBookingError("هذه الساعة تم حجزها للتو، الرجاء اختيار ساعة أخرى.");
         setSelectedTime(null);
+        setAvailabilityRefreshKey((key) => key + 1);
         return false;
       }
       setBookingError("Something went wrong. Please try again.");
@@ -115,6 +115,7 @@ export default function AppointmentsClient() {
               selectedTime={selectedTime}
               onSelectTime={handleTimeSelect}
               duration={duration}
+              refreshKey={availabilityRefreshKey}
             />
           </motion.div>
 

@@ -59,6 +59,7 @@ export function TimeSlotPicker({
   onSelectTime,
   selectedDate,
   duration,
+  refreshKey = 0,
 }) {
   const [bookedAppointments, setBookedAppointments] = useState([]);
   const [blockedTimes, setBlockedTimes] = useState([]);
@@ -101,7 +102,7 @@ export function TimeSlotPicker({
     };
 
     fetchAppointments();
-  }, [selectedDate]);
+  }, [selectedDate, refreshKey]);
   if (!selectedDate) {
     return (
       <div className="text-center py-12 text-muted-foreground">

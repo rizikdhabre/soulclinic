@@ -1,92 +1,52 @@
-import { getCollection } from "@/lib/db";
+import { getCollection, getMongoClient } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { sendWhatsAppTemplate } from "@/lib/whatsapp";
 import { normalizeIsraeliPhone } from "@/lib/phone";
+import {
+  TimeSlotUnavailableError,
+  getDurationMinutes,
+  getSafeNumber,
+  isTimeSlotAvailable,
+  toMinutes,
+  WORK_END,
+} from "@/lib/appointmentRules";
+import {
+  buildAtomicAvailabilityFilter,
+  ensureAppointmentsDateIndex,
+  ensureDayDocument,
+} from "@/lib/appointmentConcurrency";
 
 /* ---------------- HELPER ---------------- */
 
-const SLOT_MINUTES = 30;
-const WORK_START = "10:00";
-const WORK_END = "19:30";
-
-function buildSlots() {
-  const slots = [];
-
-  for (let h = 10; h < 20; h++) {
-    for (let m = 0; m < 60; m += SLOT_MINUTES) {
-      const time = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-      if (time <= WORK_END) slots.push(time);
-    }
+class RequestValidationError extends Error {
+  constructor(message = "Missing fields") {
+    super(message);
+    this.name = "RequestValidationError";
+    this.status = 400;
   }
-
-  return slots;
 }
 
-const DEFAULT_SLOTS = buildSlots();
-
-function toMinutes(time) {
-  const [h, m] = String(time || "")
-    .split(":")
-    .map(Number);
-
-  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
-  return h * 60 + m;
+function getUnavailableResponse() {
+  return NextResponse.json(
+    {
+      error: "TIME_SLOT_UNAVAILABLE",
+      message: "This time slot was just booked. Please choose another time.",
+    },
+    { status: 409 },
+  );
 }
 
-function getDurationMinutes(duration) {
-  const n = Number(duration);
-  return Number.isFinite(n) && n > 0 ? n : SLOT_MINUTES;
-}
+function isTransactionUnsupportedError(error) {
+  const message = String(error?.message || "");
 
-function rangesOverlap(startA, endA, startB, endB) {
-  return startA < endB && endA > startB;
-}
-
-function getScheduleTimes(editedTimes) {
-  const workStart = toMinutes(WORK_START);
-  const workEnd = toMinutes(WORK_END);
-  const sourceTimes =
-    Array.isArray(editedTimes) && editedTimes.length > 0
-      ? editedTimes
-      : DEFAULT_SLOTS;
-
-  return sourceTimes
-    .filter((time) => {
-      const minutes = toMinutes(time);
-      return minutes !== null && minutes >= workStart && minutes <= workEnd;
-    })
-    .sort((a, b) => toMinutes(a) - toMinutes(b));
-}
-
-function isTimeSlotAvailable({ day, time, duration }) {
-  const sourceTimes = getScheduleTimes(day?.editedTimes);
-  const blockedTimes = Array.isArray(day?.blockedTimes) ? day.blockedTimes : [];
-  const appointments = Array.isArray(day?.appointments) ? day.appointments : [];
-  const start = toMinutes(time);
-  const workEnd = toMinutes(WORK_END);
-
-  if (start === null) return false;
-
-  const end = start + duration;
-
-  if (!sourceTimes.includes(time)) return false;
-  if (end > workEnd) return false;
-  if (blockedTimes.includes(time)) return false;
-
-  const conflictsWithAppointment = appointments.some((apt) => {
-    const aptStart = toMinutes(apt.time);
-    if (aptStart === null) return false;
-
-    const aptDuration = getDurationMinutes(apt.duration);
-    const aptEnd = aptStart + aptDuration;
-
-    return rangesOverlap(start, end, aptStart, aptEnd);
-  });
-
-  if (conflictsWithAppointment) return false;
-
-  return true;
+  return (
+    error?.codeName === "IllegalOperation" ||
+    message.includes("Transaction numbers are only allowed") ||
+    message.includes("Transaction not supported") ||
+    message.includes("Transactions are not supported") ||
+    message.includes("This MongoDB deployment does not support")
+  );
 }
 
 export async function sendAppointmentConfirmationToCustomer({
@@ -115,6 +75,8 @@ export async function sendAppointmentConfirmationToCustomer({
   });
 }
 async function upsertUserData({
+  usersCollection,
+  session,
   appointmentId,
   phone,
   firstName,
@@ -126,7 +88,6 @@ async function upsertUserData({
   price,
   cupsCount,
 }) {
-  const usersCollection = await getCollection("usersData");
   const appointmentEntry = {
     _id: appointmentId,
     date,
@@ -144,42 +105,50 @@ async function upsertUserData({
       }
     : null;
 
-  const existingUser = await usersCollection.findOne(
-    { phone },
-    { projection: { firstName: 1, lastName: 1 } },
-  );
-  const adminFirstName = existingUser?.firstName || firstName;
-  const adminLastName = existingUser?.lastName || lastName;
-  const adminFullName = `${adminFirstName || ""} ${adminLastName || ""}`.trim();
+  const setOnInsert = {
+    phone,
+    firstName,
+    lastName,
+    createdAt: new Date(),
+  };
 
-  if (!existingUser) {
-    await usersCollection.insertOne({
-      phone,
-      firstName,
-      lastName,
-      appointments: [appointmentEntry],
-      notes: noteEntry ? [noteEntry] : [],
-      createdAt: new Date(),
-    });
-  } else {
-    const update = {
-      $push: {
-        appointments: appointmentEntry,
-      },
-    };
-
-    if (noteEntry) {
-      update.$push.notes = noteEntry;
-    }
-
-    await usersCollection.updateOne({ phone }, update);
+  if (!noteEntry) {
+    setOnInsert.notes = [];
   }
+
+  const update = {
+    $setOnInsert: setOnInsert,
+    $push: {
+      appointments: appointmentEntry,
+    },
+  };
+
+  if (noteEntry) {
+    update.$push.notes = noteEntry;
+  }
+
+  await usersCollection.updateOne(
+    { phone },
+    update,
+    { upsert: true, ...(session ? { session } : {}) },
+  );
+}
+
+async function sendAppointmentNotifications({
+  phone,
+  firstName,
+  lastName,
+  title,
+  date,
+  time,
+}) {
+  const adminFullName = `${firstName || ""} ${lastName || ""}`.trim();
 
   try {
     await sendAppointmentConfirmationToCustomer({
       phone,
-      firstName: adminFirstName,
-      lastName: adminLastName,
+      firstName,
+      lastName,
       title,
       date,
       time,
@@ -197,7 +166,7 @@ async function upsertUserData({
       },
     });
   } catch (err) {
-    console.error("WhatsApp admin notify failed:", err);
+    console.error("WhatsApp appointment notify failed:", err);
   }
 }
 
@@ -300,6 +269,242 @@ export async function GET(req) {
 }
 /* ---------------- POST ---------------- */
 
+function assertValidRequestedRange(time, duration) {
+  const start = toMinutes(time);
+  const workEnd = toMinutes(WORK_END);
+
+  if (start === null || workEnd === null) {
+    throw new TimeSlotUnavailableError();
+  }
+
+  if (start + duration > workEnd) {
+    throw new TimeSlotUnavailableError();
+  }
+}
+
+async function resolveBookingUser({
+  usersCollection,
+  normalizedPhone,
+  firstName,
+  lastName,
+  session,
+}) {
+  const existingUser = await usersCollection.findOne(
+    { phone: normalizedPhone },
+    {
+      projection: { firstName: 1, lastName: 1 },
+      ...(session ? { session } : {}),
+    },
+  );
+
+  if (!existingUser && (!firstName || !lastName)) {
+    throw new RequestValidationError();
+  }
+
+  return {
+    existingUser,
+    resolvedFirstName: existingUser?.firstName || firstName,
+    resolvedLastName: existingUser?.lastName || lastName,
+  };
+}
+
+function buildAppointmentData({
+  appointmentId,
+  firstName,
+  lastName,
+  phone,
+  time,
+  duration,
+  cupsCount,
+}) {
+  return {
+    _id: appointmentId,
+    firstName,
+    lastName,
+    phone,
+    time,
+    duration,
+    reminderSent: false,
+    ...(cupsCount ? { cupsCount } : {}),
+  };
+}
+
+async function createAppointmentWithTransaction({
+  client,
+  appointmentsCollection,
+  usersCollection,
+  appointmentId,
+  normalizedPhone,
+  firstName,
+  lastName,
+  note,
+  date,
+  time,
+  safeDuration,
+  title,
+  safePrice,
+  cupsCount,
+}) {
+  const session = client.startSession();
+  let notificationData = null;
+
+  try {
+    await session.withTransaction(async () => {
+      const { resolvedFirstName, resolvedLastName } =
+        await resolveBookingUser({
+          usersCollection,
+          normalizedPhone,
+          firstName,
+          lastName,
+          session,
+        });
+
+      const day = await appointmentsCollection.findOne(
+        { date },
+        {
+          projection: { appointments: 1, blockedTimes: 1, editedTimes: 1 },
+          session,
+        },
+      );
+
+      if (!isTimeSlotAvailable({ day, time, duration: safeDuration })) {
+        throw new TimeSlotUnavailableError();
+      }
+
+      const appointmentData = buildAppointmentData({
+        appointmentId,
+        firstName: resolvedFirstName,
+        lastName: resolvedLastName,
+        phone: normalizedPhone,
+        time,
+        duration: safeDuration,
+        cupsCount,
+      });
+
+      const updateResult = await appointmentsCollection.updateOne(
+        { date },
+        {
+          $push: {
+            appointments: appointmentData,
+          },
+        },
+        { session },
+      );
+
+      if (updateResult.matchedCount !== 1) {
+        throw new TimeSlotUnavailableError();
+      }
+
+      await upsertUserData({
+        usersCollection,
+        session,
+        appointmentId,
+        phone: normalizedPhone,
+        firstName: resolvedFirstName,
+        lastName: resolvedLastName,
+        note,
+        date,
+        time,
+        title,
+        price: safePrice,
+        cupsCount,
+      });
+
+      notificationData = {
+        phone: normalizedPhone,
+        firstName: resolvedFirstName,
+        lastName: resolvedLastName,
+        title,
+        date,
+        time,
+      };
+    });
+
+    return notificationData;
+  } finally {
+    await session.endSession();
+  }
+}
+
+async function createAppointmentWithAtomicFallback({
+  appointmentsCollection,
+  usersCollection,
+  appointmentId,
+  normalizedPhone,
+  firstName,
+  lastName,
+  note,
+  date,
+  time,
+  safeDuration,
+  title,
+  safePrice,
+  cupsCount,
+}) {
+  const { resolvedFirstName, resolvedLastName } = await resolveBookingUser({
+    usersCollection,
+    normalizedPhone,
+    firstName,
+    lastName,
+  });
+
+  const appointmentData = buildAppointmentData({
+    appointmentId,
+    firstName: resolvedFirstName,
+    lastName: resolvedLastName,
+    phone: normalizedPhone,
+    time,
+    duration: safeDuration,
+    cupsCount,
+  });
+
+  const updateResult = await appointmentsCollection.findOneAndUpdate(
+    buildAtomicAvailabilityFilter({
+      date,
+      time,
+      duration: safeDuration,
+    }),
+    {
+      $push: {
+        appointments: appointmentData,
+      },
+    },
+    {
+      returnDocument: "after",
+      projection: { _id: 1 },
+    },
+  );
+
+  const updatedDay = updateResult?.value ?? updateResult;
+
+  if (!updatedDay) {
+    throw new TimeSlotUnavailableError();
+  }
+
+  await upsertUserData({
+    usersCollection,
+    appointmentId,
+    phone: normalizedPhone,
+    firstName: resolvedFirstName,
+    lastName: resolvedLastName,
+    note,
+    date,
+    time,
+    title,
+    price: safePrice,
+    cupsCount,
+  });
+
+  return {
+    phone: normalizedPhone,
+    firstName: resolvedFirstName,
+    lastName: resolvedLastName,
+    title,
+    date,
+    time,
+  };
+}
+
 export async function POST(req) {
   try {
     const body = await req.json();
@@ -322,74 +527,77 @@ export async function POST(req) {
     }
 
     const normalizedPhone = normalizeIsraeliPhone(phone) || phone;
-
-    const usersCollection = await getCollection("usersData");
-    const existingUser = await usersCollection.findOne(
-      { phone: normalizedPhone },
-      { projection: { firstName: 1, lastName: 1 } },
-    );
-
-    if (!existingUser && (!firstName || !lastName)) {
-      return NextResponse.json(
-        { error: "Missing fields" },
-        { status: 400 },
-      );
-    }
-
-    const resolvedFirstName = existingUser?.firstName || firstName;
-    const resolvedLastName = existingUser?.lastName || lastName;
     const safeDuration = getDurationMinutes(duration);
+    const safePrice = getSafeNumber(price);
+
+    assertValidRequestedRange(time, safeDuration);
 
     const appointmentsCollection = await getCollection("appointments");
-    const day = await appointmentsCollection.findOne(
-      { date },
-      { projection: { appointments: 1, blockedTimes: 1, editedTimes: 1 } },
-    );
+    const usersCollection = await getCollection("usersData");
+    const appointmentId = new ObjectId();
 
-    if (!isTimeSlotAvailable({ day, time, duration: safeDuration })) {
-      return NextResponse.json(
-        { error: "Time slot is not available" },
-        { status: 409 },
+    await ensureAppointmentsDateIndex(appointmentsCollection);
+    await ensureDayDocument(appointmentsCollection, date);
+
+    let notificationData = null;
+
+    try {
+      const client = await getMongoClient();
+
+      notificationData = await createAppointmentWithTransaction({
+        client,
+        appointmentsCollection,
+        usersCollection,
+        appointmentId,
+        normalizedPhone,
+        firstName,
+        lastName,
+        note,
+        date,
+        time,
+        safeDuration,
+        title,
+        safePrice,
+        cupsCount,
+      });
+    } catch (error) {
+      if (!isTransactionUnsupportedError(error)) {
+        throw error;
+      }
+
+      console.warn(
+        "MongoDB transactions unavailable; using atomic appointment fallback.",
       );
+
+      notificationData = await createAppointmentWithAtomicFallback({
+        appointmentsCollection,
+        usersCollection,
+        appointmentId,
+        normalizedPhone,
+        firstName,
+        lastName,
+        note,
+        date,
+        time,
+        safeDuration,
+        title,
+        safePrice,
+        cupsCount,
+      });
     }
 
-    const appointmentId = new ObjectId();
-    const appointmentData = {
-      _id: appointmentId,
-      firstName: resolvedFirstName,
-      lastName: resolvedLastName,
-      phone: normalizedPhone,
-      time,
-      duration: safeDuration,
-      reminderSent: false,
-      ...(cupsCount ? { cupsCount } : {}),
-    };
+    await sendAppointmentNotifications(notificationData);
 
-    await appointmentsCollection.findOneAndUpdate(
-      { date },
-      {
-        $push: {
-          appointments: appointmentData,
-        },
-      },
-      {
-        upsert: true,
-      },
-    );
-    await upsertUserData({
-      appointmentId,
-      phone: normalizedPhone,
-      firstName,
-      lastName,
-      note,
-      date,
-      time,
-      title,
-      price,
-      cupsCount,
-    });
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error instanceof TimeSlotUnavailableError || error?.status === 409) {
+      return getUnavailableResponse();
+    }
+
+    if (error instanceof RequestValidationError || error?.status === 400) {
+      return NextResponse.json({ error: "Missing fields" }, { status: 400 });
+    }
+
     console.error("Create appointment error:", error);
     return NextResponse.json(
       { error: "Failed to create appointment" },
