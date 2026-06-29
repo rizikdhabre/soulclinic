@@ -4,6 +4,24 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { normalizeIsraeliPhone } from "@/lib/phone";
 
 const HUJAMA_ID = "69dbaf697f07ea94b798a89f";
+const SLOT_MINUTES = 30;
+const WORK_START = "10:00";
+const WORK_END = "19:30";
+
+const buildSlots = () => {
+  const slots = [];
+
+  for (let h = 10; h < 20; h++) {
+    for (let m = 0; m < 60; m += SLOT_MINUTES) {
+      const time = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      if (time <= WORK_END) slots.push(time);
+    }
+  }
+
+  return slots;
+};
+
+const DEFAULT_SLOTS = buildSlots();
 
 const initialForm = {
   phone: "",
@@ -28,12 +46,47 @@ function hasValue(value) {
   return value !== undefined && value !== null && String(value).trim() !== "";
 }
 
+const toMinutes = (time) => {
+  const [h, m] = String(time || "")
+    .split(":")
+    .map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return h * 60 + m;
+};
+
+const getDurationMinutes = (duration) => {
+  const n = Number(duration);
+  return Number.isFinite(n) && n > 0 ? n : SLOT_MINUTES;
+};
+
+const rangesOverlap = (startA, endA, startB, endB) => {
+  return startA < endB && endA > startB;
+};
+
+function getScheduleTimes(editedTimes) {
+  const workStart = toMinutes(WORK_START);
+  const workEnd = toMinutes(WORK_END);
+  const sourceTimes = editedTimes.length > 0 ? editedTimes : DEFAULT_SLOTS;
+
+  return sourceTimes
+    .filter((time) => {
+      const minutes = toMinutes(time);
+      return minutes !== null && minutes >= workStart && minutes <= workEnd;
+    })
+    .sort((a, b) => toMinutes(a) - toMinutes(b));
+}
+
 export default function BookForCustomer() {
   const [form, setForm] = useState(initialForm);
   const [customer, setCustomer] = useState(initialCustomer);
   const [treatments, setTreatments] = useState([]);
   const [categoryId, setCategoryId] = useState("");
   const [serviceIndex, setServiceIndex] = useState("");
+  const [dayAppointments, setDayAppointments] = useState([]);
+  const [blockedTimes, setBlockedTimes] = useState([]);
+  const [editedTimes, setEditedTimes] = useState([]);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState("");
   const [loadingTreatments, setLoadingTreatments] = useState(true);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -59,6 +112,36 @@ export default function BookForCustomer() {
     customer.status === "existing" &&
     customer.lookupPhone === normalizedPhone &&
     customer.name;
+  const availableTimes = useMemo(() => {
+    if (!selectedService) return [];
+
+    const sourceTimes = getScheduleTimes(editedTimes);
+    const duration = getDurationMinutes(selectedService.duration);
+    const workEnd = toMinutes(WORK_END);
+
+    return sourceTimes.filter((time) => {
+      const start = toMinutes(time);
+      if (start === null) return false;
+
+      const end = start + duration;
+      if (end > workEnd) return false;
+      if (blockedTimes.includes(time)) return false;
+
+      const conflictsWithAppointment = dayAppointments.some((apt) => {
+        const aptStart = toMinutes(apt.time);
+        if (aptStart === null) return false;
+
+        const aptDuration = getDurationMinutes(apt.duration);
+        const aptEnd = aptStart + aptDuration;
+
+        return rangesOverlap(start, end, aptStart, aptEnd);
+      });
+
+      if (conflictsWithAppointment) return false;
+
+      return true;
+    });
+  }, [blockedTimes, dayAppointments, editedTimes, selectedService]);
 
   useEffect(() => {
     const fetchTreatments = async () => {
@@ -86,8 +169,77 @@ export default function BookForCustomer() {
     fetchTreatments();
   }, []);
 
+  useEffect(() => {
+    setForm((current) =>
+      current.time ? { ...current, time: "" } : current,
+    );
+
+    if (!form.date) {
+      setDayAppointments([]);
+      setBlockedTimes([]);
+      setEditedTimes([]);
+      setAvailabilityError("");
+      return;
+    }
+
+    let active = true;
+
+    const fetchAvailability = async () => {
+      try {
+        setAvailabilityLoading(true);
+        setAvailabilityError("");
+
+        const response = await fetch(
+          `/api/appointments?date=${encodeURIComponent(form.date)}&admin=true`,
+          { cache: "no-store" },
+        );
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || "فشل تحميل الساعات المتاحة");
+        }
+
+        if (!active) return;
+
+        setDayAppointments(Array.isArray(data.appointments) ? data.appointments : []);
+        setBlockedTimes(Array.isArray(data.blockedTimes) ? data.blockedTimes : []);
+        setEditedTimes(Array.isArray(data.editedTimes) ? data.editedTimes : []);
+      } catch (error) {
+        console.error("Failed to load appointment availability:", error);
+        if (!active) return;
+
+        setDayAppointments([]);
+        setBlockedTimes([]);
+        setEditedTimes([]);
+        setAvailabilityError("فشل تحميل الساعات المتاحة");
+      } finally {
+        if (active) {
+          setAvailabilityLoading(false);
+        }
+      }
+    };
+
+    fetchAvailability();
+
+    return () => {
+      active = false;
+    };
+  }, [form.date]);
+
+  useEffect(() => {
+    if (!form.time || !selectedService) return;
+
+    if (!availableTimes.includes(form.time)) {
+      setForm((current) => ({ ...current, time: "" }));
+    }
+  }, [availableTimes, form.time, selectedService]);
+
   const updateField = (field, value) => {
-    setForm((current) => ({ ...current, [field]: value }));
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === "date" ? { time: "" } : {}),
+    }));
 
     if (field === "phone") {
       setCustomer(initialCustomer);
@@ -164,6 +316,7 @@ export default function BookForCustomer() {
   const handleCategoryChange = (value) => {
     setCategoryId(value);
     setServiceIndex("");
+    setForm((current) => ({ ...current, time: "" }));
   };
 
   const resetForm = () => {
@@ -171,6 +324,11 @@ export default function BookForCustomer() {
     setCustomer(initialCustomer);
     setCategoryId("");
     setServiceIndex("");
+  };
+
+  const handleServiceChange = (value) => {
+    setServiceIndex(value);
+    setForm((current) => ({ ...current, time: "" }));
   };
 
   const handleSubmit = async (event) => {
@@ -223,6 +381,11 @@ export default function BookForCustomer() {
         return;
       }
 
+      if (!availableTimes.includes(form.time)) {
+        showMessage("error", "هذه الساعة غير متاحة، اختر ساعة أخرى");
+        return;
+      }
+
       const payload = {
         phone,
         firstName: resolvedExisting
@@ -233,9 +396,9 @@ export default function BookForCustomer() {
           : form.lastName.trim(),
         date: form.date,
         time: form.time,
-        duration: selectedService.duration,
+        duration: Number(selectedService.duration),
         title: selectedService.title,
-        price: selectedService.price,
+        price: Number(selectedService.price),
         note: form.note.trim(),
         ...(isHujama && hasValue(selectedService.cupsCount)
           ? { cupsCount: Number(selectedService.cupsCount) }
@@ -374,7 +537,7 @@ export default function BookForCustomer() {
           </span>
           <select
             value={serviceIndex}
-            onChange={(event) => setServiceIndex(event.target.value)}
+            onChange={(event) => handleServiceChange(event.target.value)}
             disabled={!selectedCategory}
             className="w-full rounded-xl border border-border bg-background px-4 py-3 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60"
             required
@@ -401,13 +564,46 @@ export default function BookForCustomer() {
 
         <label className="space-y-2">
           <span className="text-sm font-medium text-foreground">الساعة</span>
-          <input
-            type="time"
+          <select
             value={form.time}
             onChange={(event) => updateField("time", event.target.value)}
-            className="w-full rounded-xl border border-border bg-background px-4 py-3 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+            disabled={
+              !selectedService ||
+              !form.date ||
+              availabilityLoading ||
+              availableTimes.length === 0
+            }
+            className="w-full rounded-xl border border-border bg-background px-4 py-3 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60"
             required
-          />
+          >
+            <option value="">
+              {availabilityLoading
+                ? "جارٍ تحميل الساعات المتاحة..."
+                : "اختر الساعة"}
+            </option>
+            {availableTimes.map((time) => (
+              <option key={time} value={time}>
+                {time}
+              </option>
+            ))}
+          </select>
+          {!selectedService && (
+            <p className="text-xs text-muted-foreground">
+              اختر العلاج أولًا لتحديد مدة الجلسة
+            </p>
+          )}
+          {availabilityError && (
+            <p className="text-xs text-red-600">{availabilityError}</p>
+          )}
+          {selectedService &&
+            form.date &&
+            !availabilityLoading &&
+            !availabilityError &&
+            availableTimes.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                لا توجد ساعات متاحة لهذا اليوم
+              </p>
+            )}
         </label>
       </div>
 

@@ -53,6 +53,11 @@ const toMinutes = (t) => {
   return h * 60 + m;
 };
 
+const getDurationMinutes = (duration) => {
+  const n = Number(duration);
+  return Number.isFinite(n) && n > 0 ? n : SLOT_MINUTES;
+};
+
 /* ---------- component ---------- */
 
 const DailyCalendar = () => {
@@ -228,42 +233,67 @@ const DailyCalendar = () => {
   );
 
   const timeline = useMemo(() => {
-    const rows = [];
+    const getAppointmentAtTime = (time) => {
+      return appointments.find((apt) => apt.time === time);
+    };
 
-    // 1️⃣ Always render appointments at their actual time
-    appointments.forEach((apt) => {
-      rows.push({
+    const getCoveringAppointment = (time) => {
+      const slotStart = toMinutes(time);
+
+      return appointments.find((apt) => {
+        const aptStart = toMinutes(apt.time);
+        const aptEnd = aptStart + getDurationMinutes(apt.duration);
+
+        return slotStart > aptStart && slotStart < aptEnd;
+      });
+    };
+
+    const sourceRows = sourceTimes.map((time) => {
+      const startingAppointment = getAppointmentAtTime(time);
+
+      if (startingAppointment) {
+        return {
+          time,
+          type: "appointment",
+          apt: startingAppointment,
+          blocked: false,
+        };
+      }
+
+      const coveringAppointment = getCoveringAppointment(time);
+
+      if (coveringAppointment) {
+        return {
+          time,
+          type: "continuation",
+          apt: coveringAppointment,
+          blocked: false,
+        };
+      }
+
+      return {
+        time,
+        type: "empty",
+        apt: null,
+        blocked: blockedTimes.includes(time),
+      };
+    });
+
+    const missingAppointmentRows = appointments
+      .filter((apt) => apt?.time && !sourceTimes.includes(apt.time))
+      .map((apt) => ({
         time: apt.time,
+        type: "appointment",
         apt,
         blocked: false,
-      });
-    });
+      }));
 
-    // 2️⃣ Render slots ONLY if no appointment overlaps them
-    sourceTimes.forEach((time) => {
-      const slotStart = toMinutes(time);
-      const slotEnd = slotStart + SLOT_MINUTES;
+    const rows = [...sourceRows, ...missingAppointmentRows];
 
-      const overlaps = appointments.some((apt) => {
-        const aptStart = toMinutes(apt.time);
-        const aptEnd = aptStart + apt.duration;
-        return aptStart < slotEnd && aptEnd > slotStart;
-      });
-
-      if (!overlaps) {
-        rows.push({
-          time,
-          apt: null,
-          blocked: blockedTimes.includes(time),
-        });
-      }
-    });
-
-    // 3️⃣ Sort everything by time
     return editMode
       ? rows
       : rows.sort((a, b) => toMinutes(a.time) - toMinutes(b.time));
-  }, [appointments, sourceTimes, blockedTimes]);
+  }, [appointments, sourceTimes, blockedTimes, editMode]);
 
   /* ---------- actions ---------- */
 
@@ -466,7 +496,7 @@ const DailyCalendar = () => {
               const apt = row.apt;
 
               /* ===================== APPOINTMENT SLOT ===================== */
-              if (apt) {
+              if (row.type === "appointment" && apt) {
                 const isExpanded = expandedAppointmentId === apt._id;
 
                 return (
@@ -636,6 +666,33 @@ const DailyCalendar = () => {
                         )}
                       </div>
                     )}
+                  </div>
+                );
+              }
+
+              /* ===================== CONTINUATION SLOT ===================== */
+              if (row.type === "continuation" && apt) {
+                return (
+                  <div
+                    key={`continuation-${apt._id || apt.time}-${row.time}`}
+                    className="flex items-center gap-4 p-4 rounded-xl bg-primary/5 border border-primary/10"
+                  >
+                    <div className="flex items-center gap-2 min-w-[80px]">
+                      <Clock className="w-4 h-4 text-primary" />
+                      <span className="font-semibold text-sm">{row.time}</span>
+                    </div>
+
+                    <div className="flex-1 text-sm text-muted-foreground">
+                      استمرار علاج:{" "}
+                      <span className="text-foreground font-medium">
+                        {apt.firstName} {apt.lastName}
+                      </span>
+                      {apt.title ? (
+                        <span className="block text-xs text-muted-foreground truncate">
+                          {apt.title}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                 );
               }

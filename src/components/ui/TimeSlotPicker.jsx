@@ -9,6 +9,9 @@ import { cn } from "@/lib/utils";
 
 /* ---------------- helpers ---------------- */
 
+const SLOT_MINUTES = 30;
+const WORK_END = "19:30";
+
 const timeToMinutes = (time) => {
   if (!time || typeof time !== "string") return null;
 
@@ -22,6 +25,32 @@ const timeToMinutes = (time) => {
 
   return h * 60 + m;
 };
+
+const getDurationMinutes = (value) => {
+  const duration = Number(value);
+  return Number.isFinite(duration) && duration > 0
+    ? duration
+    : SLOT_MINUTES;
+};
+
+const rangesOverlap = (startA, endA, startB, endB) => {
+  return startA < endB && endA > startB;
+};
+
+const buildDefaultSlots = () => {
+  const slots = [];
+
+  for (let h = 10; h < 20; h++) {
+    for (let m = 0; m < 60; m += SLOT_MINUTES) {
+      const time = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      if (time <= WORK_END) slots.push(time);
+    }
+  }
+
+  return slots;
+};
+
+const DEFAULT_SLOTS = buildDefaultSlots();
 
 /* ---------------- component ---------------- */
 
@@ -82,90 +111,24 @@ export function TimeSlotPicker({
     );
   }
 
-  const generateTimeSlots = () => {
-    const slots = [];
+  const generateSlots = () => {
     const now = new Date();
-    const serviceDuration = Number(duration) || 30;
+    const serviceDuration = getDurationMinutes(duration);
+    const sourceTimes = editedTimes.length > 0 ? editedTimes : DEFAULT_SLOTS;
+    const workEnd = timeToMinutes(WORK_END);
 
-    for (let h = 10; h < 20; h++) {
-      for (let m = 0; m < 60; m += 30) {
-        const startTime = `${String(h).padStart(2, "0")}:${String(m).padStart(
-          2,
-          "0",
-        )}`;
-        if (blockedTimes.includes(startTime)) {
-          slots.push({ time: startTime, available: false });
-          continue;
-        }
-
-        const startMinutes = timeToMinutes(startTime);
-        if (startMinutes === null) continue;
-
-        const endMinutes = startMinutes + serviceDuration;
-
-        let available = true;
-
-        if (isToday(selectedDate)) {
-          const slotDate = new Date(selectedDate);
-          slotDate.setHours(h, m, 0, 0);
-          if (slotDate < now) available = false;
-        }
-        if (endMinutes > 21.5 * 60) {
-          available = false;
-        }
-        const SLOT_SIZE = 30;
-
-        const slotStart = startMinutes;
-        const slotEnd = startMinutes + SLOT_SIZE;
-        for (const booking of bookedAppointments) {
-          if (!booking?.time) continue;
-
-          const bookingStart = timeToMinutes(booking.time);
-          if (bookingStart === null) continue;
-
-          const realDuration = Number(booking.duration) || 30;
-
-          const roundedDuration =
-            Math.ceil(realDuration / SLOT_SIZE) * SLOT_SIZE;
-
-          const bookingEnd = bookingStart + roundedDuration;
-
-          if (slotStart < bookingEnd && bookingStart < slotEnd) {
-            available = false;
-            break;
-          }
-        }
-        slots.push({ time: startTime, available });
-      }
-    }
-
-    return slots;
-  };
-
-  const generateSlotsFromEditedTimes = () => {
-    const slots = [];
-    const now = new Date();
-    const serviceDuration = Number(duration) || 30;
-    const SLOT_SIZE = 30;
-
-    for (const time of editedTimes) {
+    return sourceTimes.map((time) => {
       let available = true;
 
-      // blocked manually by admin
-      if (blockedTimes.includes(time)) {
-        slots.push({ time, available: false });
-        continue;
-      }
-
       const startMinutes = timeToMinutes(time);
-      if (startMinutes === null) {
-        slots.push({ time, available: false });
-        continue;
-      }
+      if (startMinutes === null) return { time, available: false };
 
       const endMinutes = startMinutes + serviceDuration;
 
-      // past time
+      if (blockedTimes.includes(time)) {
+        available = false;
+      }
+
       if (isToday(selectedDate)) {
         const [h, m] = time.split(":").map(Number);
         const slotDate = new Date(selectedDate);
@@ -173,42 +136,30 @@ export function TimeSlotPicker({
         if (slotDate < now) available = false;
       }
 
-      // outside working hours
-      if (endMinutes > 21.5 * 60) {
+      if (endMinutes > workEnd) {
         available = false;
       }
 
-      // overlap with existing appointments
       for (const booking of bookedAppointments) {
         if (!booking?.time) continue;
 
         const bookingStart = timeToMinutes(booking.time);
         if (bookingStart === null) continue;
 
-        const realDuration = Number(booking.duration) || 30;
-        const roundedDuration = Math.ceil(realDuration / SLOT_SIZE) * SLOT_SIZE;
+        const bookingDuration = getDurationMinutes(booking.duration);
+        const bookingEnd = bookingStart + bookingDuration;
 
-        const bookingEnd = bookingStart + roundedDuration;
-
-        if (
-          startMinutes < bookingEnd &&
-          bookingStart < startMinutes + SLOT_SIZE
-        ) {
+        if (rangesOverlap(startMinutes, endMinutes, bookingStart, bookingEnd)) {
           available = false;
           break;
         }
       }
 
-      slots.push({ time, available });
-    }
-
-    return slots;
+      return { time, available };
+    });
   };
 
-  const slots =
-    editedTimes.length > 0
-      ? generateSlotsFromEditedTimes()
-      : generateTimeSlots();
+  const slots = generateSlots();
 
   return (
     <div>
