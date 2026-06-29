@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import AdminProfileCard from "@/components/admin/AdminProfileCard";
+import BookForCustomer from "@/components/admin/BookForCustomer";
 import ChangePasswordModal from "@/components/admin/ChangePasswordModal";
 import DailyCalendar from "@/components/admin/DailyCalendar";
 import HujamahStatsCard from "@/components/admin/HujamahStatsCard";
@@ -39,6 +40,10 @@ export default function AdminProfilePage() {
 
         <section>
           <MonthlyBlocker />
+        </section>
+
+        <section>
+          <BookForCustomer />
         </section>
 
         <section className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-12 items-start">

@@ -185,6 +185,21 @@ const DailyCalendar = () => {
   }, [selectedDateKey]);
 
   useEffect(() => {
+    const handleAppointmentsChanged = () => {
+      fetchDay();
+    };
+
+    window.addEventListener("appointments:changed", handleAppointmentsChanged);
+
+    return () => {
+      window.removeEventListener(
+        "appointments:changed",
+        handleAppointmentsChanged,
+      );
+    };
+  }, [selectedDateKey]);
+
+  useEffect(() => {
     setEditingAppointmentId(null);
     setEditingAppointmentTime("");
   }, [selectedDateKey]);
