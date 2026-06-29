@@ -1,10 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check } from "lucide-react";
 import { format } from "date-fns";
 import { sendOTP } from "@/lib/phoneAuth";
 import { normalizeIsraeliPhone } from "@/lib/phone";
+
+const OTP_RESEND_COOLDOWN_SECONDS = 45;
+
+function getOtpCooldownMessage(seconds) {
+  return `Please wait ${seconds} seconds before requesting another verification code.`;
+}
+
+function getOtpErrorMessage(error) {
+  const code = error?.code || "otp/send-failed";
+  const message =
+    error?.message || "Unable to send verification code. Please try again.";
+
+  if (code === "auth/too-many-requests") {
+    return `${code}: ${message}`;
+  }
+
+  return `${code}: ${message}`;
+}
 
 export function AppointmentForm({
   selectedDate,
@@ -27,9 +45,24 @@ export function AppointmentForm({
   const [messageType, setMessageType] = useState("info");
   const [loadingStage, setLoadingStage] = useState(null); // "lookup" | "send" | "verify" | null
   const [existingUserName, setExistingUserName] = useState("");
+  const [otpCooldownSeconds, setOtpCooldownSeconds] = useState(0);
+  const otpSendInFlightRef = useRef(false);
 
-  const canStartFlow = selectedDate && selectedTime && data.phone;
-  const canSendOtpForNewUser = data.firstName && data.lastName;
+  const isOtpCoolingDown = otpCooldownSeconds > 0;
+  const hasPhoneForFlow = selectedDate && selectedTime && data.phone;
+  const hasDetailsForOtp = data.firstName && data.lastName;
+  const canStartFlow = hasPhoneForFlow && !isOtpCoolingDown;
+  const canSendOtpForNewUser = hasDetailsForOtp && !isOtpCoolingDown;
+
+  useEffect(() => {
+    if (otpCooldownSeconds <= 0) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setOtpCooldownSeconds((seconds) => Math.max(seconds - 1, 0));
+    }, 1000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [otpCooldownSeconds]);
 
   const showMessage = (type, text) => {
     setMessageType(type);
@@ -37,6 +70,14 @@ export function AppointmentForm({
   };
 
   const sendOtpForPhone = async (normalizedPhone) => {
+    if (otpSendInFlightRef.current) return;
+
+    if (isOtpCoolingDown) {
+      showMessage("error", getOtpCooldownMessage(otpCooldownSeconds));
+      return;
+    }
+
+    otpSendInFlightRef.current = true;
     setLoadingStage("send");
     setLoading(true);
     setMessage("");
@@ -60,10 +101,13 @@ export function AppointmentForm({
       const confirm = await sendOTP(normalizedPhone);
       setConfirmation(confirm);
       setData((d) => ({ ...d, phone: normalizedPhone }));
+      setOtpCooldownSeconds(OTP_RESEND_COOLDOWN_SECONDS);
       setStep("otp");
-    } catch {
-      showMessage("error", "Too many attempts. Please wait a bit and try again.");
+    } catch (error) {
+      console.error("Appointment OTP send failed", error);
+      showMessage("error", getOtpErrorMessage(error));
     } finally {
+      otpSendInFlightRef.current = false;
       setLoading(false);
       setLoadingStage(null);
     }
@@ -72,7 +116,14 @@ export function AppointmentForm({
   const handleLookupUser = async (e) => {
     e.preventDefault();
 
-    if (!canStartFlow || loading) return;
+    if (loading) return;
+
+    if (isOtpCoolingDown) {
+      showMessage("error", getOtpCooldownMessage(otpCooldownSeconds));
+      return;
+    }
+
+    if (!hasPhoneForFlow) return;
 
     const normalizedPhone = normalizeIsraeliPhone(data.phone);
 
@@ -141,7 +192,14 @@ export function AppointmentForm({
   const handleSendOtpForNewUser = async (e) => {
     e.preventDefault();
 
-    if (!canSendOtpForNewUser || loading) return;
+    if (loading) return;
+
+    if (isOtpCoolingDown) {
+      showMessage("error", getOtpCooldownMessage(otpCooldownSeconds));
+      return;
+    }
+
+    if (!hasDetailsForOtp) return;
 
     const normalizedPhone = normalizeIsraeliPhone(data.phone);
 
@@ -153,6 +211,21 @@ export function AppointmentForm({
 
     setData((current) => ({ ...current, phone: normalizedPhone }));
     setExistingUserName("");
+    await sendOtpForPhone(normalizedPhone);
+  };
+
+  const handleResendOTP = async () => {
+    if (loading) return;
+
+    const normalizedPhone = normalizeIsraeliPhone(data.phone);
+
+    if (!normalizedPhone) {
+      showMessage("error", "Please enter a valid Israeli phone number");
+      setStep("phone");
+      return;
+    }
+
+    setOtp("");
     await sendOtpForPhone(normalizedPhone);
   };
 
@@ -270,7 +343,11 @@ export function AppointmentForm({
                 disabled={!canStartFlow || loading}
                 className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
               >
-                {loading ? "جارٍ التحقق..." : "تأكيد الموعد"}
+                {loading
+                  ? "جارٍ التحقق..."
+                  : isOtpCoolingDown
+                    ? `انتظر ${otpCooldownSeconds} ثانية`
+                    : "تأكيد الموعد"}
               </button>
             </form>
           )}
@@ -351,7 +428,11 @@ export function AppointmentForm({
                   disabled={!canSendOtpForNewUser || loading}
                   className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
                 >
-                  {loading ? "جارٍ إرسال الرمز..." : "إرسال رمز التحقق"}
+                  {loading
+                    ? "جارٍ إرسال الرمز..."
+                    : isOtpCoolingDown
+                      ? `انتظر ${otpCooldownSeconds} ثانية`
+                      : "إرسال رمز التحقق"}
                 </button>
 
                 <button
@@ -439,8 +520,9 @@ export function AppointmentForm({
                 </div>
               )}
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3">
                 <button
+                  type="button"
                   onClick={handleVerifyOTP}
                   disabled={loading}
                   className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
@@ -448,19 +530,32 @@ export function AppointmentForm({
                   {loading ? "جارٍ التحقق..." : "التحقق وحفظ الموعد"}
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStep("phone");
-                    setConfirmation(null);
-                    setOtp("");
-                    setExistingUserName("");
-                    setMessage("");
-                  }}
-                  className="w-full rounded-xl py-3 border border-border text-foreground"
-                >
-                  تغيير الرقم
-                </button>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={handleResendOTP}
+                    disabled={loading || isOtpCoolingDown}
+                    className="w-full rounded-xl py-3 border border-border text-foreground disabled:opacity-50"
+                  >
+                    {isOtpCoolingDown
+                      ? `إعادة الإرسال خلال ${otpCooldownSeconds} ثانية`
+                      : "إعادة إرسال الرمز"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep("phone");
+                      setConfirmation(null);
+                      setOtp("");
+                      setExistingUserName("");
+                      setMessage("");
+                    }}
+                    className="w-full rounded-xl py-3 border border-border text-foreground"
+                  >
+                    تغيير الرقم
+                  </button>
+                </div>
               </div>
             </div>
           )}
