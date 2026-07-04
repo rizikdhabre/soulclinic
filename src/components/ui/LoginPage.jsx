@@ -2,12 +2,34 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Phone, ShieldCheck, KeyRound } from "lucide-react";
 import { normalizeIsraeliPhone } from "@/lib/phone";
-import { sendOTP } from "@/lib/phoneAuth";
 
-const IS_DEV = process.env.NODE_ENV === "development";
+function createOtpApiError(payload, fallbackMessage) {
+  const error = new Error(payload?.message || fallbackMessage);
+  error.code = payload?.error;
+  return error;
+}
+
+async function sendBackendOtp(phone) {
+  try {
+    const response = await axios.post("/api/otp/start", { phone });
+    return response.data;
+  } catch (error) {
+    throw createOtpApiError(error.response?.data, "Failed to send OTP.");
+  }
+}
+
+async function verifyBackendOtp(phone, code) {
+  try {
+    const response = await axios.post("/api/otp/verify", { phone, code });
+    return response.data;
+  } catch (error) {
+    throw createOtpApiError(error.response?.data, "Invalid OTP.");
+  }
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -37,17 +59,15 @@ export default function LoginPage() {
     try {
       setLoading(true);
 
-      if (IS_DEV) {
-        setStep("otp");
-        return;
-      }
-
-      const confirmation = await sendOTP(normalizedPhone);
-      window.__otpConfirmation = confirmation;
+      await sendBackendOtp(normalizedPhone);
       setStep("otp");
     } catch (e) {
       console.error(e);
-      setError("فشل إرسال الرمز. جرّب مرة أخرى.");
+      setError(
+        e.code === "OTP_SERVICE_NOT_CONFIGURED"
+          ? "خدمة إرسال الرمز غير مفعّلة حالياً."
+          : "فشل إرسال الرمز. جرّب مرة أخرى.",
+      );
     } finally {
       setLoading(false);
     }
@@ -58,26 +78,7 @@ export default function LoginPage() {
     try {
       setLoading(true);
 
-      if (IS_DEV) {
-        if (otp.trim() === "123456") {
-          router.push(
-            `/userAppointments?phone=${encodeURIComponent(normalizedPhone)}`,
-          );
-          return;
-        } else {
-          setError("رمز غير صحيح. (في وضع التطوير الرمز هو 123456)");
-          return;
-        }
-      }
-
-      const confirmation = window.__otpConfirmation;
-      if (!confirmation) {
-        setError("جلسة التحقق انتهت. أعد إرسال الرمز.");
-        setStep("phone");
-        return;
-      }
-
-      await confirmation.confirm(otp.trim());
+      await verifyBackendOtp(normalizedPhone, otp.trim());
       router.push(
         `/userAppointments?phone=${encodeURIComponent(normalizedPhone)}`,
       );

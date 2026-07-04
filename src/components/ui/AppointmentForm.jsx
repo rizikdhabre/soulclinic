@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check } from "lucide-react";
 import { format } from "date-fns";
-import { sendOTP } from "@/lib/phoneAuth";
+import axios from "axios";
 import { normalizeIsraeliPhone } from "@/lib/phone";
 
 const OTP_RESEND_COOLDOWN_SECONDS = 45;
@@ -21,6 +21,42 @@ function getOtpErrorMessage(error) {
   }
 
   return `${code}: ${message}`;
+}
+
+function createOtpApiError(payload, fallbackCode, fallbackMessage) {
+  const error = new Error(payload?.message || fallbackMessage);
+  error.code = payload?.error || fallbackCode;
+  return error;
+}
+
+async function sendBackendOtp(phone) {
+  try {
+    const response = await axios.post("/api/otp/start", { phone });
+    return response.data;
+  } catch (error) {
+    throw createOtpApiError(
+      error.response?.data,
+      "otp/send-failed",
+      "Failed to send OTP",
+    );
+  }
+}
+
+function createBackendOtpConfirmation(phone) {
+  return {
+    confirm: async (code) => {
+      try {
+        await axios.post("/api/otp/verify", { phone, code });
+        return true;
+      } catch (error) {
+        throw createOtpApiError(
+          error.response?.data,
+          "otp/verify-failed",
+          "Invalid verification code",
+        );
+      }
+    },
+  };
 }
 
 export function AppointmentForm({
@@ -82,24 +118,8 @@ export function AppointmentForm({
     setMessage("");
 
     try {
-      if (process.env.NODE_ENV === "development") {
-        setConfirmation({
-          confirm: async (code) => {
-            if (code === "123456") return true;
-            throw new Error("Invalid code");
-          },
-        });
-
-        setData((d) => ({ ...d, phone: normalizedPhone }));
-        setOtpCooldownSeconds(OTP_RESEND_COOLDOWN_SECONDS);
-        setStep("otp");
-        setLoading(false);
-        setLoadingStage(null);
-        return;
-      }
-
-      const confirm = await sendOTP(normalizedPhone);
-      setConfirmation(confirm);
+      await sendBackendOtp(normalizedPhone);
+      setConfirmation(createBackendOtpConfirmation(normalizedPhone));
       setData((d) => ({ ...d, phone: normalizedPhone }));
       setOtpCooldownSeconds(OTP_RESEND_COOLDOWN_SECONDS);
       setStep("otp");
@@ -245,8 +265,13 @@ export function AppointmentForm({
       }
 
       setStep("success");
-    } catch {
-      showMessage("error", "Invalid verification code. Please try again.");
+    } catch (error) {
+      showMessage(
+        "error",
+        error?.code === "OTP_SERVICE_NOT_CONFIGURED"
+          ? "OTP_SERVICE_NOT_CONFIGURED: OTP service is not configured."
+          : "Invalid verification code. Please try again.",
+      );
     } finally {
       setLoading(false);
       setLoadingStage(null);
