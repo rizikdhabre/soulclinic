@@ -42,6 +42,7 @@ export default function AppointmentsClient() {
         lastName: data.lastName,
         phone: data.phone,
         note: data.note,
+        verificationToken: data.verificationToken,
         duration,
         price,
         title,
@@ -52,12 +53,24 @@ export default function AppointmentsClient() {
 
       return true;
     } catch (error) {
-      if (error.response?.status === 409) {
+      if (
+        error.response?.status === 409 &&
+        error.response?.data?.error === "TIME_SLOT_UNAVAILABLE"
+      ) {
         setBookingError("هذه الساعة تم حجزها للتو، الرجاء اختيار ساعة أخرى.");
         setSelectedTime(null);
         setAvailabilityRefreshKey((key) => key + 1);
         return false;
       }
+
+      if (
+        error.response?.data?.error?.startsWith("OTP_VERIFICATION_") ||
+        error.response?.data?.error === "INVALID_PHONE"
+      ) {
+        setBookingError("انتهت صلاحية التحقق. يرجى طلب رمز تحقق جديد.");
+        return false;
+      }
+
       setBookingError("Something went wrong. Please try again.");
       return false;
     }

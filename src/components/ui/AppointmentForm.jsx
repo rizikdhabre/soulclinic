@@ -6,34 +6,60 @@ import { format } from "date-fns";
 import axios from "axios";
 import { normalizeIsraeliPhone } from "@/lib/phone";
 
-const OTP_RESEND_COOLDOWN_SECONDS = 45;
+const OTP_RESEND_COOLDOWN_SECONDS = 60;
 
 function getOtpCooldownMessage(seconds) {
-  return `Please wait ${seconds} seconds before requesting another verification code.`;
+  return `يرجى الانتظار ${seconds} ثانية قبل طلب رمز تحقق جديد.`;
 }
 
 function getOtpErrorMessage(error) {
   const code = error?.code || "otp/send-failed";
-  const message = error?.message || "Failed to send OTP";
 
-  if (code === "auth/too-many-requests") {
-    return "تم إرسال طلبات كثيرة. انتظر قليلاً ثم حاول مرة أخرى.";
+  switch (code) {
+    case "OTP_RATE_LIMITED":
+      return "تم طلب رمز تحقق مؤخرًا. يرجى الانتظار قبل المحاولة مرة أخرى.";
+    case "OTP_REQUEST_IN_PROGRESS":
+      return "يوجد طلب تحقق قيد المعالجة حاليًا.";
+    case "TWILIO_REQUEST_FAILED":
+      return "تعذر إرسال الرمز. نحاول مرة أخرى تلقائيًا.";
+    case "OTP_SEND_RETRIES_EXHAUSTED":
+    case "OTP_SEND_FAILED":
+      return "تعذر إرسال رمز التحقق بعد عدة محاولات. يرجى الانتظار قبل المحاولة مرة أخرى.";
+    case "OTP_SEND_PENDING":
+      return "قد يكون طلب رمز التحقق ما زال قيد المعالجة. يرجى الانتظار قبل المحاولة مرة أخرى.";
+    case "INVALID_PHONE":
+      return "رقم الهاتف غير صالح.";
+    case "OTP_SERVICE_NOT_CONFIGURED":
+    case "TWILIO_AUTH_FAILED":
+      return "خدمة التحقق غير متاحة حاليًا.";
+    case "auth/too-many-requests":
+      return "تم إرسال طلبات كثيرة. انتظر قليلاً ثم حاول مرة أخرى.";
+    default:
+      return "تعذر إرسال رمز التحقق. يرجى الانتظار قبل المحاولة مرة أخرى.";
   }
-
-  return `${code}: ${message}`;
 }
 
 function createOtpApiError(payload, fallbackCode, fallbackMessage) {
   const error = new Error(payload?.message || fallbackMessage);
   error.code = payload?.error || fallbackCode;
+  error.retryAfterSeconds = payload?.retryAfterSeconds;
   return error;
 }
 
 async function sendBackendOtp(phone) {
   try {
     const response = await axios.post("/api/otp/start", { phone });
+    if (!response.data?.success) {
+      throw createOtpApiError(
+        response.data,
+        "otp/send-failed",
+        "Failed to send OTP",
+      );
+    }
     return response.data;
   } catch (error) {
+    if (error.code) throw error;
+
     throw createOtpApiError(
       error.response?.data,
       "otp/send-failed",
@@ -46,8 +72,8 @@ function createBackendOtpConfirmation(phone) {
   return {
     confirm: async (code) => {
       try {
-        await axios.post("/api/otp/verify", { phone, code });
-        return true;
+        const response = await axios.post("/api/otp/verify", { phone, code });
+        return response.data;
       } catch (error) {
         throw createOtpApiError(
           error.response?.data,
@@ -75,6 +101,7 @@ export function AppointmentForm({
   const [step, setStep] = useState("phone");
   const [confirmation, setConfirmation] = useState(null);
   const [otp, setOtp] = useState("");
+  const [, setVerificationToken] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
@@ -115,16 +142,24 @@ export function AppointmentForm({
     otpSendInFlightRef.current = true;
     setLoadingStage("send");
     setLoading(true);
+    setOtpCooldownSeconds(OTP_RESEND_COOLDOWN_SECONDS);
+    setVerificationToken("");
+    setOtp("");
     setMessage("");
 
     try {
-      await sendBackendOtp(normalizedPhone);
+      const response = await sendBackendOtp(normalizedPhone);
       setConfirmation(createBackendOtpConfirmation(normalizedPhone));
       setData((d) => ({ ...d, phone: normalizedPhone }));
-      setOtpCooldownSeconds(OTP_RESEND_COOLDOWN_SECONDS);
+      if (response.retryAfterSeconds) {
+        setOtpCooldownSeconds(response.retryAfterSeconds);
+      }
       setStep("otp");
     } catch (error) {
       console.error("Appointment OTP send failed", error);
+      if (error.retryAfterSeconds) {
+        setOtpCooldownSeconds(error.retryAfterSeconds);
+      }
       showMessage("error", getOtpErrorMessage(error));
     } finally {
       otpSendInFlightRef.current = false;
@@ -148,7 +183,7 @@ export function AppointmentForm({
     const normalizedPhone = normalizeIsraeliPhone(data.phone);
 
     if (!normalizedPhone) {
-      showMessage("error", "Please enter a valid Israeli phone number");
+      showMessage("error", "رقم الهاتف غير صالح.");
       return;
     }
 
@@ -224,7 +259,7 @@ export function AppointmentForm({
     const normalizedPhone = normalizeIsraeliPhone(data.phone);
 
     if (!normalizedPhone) {
-      showMessage("error", "Please enter a valid Israeli phone number");
+      showMessage("error", "رقم الهاتف غير صالح.");
       setStep("phone");
       return;
     }
@@ -240,7 +275,7 @@ export function AppointmentForm({
     const normalizedPhone = normalizeIsraeliPhone(data.phone);
 
     if (!normalizedPhone) {
-      showMessage("error", "Please enter a valid Israeli phone number");
+      showMessage("error", "رقم الهاتف غير صالح.");
       setStep("phone");
       return;
     }
@@ -257,8 +292,24 @@ export function AppointmentForm({
     setMessage("");
 
     try {
-      await confirmation.confirm(otp.trim());
-      const submitted = await onSubmit(data);
+      const verification = await confirmation.confirm(otp.trim());
+      const nextVerificationToken = verification?.verificationToken;
+
+      if (!nextVerificationToken) {
+        throw createOtpApiError(
+          { error: "OTP_VERIFICATION_INVALID" },
+          "otp/verify-failed",
+          "Invalid verification code",
+        );
+      }
+
+      setVerificationToken(nextVerificationToken);
+
+      const submitted = await onSubmit({
+        ...data,
+        verificationToken: nextVerificationToken,
+      });
+      setVerificationToken("");
 
       if (submitted === false) {
         return;
@@ -269,8 +320,10 @@ export function AppointmentForm({
       showMessage(
         "error",
         error?.code === "OTP_SERVICE_NOT_CONFIGURED"
-          ? "OTP_SERVICE_NOT_CONFIGURED: OTP service is not configured."
-          : "Invalid verification code. Please try again.",
+          ? "خدمة التحقق غير متاحة حاليًا."
+          : error?.code === "OTP_VERIFY_RATE_LIMITED"
+            ? "تم إدخال رمز خاطئ عدة مرات. يرجى الانتظار قبل المحاولة مرة أخرى."
+            : "رمز التحقق غير صحيح. حاول مرة أخرى.",
       );
     } finally {
       setLoading(false);
@@ -295,12 +348,12 @@ export function AppointmentForm({
             <div className="text-base font-semibold">
               {loadingStage === "lookup"
                 ? "نقوم بالتحقق من رقم الهاتف"
-                : "انتظر، نحن نرسل لك رمزًا"}
+                : "جارٍ إرسال رمز التحقق."}
             </div>
             <div className="mt-2 text-sm text-muted-foreground">
               {loadingStage === "lookup"
                 ? "نبحث عن بياناتك أولاً حتى نحدد الخطوة التالية."
-                : "لا تغادر الصفحة حتى تقوم بإدخال الرمز وإتمام التأكيد."}
+                : "إذا تعذر إرسال الرمز مؤقتًا فسنحاول مرة أخرى تلقائيًا."}
             </div>
 
             <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-muted">
@@ -328,6 +381,9 @@ export function AppointmentForm({
                 onChange={(e) => {
                   setData({ ...data, phone: e.target.value });
                   setExistingUserName("");
+                  setConfirmation(null);
+                  setVerificationToken("");
+                  setOtp("");
                 }}
                 inputMode="tel"
                 autoComplete="tel"
@@ -465,6 +521,9 @@ export function AppointmentForm({
                   onClick={() => {
                     setStep("phone");
                     setMessage("");
+                    setConfirmation(null);
+                    setVerificationToken("");
+                    setOtp("");
                   }}
                   className="w-full rounded-xl py-3 border border-border text-foreground"
                 >
@@ -572,6 +631,7 @@ export function AppointmentForm({
                     onClick={() => {
                       setStep("phone");
                       setConfirmation(null);
+                      setVerificationToken("");
                       setOtp("");
                       setExistingUserName("");
                       setMessage("");

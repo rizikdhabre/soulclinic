@@ -16,6 +16,11 @@ import {
   ensureAppointmentsDateIndex,
   ensureDayDocument,
 } from "@/lib/appointmentConcurrency";
+import {
+  OtpVerificationGrantError,
+  consumeOtpVerificationGrant,
+  releaseOtpVerificationGrant,
+} from "@/lib/otpSecurity";
 
 /* ---------------- HELPER ---------------- */
 
@@ -34,6 +39,38 @@ function getUnavailableResponse() {
       message: "This time slot was just booked. Please choose another time.",
     },
     { status: 409 },
+  );
+}
+
+function getInvalidPhoneResponse() {
+  return NextResponse.json(
+    {
+      error: "INVALID_PHONE",
+      message: "Invalid phone number.",
+    },
+    { status: 400 },
+  );
+}
+
+function getOtpVerificationErrorResponse(error) {
+  const messages = {
+    OTP_VERIFICATION_REQUIRED: "OTP verification is required.",
+    OTP_VERIFICATION_INVALID: "OTP verification is invalid.",
+    OTP_VERIFICATION_EXPIRED: "OTP verification has expired.",
+    OTP_VERIFICATION_ALREADY_USED: "OTP verification was already used.",
+  };
+  const statuses = {
+    OTP_VERIFICATION_ALREADY_USED: 409,
+  };
+
+  return NextResponse.json(
+    {
+      error: error.code || "OTP_VERIFICATION_INVALID",
+      message:
+        messages[error.code] ||
+        "OTP verification is missing, invalid, expired, or already used.",
+    },
+    { status: statuses[error.code] || error.status || 401 },
   );
 }
 
@@ -335,6 +372,7 @@ async function createAppointmentWithTransaction({
   usersCollection,
   appointmentId,
   normalizedPhone,
+  verificationToken,
   firstName,
   lastName,
   note,
@@ -350,6 +388,13 @@ async function createAppointmentWithTransaction({
 
   try {
     await session.withTransaction(async () => {
+      await consumeOtpVerificationGrant({
+        phone: normalizedPhone,
+        verificationToken,
+        appointmentId,
+        session,
+      });
+
       const { resolvedFirstName, resolvedLastName } =
         await resolveBookingUser({
           usersCollection,
@@ -431,6 +476,7 @@ async function createAppointmentWithAtomicFallback({
   usersCollection,
   appointmentId,
   normalizedPhone,
+  verificationToken,
   firstName,
   lastName,
   note,
@@ -441,68 +487,92 @@ async function createAppointmentWithAtomicFallback({
   safePrice,
   cupsCount,
 }) {
-  const { resolvedFirstName, resolvedLastName } = await resolveBookingUser({
-    usersCollection,
-    normalizedPhone,
-    firstName,
-    lastName,
-  });
+  let grantConsumed = false;
+  let appointmentSaved = false;
 
-  const appointmentData = buildAppointmentData({
-    appointmentId,
-    firstName: resolvedFirstName,
-    lastName: resolvedLastName,
-    phone: normalizedPhone,
-    time,
-    duration: safeDuration,
-    cupsCount,
-  });
+  try {
+    await consumeOtpVerificationGrant({
+      phone: normalizedPhone,
+      verificationToken,
+      appointmentId,
+    });
+    grantConsumed = true;
 
-  const updateResult = await appointmentsCollection.findOneAndUpdate(
-    buildAtomicAvailabilityFilter({
-      date,
+    const { resolvedFirstName, resolvedLastName } = await resolveBookingUser({
+      usersCollection,
+      normalizedPhone,
+      firstName,
+      lastName,
+    });
+
+    const appointmentData = buildAppointmentData({
+      appointmentId,
+      firstName: resolvedFirstName,
+      lastName: resolvedLastName,
+      phone: normalizedPhone,
       time,
       duration: safeDuration,
-    }),
-    {
-      $push: {
-        appointments: appointmentData,
+      cupsCount,
+    });
+
+    const updateResult = await appointmentsCollection.findOneAndUpdate(
+      buildAtomicAvailabilityFilter({
+        date,
+        time,
+        duration: safeDuration,
+      }),
+      {
+        $push: {
+          appointments: appointmentData,
+        },
       },
-    },
-    {
-      returnDocument: "after",
-      projection: { _id: 1 },
-    },
-  );
+      {
+        returnDocument: "after",
+        projection: { _id: 1 },
+      },
+    );
 
-  const updatedDay = updateResult?.value ?? updateResult;
+    const updatedDay = updateResult?.value ?? updateResult;
 
-  if (!updatedDay) {
-    throw new TimeSlotUnavailableError();
+    if (!updatedDay) {
+      throw new TimeSlotUnavailableError();
+    }
+
+    appointmentSaved = true;
+
+    await upsertUserData({
+      usersCollection,
+      appointmentId,
+      phone: normalizedPhone,
+      firstName: resolvedFirstName,
+      lastName: resolvedLastName,
+      note,
+      date,
+      time,
+      title,
+      price: safePrice,
+      cupsCount,
+    });
+
+    return {
+      phone: normalizedPhone,
+      firstName: resolvedFirstName,
+      lastName: resolvedLastName,
+      title,
+      date,
+      time,
+    };
+  } catch (error) {
+    if (grantConsumed && !appointmentSaved) {
+      await releaseOtpVerificationGrant({
+        phone: normalizedPhone,
+        verificationToken,
+        appointmentId,
+      });
+    }
+
+    throw error;
   }
-
-  await upsertUserData({
-    usersCollection,
-    appointmentId,
-    phone: normalizedPhone,
-    firstName: resolvedFirstName,
-    lastName: resolvedLastName,
-    note,
-    date,
-    time,
-    title,
-    price: safePrice,
-    cupsCount,
-  });
-
-  return {
-    phone: normalizedPhone,
-    firstName: resolvedFirstName,
-    lastName: resolvedLastName,
-    title,
-    date,
-    time,
-  };
 }
 
 export async function POST(req) {
@@ -520,13 +590,25 @@ export async function POST(req) {
       title,
       price,
       cupsCount,
+      verificationToken,
     } = body;
 
     if (!phone || !date || !time) {
       return NextResponse.json({ error: "Missing fields" }, { status: 400 });
     }
 
-    const normalizedPhone = normalizeIsraeliPhone(phone) || phone;
+    const normalizedPhone = normalizeIsraeliPhone(phone);
+
+    if (!normalizedPhone) {
+      return getInvalidPhoneResponse();
+    }
+
+    if (!verificationToken) {
+      return getOtpVerificationErrorResponse(
+        new OtpVerificationGrantError("OTP_VERIFICATION_REQUIRED"),
+      );
+    }
+
     const safeDuration = getDurationMinutes(duration);
     const safePrice = getSafeNumber(price);
 
@@ -550,6 +632,7 @@ export async function POST(req) {
         usersCollection,
         appointmentId,
         normalizedPhone,
+        verificationToken,
         firstName,
         lastName,
         note,
@@ -574,6 +657,7 @@ export async function POST(req) {
         usersCollection,
         appointmentId,
         normalizedPhone,
+        verificationToken,
         firstName,
         lastName,
         note,
@@ -592,6 +676,10 @@ export async function POST(req) {
   } catch (error) {
     if (error instanceof TimeSlotUnavailableError || error?.status === 409) {
       return getUnavailableResponse();
+    }
+
+    if (error instanceof OtpVerificationGrantError) {
+      return getOtpVerificationErrorResponse(error);
     }
 
     if (error instanceof RequestValidationError || error?.status === 400) {
