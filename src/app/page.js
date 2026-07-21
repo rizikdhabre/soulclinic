@@ -135,13 +135,13 @@ const HomePage = () => {
                 bubblePhase === "hero"
                   ? { duration: 0.6 }
                   : {
-                      duration: 1.8, 
+                      duration: 1.8,
                       ease: "easeInOut",
                     }
               }
               className="fixed bottom-6 right-6 z-[9999]"
             >
-              <Link href="/perfumes">
+              <a href="https://www.soulperfume.co">
                 <motion.div
                   className={`
         ${bubblePhase === "hero" ? "w-26 h-26" : "w-[56px] h-[56px]"}
@@ -182,7 +182,7 @@ const HomePage = () => {
                       transition={{ repeat: Infinity, duration: 4 }}
                       className="text-sm leading-relaxed font-semibold p-3"
                     >
-                      عطورنا 
+                      عطورنا
                       <br />
                       متوفرة الآن!
                       <br />
@@ -192,7 +192,7 @@ const HomePage = () => {
                     <span className="text-xs font-bold">عطور</span>
                   )}
                 </motion.div>
-              </Link>
+              </a>
             </motion.div>
 
             {/* CTA Buttons */}

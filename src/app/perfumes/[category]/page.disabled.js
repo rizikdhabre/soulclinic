@@ -1,3 +1,7 @@
+// Perfumes category page is intentionally disabled.
+// This file is not named page.js so Next/Vercel will not register /perfumes/[category].
+// Rename it back to page.js when you want to restore the public category page.
+
 "use client";
 
 import { useEffect, useState } from "react";

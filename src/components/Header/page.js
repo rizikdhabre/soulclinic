@@ -21,7 +21,6 @@ const Header = () => {
     { name: "من نحن", path: "/about" },
     { name: "العلاجات", path: "/dashboard" },
     { name: "اتصل بنا", path: "/contact" },
-    { name: "العطور", path: "/perfumes" },
 
     isAdmin
       ? { name: "صفحة الإدارة", path: "/admin" }

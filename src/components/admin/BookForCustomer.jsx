@@ -1,5 +1,6 @@
 "use client";
 
+import axios from "axios";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { normalizeIsraeliPhone } from "@/lib/phone";
 
@@ -76,6 +77,12 @@ function getScheduleTimes(editedTimes) {
     .sort((a, b) => toMinutes(a) - toMinutes(b));
 }
 
+function getApiErrorMessage(error, fallback) {
+  const payload = error?.response?.data;
+
+  return payload?.message || payload?.error || error?.message || fallback;
+}
+
 export default function BookForCustomer() {
   const [form, setForm] = useState(initialForm);
   const [customer, setCustomer] = useState(initialCustomer);
@@ -148,20 +155,14 @@ export default function BookForCustomer() {
     const fetchTreatments = async () => {
       try {
         setLoadingTreatments(true);
-        const response = await fetch("/api/admin/treatments", {
-          cache: "no-store",
+        const { data } = await axios.get("/api/admin/treatments", {
+          headers: { "Cache-Control": "no-store" },
         });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.message || "فشل تحميل الأقسام");
-        }
 
         setTreatments(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error("Failed to load treatments:", error);
-        showMessage("error", "فشل تحميل الأقسام");
+        showMessage("error", getApiErrorMessage(error, "فشل تحميل الأقسام"));
       } finally {
         setLoadingTreatments(false);
       }
@@ -190,15 +191,10 @@ export default function BookForCustomer() {
         setAvailabilityLoading(true);
         setAvailabilityError("");
 
-        const response = await fetch(
-          `/api/appointments?date=${encodeURIComponent(form.date)}&admin=true`,
-          { cache: "no-store" },
-        );
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.error || "فشل تحميل الساعات المتاحة");
-        }
+        const { data } = await axios.get("/api/appointments", {
+          params: { date: form.date, admin: true },
+          headers: { "Cache-Control": "no-store" },
+        });
 
         if (!active) return;
 
@@ -265,16 +261,10 @@ export default function BookForCustomer() {
     setMessage("");
 
     try {
-      const response = await fetch(
-        `/api/appointments/user?phone=${encodeURIComponent(phone)}`,
-        { cache: "no-store" },
-      );
-
-      const payload = await response.json();
-
-      if (!response.ok) {
-        throw new Error(payload.message || "فشل البحث عن الزبون");
-      }
+      const { data: payload } = await axios.get("/api/appointments/user", {
+        params: { phone },
+        headers: { "Cache-Control": "no-store" },
+      });
 
       const firstName = payload.firstName || "";
       const lastName = payload.lastName || "";
@@ -307,7 +297,7 @@ export default function BookForCustomer() {
     } catch (error) {
       console.error("Customer lookup failed:", error);
       setCustomer(initialCustomer);
-      showMessage("error", error.message || "فشل البحث عن الزبون");
+      showMessage("error", getApiErrorMessage(error, "فشل البحث عن الزبون"));
       return null;
     } finally {
       setLookupLoading(false);
@@ -408,32 +398,38 @@ export default function BookForCustomer() {
 
       setMessage("");
 
-      const response = await fetch("/api/appointments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const result = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        if (response.status === 409) {
-          setForm((current) => ({ ...current, time: "" }));
-          setAvailabilityRefreshKey((key) => key + 1);
-          throw new Error(
-            "هذه الساعة تم حجزها أو لم تعد متاحة، اختر ساعة أخرى.",
-          );
-        }
-
-        throw new Error(result.error || result.message || "فشل إنشاء الموعد");
-      }
+      await axios.post("/api/admin/bookforCustumer", payload);
 
       resetForm();
       showMessage("success", "تم إنشاء الموعد بنجاح");
       window.dispatchEvent(new CustomEvent("appointments:changed"));
     } catch (error) {
       console.error("Admin booking failed:", error);
-      showMessage("error", error.message || "فشل إنشاء الموعد");
+
+      const status = error?.response?.status;
+      const apiError = error?.response?.data?.error;
+
+      if (status === 409 || apiError === "TIME_SLOT_UNAVAILABLE") {
+        setForm((current) => ({ ...current, time: "" }));
+        setAvailabilityRefreshKey((key) => key + 1);
+        showMessage(
+          "error",
+          "هذه الساعة تم حجزها أو لم تعد متاحة، اختر ساعة أخرى.",
+        );
+        return;
+      }
+
+      if (status === 401) {
+        showMessage("error", "انتهت صلاحية جلسة الأدمن. سجّل الدخول مرة أخرى.");
+        return;
+      }
+
+      if (status === 403) {
+        showMessage("error", "لا توجد صلاحية لإنشاء موعد من لوحة الإدارة.");
+        return;
+      }
+
+      showMessage("error", getApiErrorMessage(error, "فشل إنشاء الموعد"));
     } finally {
       submitInFlightRef.current = false;
       setSubmitting(false);

@@ -1,3 +1,7 @@
+// Perfumes layout is intentionally disabled.
+// This file is not named layout.js so Next/Vercel will not include it in the route tree.
+// Rename it back to layout.js when you want to restore the public perfumes layout.
+
 "use client";
 
 import { usePathname } from "next/navigation";
