@@ -19,7 +19,7 @@ export const metadata = {
   metadataBase: new URL("https://soulclinc.net"),
 
   title: {
-    default: "عيادة SOUL | استعادة التوازن وشفاء الجسد",
+    default: "عيادة SOUL |  للعلاج الطبيعي وتخفيف الآلام",
     template: "%s | SoulClinc",
   },
 
@@ -51,7 +51,7 @@ export const metadata = {
   },
 
   openGraph: {
-    title: "عيادة SOUL | استعادة التوازن وشفاء الجسد",
+    title: "عيادة SOUL |  للعلاج الطبيعي وتخفيف الآلام",
     description:
       "علاجات طبيعية تشمل الحجامة، الإبر الصينية، والمساج الطبي لتعزيز الصحة واستعادة توازن الجسم",
     url: "https://soulclinc.net",
