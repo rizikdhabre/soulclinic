@@ -7,11 +7,16 @@ const FALLBACK_CODES = new Set([
   "auth/missing-app-credential",
   "auth/invalid-app-credential",
   "auth/network-request-failed",
+  "auth/unknown",
 ]);
 
 export function classifyFirebaseSendError(value) {
+  const hasExplicitCode =
+    typeof value === "string" || typeof value?.code === "string";
   const code = typeof value === "string" ? value : value?.code || "auth/unknown";
-  if (FALLBACK_CODES.has(code)) return { action: "fallback", code };
+  if (hasExplicitCode && FALLBACK_CODES.has(code)) {
+    return { action: "fallback", code };
+  }
   return { action: "reject", code };
 }
 
