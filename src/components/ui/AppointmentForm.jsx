@@ -1,88 +1,40 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Check } from "lucide-react";
 import { format } from "date-fns";
-import axios from "axios";
+import { usePhoneOtp } from "@/hooks/usePhoneOtp";
+import { createBookingFormFlow } from "@/lib/bookingFormFlow";
 import { normalizeIsraeliPhone } from "@/lib/phone";
 
-const OTP_RESEND_COOLDOWN_SECONDS = 60;
-
-function getOtpCooldownMessage(seconds) {
-  return `يرجى الانتظار ${seconds} ثانية قبل طلب رمز تحقق جديد.`;
-}
-
 function getOtpErrorMessage(error) {
-  const code = error?.code || "otp/send-failed";
-
-  switch (code) {
-    case "OTP_RATE_LIMITED":
-      return "تم طلب رمز تحقق مؤخرًا. يرجى الانتظار قبل المحاولة مرة أخرى.";
-    case "OTP_REQUEST_IN_PROGRESS":
-      return "يوجد طلب تحقق قيد المعالجة حاليًا.";
-    case "TWILIO_REQUEST_FAILED":
-      return "تعذر إرسال الرمز. نحاول مرة أخرى تلقائيًا.";
-    case "OTP_SEND_RETRIES_EXHAUSTED":
-    case "OTP_SEND_FAILED":
-      return "تعذر إرسال رمز التحقق بعد عدة محاولات. يرجى الانتظار قبل المحاولة مرة أخرى.";
-    case "OTP_SEND_PENDING":
-      return "قد يكون طلب رمز التحقق ما زال قيد المعالجة. يرجى الانتظار قبل المحاولة مرة أخرى.";
+  switch (error?.code) {
     case "INVALID_PHONE":
       return "رقم الهاتف غير صالح.";
-    case "OTP_SERVICE_NOT_CONFIGURED":
-    case "TWILIO_AUTH_FAILED":
-      return "خدمة التحقق غير متاحة حاليًا.";
+    case "OTP_RATE_LIMITED":
+    case "OTP_SOURCE_RATE_LIMITED":
+    case "OTP_FALLBACK_SOURCE_RATE_LIMITED":
     case "auth/too-many-requests":
       return "تم إرسال طلبات كثيرة. انتظر قليلاً ثم حاول مرة أخرى.";
+    case "OTP_REQUEST_IN_PROGRESS":
+    case "OTP_STATE_BUSY":
+      return "يوجد طلب تحقق قيد المعالجة حاليًا.";
+    case "OTP_SERVICE_NOT_CONFIGURED":
+    case "OTP_SOURCE_UNAVAILABLE":
+      return "خدمة التحقق غير متاحة حاليًا.";
+    case "OTP_VERIFY_RATE_LIMITED":
+      return "تم إدخال رمز خاطئ عدة مرات. يرجى الانتظار قبل المحاولة مرة أخرى.";
+    case "OTP_VERIFICATION_EXPIRED":
+    case "auth/code-expired":
+      return "انتهت صلاحية رمز التحقق. أعد إرسال الرمز وحاول مرة أخرى.";
+    case "INVALID_OTP":
+    case "OTP_VERIFICATION_INVALID":
+    case "auth/invalid-verification-code":
+    case "auth/missing-verification-code":
+      return "رمز التحقق غير صحيح. حاول مرة أخرى.";
     default:
-      return "تعذر إرسال رمز التحقق. يرجى الانتظار قبل المحاولة مرة أخرى.";
+      return "تعذر إكمال التحقق. يرجى المحاولة مرة أخرى.";
   }
-}
-
-function createOtpApiError(payload, fallbackCode, fallbackMessage) {
-  const error = new Error(payload?.message || fallbackMessage);
-  error.code = payload?.error || fallbackCode;
-  error.retryAfterSeconds = payload?.retryAfterSeconds;
-  return error;
-}
-
-async function sendBackendOtp(phone) {
-  try {
-    const response = await axios.post("/api/otp/start", { phone });
-    if (!response.data?.success) {
-      throw createOtpApiError(
-        response.data,
-        "otp/send-failed",
-        "Failed to send OTP",
-      );
-    }
-    return response.data;
-  } catch (error) {
-    if (error.code) throw error;
-
-    throw createOtpApiError(
-      error.response?.data,
-      "otp/send-failed",
-      "Failed to send OTP",
-    );
-  }
-}
-
-function createBackendOtpConfirmation(phone) {
-  return {
-    confirm: async (code) => {
-      try {
-        const response = await axios.post("/api/otp/verify", { phone, code });
-        return response.data;
-      } catch (error) {
-        throw createOtpApiError(
-          error.response?.data,
-          "otp/verify-failed",
-          "Invalid verification code",
-        );
-      }
-    },
-  };
 }
 
 export function AppointmentForm({
@@ -97,245 +49,232 @@ export function AppointmentForm({
     phone: "",
     note: "",
   });
-
   const [step, setStep] = useState("phone");
-  const [confirmation, setConfirmation] = useState(null);
   const [otp, setOtp] = useState("");
-  const [, setVerificationToken] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
-  const [loadingStage, setLoadingStage] = useState(null); // "lookup" | "send" | "verify" | null
-  const [existingUserName, setExistingUserName] = useState("");
-  const [otpCooldownSeconds, setOtpCooldownSeconds] = useState(0);
-  const otpSendInFlightRef = useRef(false);
+  const bookingFlowRef = useRef(null);
+  if (!bookingFlowRef.current) {
+    bookingFlowRef.current = createBookingFormFlow();
+  }
+  const bookingFlow = bookingFlowRef.current;
+  const [verifiedFlowState, setVerifiedFlowState] = useState(() =>
+    bookingFlow.getSnapshot(),
+  );
+  const otpFlow = usePhoneOtp({
+    purpose: "booking",
+    recaptchaContainerId: "appointment-recaptcha-container",
+  });
 
-  const isOtpCoolingDown = otpCooldownSeconds > 0;
-  const hasPhoneForFlow = selectedDate && selectedTime && data.phone;
-  const hasDetailsForOtp = data.firstName && data.lastName;
-  const canStartFlow = hasPhoneForFlow && !isOtpCoolingDown;
-  const canSendOtpForNewUser = hasDetailsForOtp && !isOtpCoolingDown;
-
-  useEffect(() => {
-    if (otpCooldownSeconds <= 0) return;
-
-    const timeoutId = window.setTimeout(() => {
-      setOtpCooldownSeconds((seconds) => Math.max(seconds - 1, 0));
-    }, 1000);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [otpCooldownSeconds]);
+  const normalizedPhone = normalizeIsraeliPhone(data.phone);
+  const isOtpCoolingDown = otpFlow.cooldownSeconds > 0;
+  const canStartFlow = Boolean(
+    selectedDate &&
+      selectedTime &&
+      data.phone.trim() &&
+      !otpFlow.loading &&
+      !isOtpCoolingDown,
+  );
+  const canSubmitDetails = Boolean(
+    selectedDate &&
+      selectedTime &&
+      data.firstName.trim() &&
+      data.lastName.trim() &&
+      verifiedFlowState.hasPendingBooking &&
+      verifiedFlowState.profileStatus === "incomplete" &&
+      !submitting,
+  );
+  const canRetryVerifiedBooking = Boolean(
+    selectedDate &&
+      selectedTime &&
+      normalizedPhone &&
+      verifiedFlowState.hasPendingBooking &&
+      verifiedFlowState.profileStatus === "complete" &&
+      !submitting,
+  );
+  const visibleMessage = message ||
+    (otpFlow.error ? getOtpErrorMessage(otpFlow.error) : "");
+  const visibleMessageType = message ? messageType : "error";
 
   const showMessage = (type, text) => {
     setMessageType(type);
     setMessage(text);
   };
 
-  const sendOtpForPhone = async (normalizedPhone) => {
-    if (otpSendInFlightRef.current) return;
+  const syncVerifiedFlowState = () => {
+    setVerifiedFlowState(bookingFlow.getSnapshot());
+  };
 
-    if (isOtpCoolingDown) {
-      showMessage("error", getOtpCooldownMessage(otpCooldownSeconds));
+  const submitVerifiedBooking = async (details) => {
+    if (submitting || bookingFlow.getSnapshot().submitting) return false;
+
+    setSubmitting(true);
+    try {
+      const result = await bookingFlow.submit({ onSubmit, details });
+      syncVerifiedFlowState();
+
+      if (result.status === "success") {
+        setStep("success");
+        return true;
+      }
+
+      if (result.status === "retry" && result.reason === "error") {
+        showMessage("error", "تعذر حفظ الموعد. يرجى المحاولة مرة أخرى.");
+      } else if (result.status === "missing") {
+        showMessage("error", "انتهت صلاحية التحقق. اطلب رمز تحقق جديدًا.");
+      }
+
+      return false;
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handlePhoneSubmit = async (event) => {
+    event.preventDefault();
+    if (otpFlow.loading || submitting || isOtpCoolingDown) return;
+
+    if (!selectedDate || !selectedTime) {
+      showMessage("error", "اختر التاريخ والساعة قبل تأكيد الموعد.");
+      return;
+    }
+    if (!normalizedPhone) {
+      showMessage("error", "رقم الهاتف غير صالح.");
       return;
     }
 
-    otpSendInFlightRef.current = true;
-    setLoadingStage("send");
-    setLoading(true);
-    setOtpCooldownSeconds(OTP_RESEND_COOLDOWN_SECONDS);
-    setVerificationToken("");
+    setData((current) => ({
+      ...current,
+      phone: normalizedPhone,
+      firstName: "",
+      lastName: "",
+    }));
+    bookingFlow.phoneChanged();
+    syncVerifiedFlowState();
     setOtp("");
     setMessage("");
 
     try {
-      const response = await sendBackendOtp(normalizedPhone);
-      setConfirmation(createBackendOtpConfirmation(normalizedPhone));
-      setData((d) => ({ ...d, phone: normalizedPhone }));
-      if (response.retryAfterSeconds) {
-        setOtpCooldownSeconds(response.retryAfterSeconds);
-      }
+      const startOutcome = await otpFlow.start(normalizedPhone);
+      if (!startOutcome.started) return;
       setStep("otp");
-    } catch (error) {
-      console.error("Appointment OTP send failed", error);
-      if (error.retryAfterSeconds) {
-        setOtpCooldownSeconds(error.retryAfterSeconds);
-      }
-      showMessage("error", getOtpErrorMessage(error));
-    } finally {
-      otpSendInFlightRef.current = false;
-      setLoading(false);
-      setLoadingStage(null);
+    } catch {
+      // The hook exposes only its projected public error.
     }
   };
 
-  const handleLookupUser = async (e) => {
-    e.preventDefault();
-
-    if (loading) return;
-
-    if (isOtpCoolingDown) {
-      showMessage("error", getOtpCooldownMessage(otpCooldownSeconds));
-      return;
-    }
-
-    if (!hasPhoneForFlow) return;
-
-    const normalizedPhone = normalizeIsraeliPhone(data.phone);
-
-    if (!normalizedPhone) {
-      showMessage("error", "رقم الهاتف غير صالح.");
-      return;
-    }
-
-    setLoadingStage("lookup");
-    setLoading(true);
-    setMessage("");
-
-    try {
-      const response = await fetch(
-        `/api/appointments/user?phone=${encodeURIComponent(normalizedPhone)}`,
-        {
-          cache: "no-store",
-        },
-      );
-
-      const payload = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          payload.message || "Unable to validate this phone number right now.",
-        );
-      }
-
-      const firstName = payload.firstName || "";
-      const lastName = payload.lastName || "";
-      const fullName = `${firstName} ${lastName}`.trim();
-      const phone = payload.phone || normalizedPhone;
-
-      setData((current) => ({
-        ...current,
-        phone,
-        firstName,
-        lastName,
-      }));
-
-      if (payload.exists && firstName && lastName) {
-        setExistingUserName(fullName);
-        await sendOtpForPhone(phone);
-        return;
-      }
-
-      setExistingUserName(fullName);
-      setStep("details");
-      showMessage(
-        "info",
-        payload.exists
-          ? "أكمل الاسم لهذا الرقم ثم أرسل رمز التحقق."
-          : "هذا رقم جديد. أدخل الاسم الأول واسم العائلة ثم أرسل رمز التحقق.",
-      );
-    } catch (error) {
-      showMessage(
-        "error",
-        error.message || "Unable to check this number right now.",
-      );
-    } finally {
-      setLoading(false);
-      setLoadingStage(null);
-    }
-  };
-
-  const handleSendOtpForNewUser = async (e) => {
-    e.preventDefault();
-
-    if (loading) return;
-
-    if (isOtpCoolingDown) {
-      showMessage("error", getOtpCooldownMessage(otpCooldownSeconds));
-      return;
-    }
-
-    if (!hasDetailsForOtp) return;
-
-    const normalizedPhone = normalizeIsraeliPhone(data.phone);
-
-    if (!normalizedPhone) {
-      showMessage("error", "رقم الهاتف غير صالح.");
-      setStep("phone");
-      return;
-    }
-
-    setData((current) => ({ ...current, phone: normalizedPhone }));
-    setExistingUserName("");
-    await sendOtpForPhone(normalizedPhone);
-  };
-
-  const handleResendOTP = async () => {
-    if (loading) return;
-
-    const normalizedPhone = normalizeIsraeliPhone(data.phone);
-
-    if (!normalizedPhone) {
-      showMessage("error", "رقم الهاتف غير صالح.");
-      setStep("phone");
-      return;
-    }
+  const handleResendOtp = async () => {
+    if (otpFlow.loading || submitting || isOtpCoolingDown) return;
 
     setOtp("");
-    await sendOtpForPhone(normalizedPhone);
+    setMessage("");
+    try {
+      await otpFlow.resend();
+    } catch {
+      // The hook exposes only its projected public error.
+    }
   };
 
-  const handleVerifyOTP = async () => {
-    if (!otp.trim() || !confirmation) return;
+  const handleVerifyOtp = async () => {
+    if (!otp.trim() || otpFlow.loading || submitting) return;
 
-    setLoadingStage("verify");
-    setLoading(true);
     setMessage("");
-
     try {
-      const verification = await confirmation.confirm(otp.trim());
-      const nextVerificationToken = verification?.verificationToken;
+      const completion = await otpFlow.verify(otp.trim());
+      if (!completion) return;
 
-      if (!nextVerificationToken) {
-        throw createOtpApiError(
-          { error: "OTP_VERIFICATION_INVALID" },
-          "otp/verify-failed",
-          "Invalid verification code",
-        );
-      }
-
-      setVerificationToken(nextVerificationToken);
-
-      const submitted = await onSubmit({
-        ...data,
-        verificationToken: nextVerificationToken,
+      const transition = bookingFlow.acceptCompletion({
+        completion,
+        bookingData: data,
+        normalizedPhone,
       });
-      setVerificationToken("");
+      syncVerifiedFlowState();
 
-      if (submitted === false) {
+      if (
+        transition.status === "invalid" ||
+        transition.status === "pending"
+      ) {
+        showMessage("error", "تعذر إكمال التحقق. يرجى المحاولة مرة أخرى.");
         return;
       }
 
-      setStep("success");
-    } catch (error) {
-      showMessage(
-        "error",
-        error?.code === "OTP_SERVICE_NOT_CONFIGURED"
-          ? "خدمة التحقق غير متاحة حاليًا."
-          : error?.code === "OTP_VERIFY_RATE_LIMITED"
-            ? "تم إدخال رمز خاطئ عدة مرات. يرجى الانتظار قبل المحاولة مرة أخرى."
-            : "رمز التحقق غير صحيح. حاول مرة أخرى.",
-      );
-    } finally {
-      setLoading(false);
-      setLoadingStage(null);
+      if (transition.status === "details") {
+        setData((current) => ({
+          ...current,
+          firstName: "",
+          lastName: "",
+        }));
+        setStep("details");
+        showMessage("info", "أدخل الاسم الأول واسم العائلة لإكمال الحجز.");
+        return;
+      }
+
+      setStep("retry");
+      await submitVerifiedBooking();
+    } catch {
+      // The hook exposes only its projected public error.
     }
+  };
+
+  const handleDetailsSubmit = async (event) => {
+    event.preventDefault();
+    if (submitting || bookingFlow.getSnapshot().submitting) return;
+
+    const firstName = data.firstName.trim();
+    const lastName = data.lastName.trim();
+    if (!firstName || !lastName) {
+      showMessage("error", "أدخل الاسم الأول واسم العائلة.");
+      return;
+    }
+    if (!selectedDate || !selectedTime) {
+      showMessage("error", "اختر التاريخ والساعة قبل حفظ الموعد.");
+      return;
+    }
+    if (!normalizedPhone || !verifiedFlowState.hasPendingBooking) {
+      showMessage("error", "انتهت صلاحية التحقق. اطلب رمز تحقق جديدًا.");
+      return;
+    }
+
+    setData((current) => ({ ...current, firstName, lastName }));
+    setMessage("");
+    await submitVerifiedBooking({ firstName, lastName });
+  };
+
+  const handleRetryBooking = async () => {
+    if (submitting || bookingFlow.getSnapshot().submitting) return;
+    if (!selectedDate || !selectedTime) {
+      showMessage("error", "اختر التاريخ والساعة قبل حفظ الموعد.");
+      return;
+    }
+    if (!normalizedPhone || !verifiedFlowState.hasPendingBooking) {
+      showMessage("error", "انتهت صلاحية التحقق. اطلب رمز تحقق جديدًا.");
+      return;
+    }
+
+    setMessage("");
+    await submitVerifiedBooking();
+  };
+
+  const returnToPhone = () => {
+    otpFlow.reset();
+    bookingFlow.reset();
+    syncVerifiedFlowState();
+    setStep("phone");
+    setOtp("");
+    setData((current) => ({
+      ...current,
+      firstName: "",
+      lastName: "",
+    }));
+    setMessage("");
   };
 
   return (
     <>
-      <div id="recaptcha-container" />
+      <div id="appointment-recaptcha-container" />
 
-      {loading && (loadingStage === "lookup" || loadingStage === "send") && (
+      {step === "phone" && otpFlow.loading && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           role="dialog"
@@ -346,16 +285,11 @@ export function AppointmentForm({
             className="w-full max-w-md rounded-2xl bg-card border border-border p-6 shadow-xl"
           >
             <div className="text-base font-semibold">
-              {loadingStage === "lookup"
-                ? "نقوم بالتحقق من رقم الهاتف"
-                : "جارٍ إرسال رمز التحقق."}
+              جارٍ إرسال رمز التحقق.
             </div>
             <div className="mt-2 text-sm text-muted-foreground">
-              {loadingStage === "lookup"
-                ? "نبحث عن بياناتك أولاً حتى نحدد الخطوة التالية."
-                : "إذا تعذر إرسال الرمز مؤقتًا فسنحاول مرة أخرى تلقائيًا."}
+              قد يستغرق وصول الرمز بضع لحظات.
             </div>
-
             <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-muted">
               <div className="h-full w-1/2 animate-pulse bg-primary" />
             </div>
@@ -365,51 +299,50 @@ export function AppointmentForm({
 
       <div className="w-full md:w-auto min-h-[70vh] md:min-h-0 flex items-center justify-center md:block px-4 md:px-0">
         <div className="w-full max-w-md md:max-w-none">
-          {/* PHONE STEP */}
           {step === "phone" && (
             <form
-              onSubmit={handleLookupUser}
+              onSubmit={handlePhoneSubmit}
               className="
-            space-y-4 rounded-2xl bg-card p-6 border border-border
-            min-h-[350px] md:min-h-0
-            flex flex-col justify-center md:block
-          "
+                space-y-4 rounded-2xl bg-card p-6 border border-border
+                min-h-[350px] md:min-h-0
+                flex flex-col justify-center md:block
+              "
             >
               <input
                 placeholder="رقم الهاتف"
                 value={data.phone}
-                onChange={(e) => {
-                  setData({ ...data, phone: e.target.value });
-                  setExistingUserName("");
-                  setConfirmation(null);
-                  setVerificationToken("");
+                onChange={(event) => {
+                  setData((current) => ({
+                    ...current,
+                    phone: event.target.value,
+                    firstName: "",
+                    lastName: "",
+                  }));
+                  bookingFlow.phoneChanged();
+                  syncVerifiedFlowState();
                   setOtp("");
+                  setMessage("");
                 }}
                 inputMode="tel"
                 autoComplete="tel"
                 className="
-              w-full rounded-xl border px-4 py-3
-              bg-background text-foreground
-              placeholder:text-muted-foreground
-              border-border
-              focus:outline-none focus:ring-2 focus:ring-primary/40
-            "
+                  w-full rounded-xl border px-4 py-3
+                  bg-background text-foreground
+                  placeholder:text-muted-foreground
+                  border-border
+                  focus:outline-none focus:ring-2 focus:ring-primary/40
+                "
               />
 
-              {message && (
+              {visibleMessage && (
                 <div
-                  className={`
-                rounded-xl px-4 py-3 text-sm
-                ${
-                  messageType === "error"
-                    ? "bg-red-500/10 text-red-600"
-                    : messageType === "success"
-                      ? "bg-green-500/10 text-green-600"
+                  className={`rounded-xl px-4 py-3 text-sm ${
+                    visibleMessageType === "error"
+                      ? "bg-red-500/10 text-red-600"
                       : "bg-primary/10 text-primary"
-                }
-              `}
+                  }`}
                 >
-                  {message}
+                  {visibleMessage}
                 </div>
               )}
 
@@ -421,180 +354,77 @@ export function AppointmentForm({
 
               <button
                 type="submit"
-                disabled={!canStartFlow || loading}
+                disabled={!canStartFlow || submitting}
                 className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
               >
-                {loading
-                  ? "جارٍ التحقق..."
+                {otpFlow.loading
+                  ? "جارٍ إرسال الرمز..."
                   : isOtpCoolingDown
-                    ? `انتظر ${otpCooldownSeconds} ثانية`
+                    ? `انتظر ${otpFlow.cooldownSeconds} ثانية`
                     : "تأكيد الموعد"}
               </button>
             </form>
           )}
 
-          {/* DETAILS STEP */}
-          {step === "details" && (
-            <form
-              onSubmit={handleSendOtpForNewUser}
-              className="
-            space-y-4 rounded-2xl bg-card p-6 border border-border
-            min-h-[350px] md:min-h-0
-            flex flex-col justify-center md:block
-          "
-            >
-              <div className="rounded-xl bg-primary/10 px-4 py-3 text-sm text-primary">
-                <div>{data.phone}</div>
-                {existingUserName && (
-                  <div className="mt-1 text-muted-foreground">
-                    الاسم الحالي: {existingUserName}
-                  </div>
-                )}
-              </div>
-
-              <input
-                placeholder="الاسم الأول"
-                value={data.firstName}
-                onChange={(e) =>
-                  setData({ ...data, firstName: e.target.value })
-                }
-                className="
-              w-full rounded-xl border px-4 py-3
-              bg-background text-foreground
-              placeholder:text-muted-foreground
-              border-border
-              focus:outline-none focus:ring-2 focus:ring-primary/40
-            "
-              />
-
-              <input
-                placeholder="اسم العائلة"
-                value={data.lastName}
-                onChange={(e) => setData({ ...data, lastName: e.target.value })}
-                className="
-              w-full rounded-xl border px-4 py-3
-              bg-background text-foreground
-              placeholder:text-muted-foreground
-              border-border
-              focus:outline-none focus:ring-2 focus:ring-primary/40
-            "
-              />
-
-              {message && (
-                <div
-                  className={`
-                rounded-xl px-4 py-3 text-sm
-                ${
-                  messageType === "error"
-                    ? "bg-red-500/10 text-red-600"
-                    : messageType === "success"
-                      ? "bg-green-500/10 text-green-600"
-                      : "bg-primary/10 text-primary"
-                }
-              `}
-                >
-                  {message}
-                </div>
-              )}
-
-              {bookingError && (
-                <div className="rounded-xl bg-red-500/10 text-red-600 px-4 py-3 text-sm">
-                  {bookingError}
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <button
-                  type="submit"
-                  disabled={!canSendOtpForNewUser || loading}
-                  className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
-                >
-                  {loading
-                    ? "جارٍ إرسال الرمز..."
-                    : isOtpCoolingDown
-                      ? `انتظر ${otpCooldownSeconds} ثانية`
-                      : "إرسال رمز التحقق"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStep("phone");
-                    setMessage("");
-                    setConfirmation(null);
-                    setVerificationToken("");
-                    setOtp("");
-                  }}
-                  className="w-full rounded-xl py-3 border border-border text-foreground"
-                >
-                  تغيير الرقم
-                </button>
-              </div>
-            </form>
-          )}
-
-          {/* OTP STEP */}
           {step === "otp" && (
             <div
               className="
-            space-y-4 rounded-2xl bg-card p-6 border border-border
-            min-h-[350px] md:min-h-0
-            flex flex-col justify-center md:block
-          "
+                space-y-4 rounded-2xl bg-card p-6 border border-border
+                min-h-[350px] md:min-h-0
+                flex flex-col justify-center md:block
+              "
             >
               <div className="rounded-xl bg-primary/10 px-4 py-3 text-sm text-primary">
                 <div>{data.phone}</div>
                 <div className="mt-1 text-muted-foreground">
-                  {existingUserName
-                    ? `سنستخدم الاسم المسجل: ${existingUserName}`
-                    : `${data.firstName} ${data.lastName}`.trim()}
+                  أدخل رمز التحقق الذي تم إرساله إلى رقمك.
                 </div>
               </div>
 
               <input
                 placeholder="أدخل رمز التحقق"
                 value={otp}
-                onChange={(e) => setOtp(e.target.value)}
+                onChange={(event) => setOtp(event.target.value)}
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 className="
-              w-full rounded-xl border px-4 py-3
-              bg-background text-foreground
-              placeholder:text-muted-foreground
-              border-border
-              focus:outline-none focus:ring-2 focus:ring-primary/40
-            "
+                  w-full rounded-xl border px-4 py-3
+                  bg-background text-foreground
+                  placeholder:text-muted-foreground
+                  border-border
+                  focus:outline-none focus:ring-2 focus:ring-primary/40
+                "
               />
 
               <textarea
                 placeholder="إضافة ملاحظة (اختياري)"
                 value={data.note}
-                onChange={(e) => setData({ ...data, note: e.target.value })}
+                onChange={(event) =>
+                  setData((current) => ({
+                    ...current,
+                    note: event.target.value,
+                  }))
+                }
                 rows={4}
                 className="
-              w-full rounded-xl border px-4 py-3
-              bg-background text-foreground
-              placeholder:text-muted-foreground
-              border-border
-              focus:outline-none focus:ring-2 focus:ring-primary/40
-              resize-none
-            "
+                  w-full rounded-xl border px-4 py-3
+                  bg-background text-foreground
+                  placeholder:text-muted-foreground
+                  border-border
+                  focus:outline-none focus:ring-2 focus:ring-primary/40
+                  resize-none
+                "
               />
 
-              {message && (
+              {visibleMessage && (
                 <div
-                  className={`
-                rounded-xl px-4 py-3 text-sm
-                ${
-                  messageType === "error"
-                    ? "bg-red-500/10 text-red-600"
-                    : messageType === "success"
-                      ? "bg-green-500/10 text-green-600"
+                  className={`rounded-xl px-4 py-3 text-sm ${
+                    visibleMessageType === "error"
+                      ? "bg-red-500/10 text-red-600"
                       : "bg-primary/10 text-primary"
-                }
-              `}
+                  }`}
                 >
-                  {message}
+                  {visibleMessage}
                 </div>
               )}
 
@@ -607,36 +437,34 @@ export function AppointmentForm({
               <div className="grid grid-cols-1 gap-3">
                 <button
                   type="button"
-                  onClick={handleVerifyOTP}
-                  disabled={loading}
+                  onClick={handleVerifyOtp}
+                  disabled={!otp.trim() || otpFlow.loading || submitting}
                   className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
                 >
-                  {loading ? "جارٍ التحقق..." : "التحقق وحفظ الموعد"}
+                  {otpFlow.loading || submitting
+                    ? "جارٍ التحقق..."
+                    : "التحقق وحفظ الموعد"}
                 </button>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <button
                     type="button"
-                    onClick={handleResendOTP}
-                    disabled={loading || isOtpCoolingDown}
+                    onClick={handleResendOtp}
+                    disabled={
+                      otpFlow.loading || submitting || isOtpCoolingDown
+                    }
                     className="w-full rounded-xl py-3 border border-border text-foreground disabled:opacity-50"
                   >
                     {isOtpCoolingDown
-                      ? `إعادة الإرسال خلال ${otpCooldownSeconds} ثانية`
+                      ? `إعادة الإرسال خلال ${otpFlow.cooldownSeconds} ثانية`
                       : "إعادة إرسال الرمز"}
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setStep("phone");
-                      setConfirmation(null);
-                      setVerificationToken("");
-                      setOtp("");
-                      setExistingUserName("");
-                      setMessage("");
-                    }}
-                    className="w-full rounded-xl py-3 border border-border text-foreground"
+                    onClick={returnToPhone}
+                    disabled={otpFlow.loading || submitting}
+                    className="w-full rounded-xl py-3 border border-border text-foreground disabled:opacity-50"
                   >
                     تغيير الرقم
                   </button>
@@ -645,14 +473,163 @@ export function AppointmentForm({
             </div>
           )}
 
-          {/* SUCCESS STEP */}
+          {step === "retry" && (
+            <div
+              className="
+                space-y-4 rounded-2xl bg-card p-6 border border-border
+                min-h-[350px] md:min-h-0
+                flex flex-col justify-center md:block
+              "
+            >
+              <div className="rounded-xl bg-primary/10 px-4 py-3 text-sm text-primary">
+                <div>{data.phone}</div>
+                <div className="mt-1 text-muted-foreground">
+                  تم التحقق من الرقم. أعد محاولة حفظ الموعد.
+                </div>
+              </div>
+
+              {visibleMessage && (
+                <div
+                  className={`rounded-xl px-4 py-3 text-sm ${
+                    visibleMessageType === "error"
+                      ? "bg-red-500/10 text-red-600"
+                      : "bg-primary/10 text-primary"
+                  }`}
+                >
+                  {visibleMessage}
+                </div>
+              )}
+
+              {bookingError && (
+                <div className="rounded-xl bg-red-500/10 text-red-600 px-4 py-3 text-sm">
+                  {bookingError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={handleRetryBooking}
+                  disabled={!canRetryVerifiedBooking}
+                  className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
+                >
+                  {submitting
+                    ? "جارٍ حفظ الموعد..."
+                    : "إعادة محاولة حفظ الموعد"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={returnToPhone}
+                  disabled={submitting}
+                  className="w-full rounded-xl py-3 border border-border text-foreground disabled:opacity-50"
+                >
+                  تغيير الرقم
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === "details" && (
+            <form
+              onSubmit={handleDetailsSubmit}
+              className="
+                space-y-4 rounded-2xl bg-card p-6 border border-border
+                min-h-[350px] md:min-h-0
+                flex flex-col justify-center md:block
+              "
+            >
+              <div className="rounded-xl bg-primary/10 px-4 py-3 text-sm text-primary">
+                <div>{data.phone}</div>
+                <div className="mt-1 text-muted-foreground">
+                  تم التحقق من الرقم. أكمل الاسم لحفظ الموعد.
+                </div>
+              </div>
+
+              <input
+                placeholder="الاسم الأول"
+                value={data.firstName}
+                onChange={(event) =>
+                  setData((current) => ({
+                    ...current,
+                    firstName: event.target.value,
+                  }))
+                }
+                required
+                className="
+                  w-full rounded-xl border px-4 py-3
+                  bg-background text-foreground
+                  placeholder:text-muted-foreground
+                  border-border
+                  focus:outline-none focus:ring-2 focus:ring-primary/40
+                "
+              />
+
+              <input
+                placeholder="اسم العائلة"
+                value={data.lastName}
+                onChange={(event) =>
+                  setData((current) => ({
+                    ...current,
+                    lastName: event.target.value,
+                  }))
+                }
+                required
+                className="
+                  w-full rounded-xl border px-4 py-3
+                  bg-background text-foreground
+                  placeholder:text-muted-foreground
+                  border-border
+                  focus:outline-none focus:ring-2 focus:ring-primary/40
+                "
+              />
+
+              {visibleMessage && (
+                <div
+                  className={`rounded-xl px-4 py-3 text-sm ${
+                    visibleMessageType === "error"
+                      ? "bg-red-500/10 text-red-600"
+                      : "bg-primary/10 text-primary"
+                  }`}
+                >
+                  {visibleMessage}
+                </div>
+              )}
+
+              {bookingError && (
+                <div className="rounded-xl bg-red-500/10 text-red-600 px-4 py-3 text-sm">
+                  {bookingError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <button
+                  type="submit"
+                  disabled={!canSubmitDetails}
+                  className="w-full rounded-xl py-3 bg-primary text-white disabled:opacity-50"
+                >
+                  {submitting ? "جارٍ حفظ الموعد..." : "حفظ الموعد"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={returnToPhone}
+                  disabled={submitting}
+                  className="w-full rounded-xl py-3 border border-border text-foreground disabled:opacity-50"
+                >
+                  تغيير الرقم
+                </button>
+              </div>
+            </form>
+          )}
+
           {step === "success" && (
             <div
               className="
-            space-y-4 rounded-2xl bg-card p-6 border border-border
-            min-h-[350px] md:min-h-0
-            flex flex-col justify-center items-center
-          "
+                space-y-4 rounded-2xl bg-card p-6 border border-border
+                min-h-[350px] md:min-h-0
+                flex flex-col justify-center items-center
+              "
             >
               <Check className="mb-4 text-green-500 w-8 h-8" />
               <h3 className="text-lg font-semibold">تم الحجز بنجاح</h3>

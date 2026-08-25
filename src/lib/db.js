@@ -7,26 +7,15 @@ const client = new MongoClient(url);
 let dbConnection = null;
 
 async function connectDb() {
-  try {
-    if (dbConnection) return dbConnection;
-    await client.connect();
-    dbConnection = client.db(dbName);
-    return dbConnection;
-  } catch (error) {
-    console.error("Error in connection to Data", error);
-    throw error;
-  }
+  if (dbConnection) return dbConnection;
+  await client.connect();
+  dbConnection = client.db(dbName);
+  return dbConnection;
 }
 
 export async function getCollection(collectionName) {
-  try {
-    const db = await connectDb();
-    const collection = db.collection(collectionName);
-    return collection
-  } catch (error) {
-    console.error("Error in connection to Data", error);
-    throw error;
-  }
+  const db = await connectDb();
+  return db.collection(collectionName);
 }
 
 export async function getMongoClient() {

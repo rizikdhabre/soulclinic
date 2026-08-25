@@ -160,7 +160,7 @@ export function TimeSlotPicker({
     });
   };
 
-  const slots = generateSlots();
+  const slots = generateSlots().filter((slot) => slot.available);
 
   return (
     <div>
@@ -169,27 +169,29 @@ export function TimeSlotPicker({
         الأوقات المتاحة
       </h3>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-        {slots.map((slot) => (
-          <motion.button
-            key={slot.time}
-            whileHover={slot.available ? { scale: 1.05 } : undefined}
-            whileTap={slot.available ? { scale: 0.97 } : undefined}
-            onClick={() => slot.available && onSelectTime(slot.time)}
-            disabled={!slot.available}
-            className={cn(
-              "px-4 py-3 rounded-xl text-sm font-medium transition",
-              slot.available
-                ? "bg-secondary hover:bg-secondary/80"
-                : "bg-muted text-muted-foreground line-through cursor-not-allowed",
-              selectedTime === slot.time &&
-                "bg-primary text-white hover:bg-primary",
-            )}
-          >
-            {slot.time}
-          </motion.button>
-        ))}
-      </div>
+      {slots.length > 0 ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {slots.map((slot) => (
+            <motion.button
+              key={slot.time}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={() => onSelectTime(slot.time)}
+              className={cn(
+                "px-4 py-3 rounded-xl text-sm font-medium transition bg-secondary hover:bg-secondary/80",
+                selectedTime === slot.time &&
+                  "bg-primary text-white hover:bg-primary",
+              )}
+            >
+              {slot.time}
+            </motion.button>
+          ))}
+        </div>
+      ) : (
+        <p className="py-8 text-center text-sm text-muted-foreground">
+          لا توجد أوقات متاحة لهذا اليوم
+        </p>
+      )}
     </div>
   );
 }

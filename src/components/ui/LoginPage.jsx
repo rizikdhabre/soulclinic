@@ -2,32 +2,57 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Phone, ShieldCheck, KeyRound } from "lucide-react";
+import { usePhoneOtp } from "@/hooks/usePhoneOtp";
 import { normalizeIsraeliPhone } from "@/lib/phone";
 
-function createOtpApiError(payload, fallbackMessage) {
-  const error = new Error(payload?.message || fallbackMessage);
-  error.code = payload?.error;
-  return error;
-}
-
-async function sendBackendOtp(phone) {
-  try {
-    const response = await axios.post("/api/otp/start", { phone });
-    return response.data;
-  } catch (error) {
-    throw createOtpApiError(error.response?.data, "Failed to send OTP.");
-  }
-}
-
-async function verifyBackendOtp(phone, code) {
-  try {
-    const response = await axios.post("/api/otp/verify", { phone, code });
-    return response.data;
-  } catch (error) {
-    throw createOtpApiError(error.response?.data, "Invalid OTP.");
+function getLoginErrorMessage(error) {
+  switch (error?.code) {
+    case "INVALID_PHONE":
+      return "رقم الهاتف غير صحيح. أدخل رقمًا إسرائيليًا صالحًا.";
+    case "OTP_RATE_LIMITED":
+    case "OTP_SOURCE_RATE_LIMITED":
+    case "OTP_FALLBACK_SOURCE_RATE_LIMITED":
+    case "auth/too-many-requests":
+      return "تم إرسال طلبات كثيرة. انتظر قليلًا ثم حاول مرة أخرى.";
+    case "OTP_VERIFY_RATE_LIMITED":
+      return "تم إدخال رمز خاطئ عدة مرات. انتظر قبل المحاولة مرة أخرى.";
+    case "OTP_SEND_PENDING":
+    case "auth/network-request-failed":
+      return "قد يكون الرمز في طريقه إليك. انتظر قليلًا قبل المحاولة مرة أخرى.";
+    case "OTP_SERVICE_NOT_CONFIGURED":
+    case "OTP_SOURCE_UNAVAILABLE":
+    case "OTP_PROVIDER_UNSUPPORTED":
+    case "auth/app-not-authorized":
+    case "auth/invalid-app-credential":
+    case "auth/missing-app-credential":
+    case "auth/operation-not-allowed":
+      return "خدمة التحقق غير متاحة حاليًا. يرجى المحاولة لاحقًا.";
+    case "OTP_SEND_FAILED":
+    case "OTP_SEND_RETRIES_EXHAUSTED":
+    case "OTP_VERIFY_FAILED":
+    case "OTP_VERIFY_TEMPORARY_FAILURE":
+    case "OTP_CHALLENGE_FAILED":
+    case "OTP_REQUEST_IN_PROGRESS":
+    case "OTP_STATE_BUSY":
+    case "auth/captcha-check-failed":
+    case "auth/internal-error":
+    case "auth/quota-exceeded":
+      return "حدث عطل مؤقت في التحقق. يرجى المحاولة مرة أخرى.";
+    case "INVALID_OTP":
+    case "OTP_VERIFICATION_INVALID":
+    case "auth/invalid-verification-code":
+      return "رمز التحقق غير صحيح. حاول مرة أخرى.";
+    case "OTP_VERIFICATION_REQUIRED":
+    case "auth/missing-verification-code":
+      return "أدخل رمز التحقق المرسل إلى هاتفك.";
+    case "OTP_VERIFICATION_EXPIRED":
+    case "auth/code-expired":
+    case "OTP_FLOW_NOT_STARTED":
+      return "انتهت صلاحية رمز التحقق. أعد إرسال الرمز وحاول مرة أخرى.";
+    default:
+      return "تعذر إكمال التحقق. يرجى المحاولة مرة أخرى.";
   }
 }
 
@@ -37,57 +62,82 @@ export default function LoginPage() {
   const [step, setStep] = useState("phone");
   const [rawPhone, setRawPhone] = useState("");
   const [otp, setOtp] = useState("");
-
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [localError, setLocalError] = useState("");
+  const otpFlow = usePhoneOtp({
+    purpose: "login",
+    recaptchaContainerId: "login-recaptcha-container",
+  });
 
   const normalizedPhone = useMemo(
     () => normalizeIsraeliPhone(rawPhone),
     [rawPhone],
   );
 
-  const canSend = !!normalizedPhone && !loading;
-  const canVerify = otp.trim().length >= 6 && !loading;
+  const isCoolingDown = otpFlow.cooldownSeconds > 0;
+  const canSend = Boolean(
+    normalizedPhone && !otpFlow.loading && !isCoolingDown,
+  );
+  const canVerify = Boolean(
+    otp.trim().length >= 6 && !otpFlow.loading,
+  );
+  const visibleError = localError ||
+    (otpFlow.error ? getLoginErrorMessage(otpFlow.error) : "");
 
   async function handleSendOtp() {
-    setError("");
+    if (otpFlow.loading || isCoolingDown) return;
+
+    setLocalError("");
     if (!normalizedPhone) {
-      setError("رقم الهاتف غير صحيح. أدخل رقم إسرائيلي بصيغة 05XXXXXXXX.");
+      setLocalError(getLoginErrorMessage({ code: "INVALID_PHONE" }));
       return;
     }
 
     try {
-      setLoading(true);
-
-      await sendBackendOtp(normalizedPhone);
+      const startOutcome = await otpFlow.start(normalizedPhone);
+      if (!startOutcome.started) return;
       setStep("otp");
-    } catch (e) {
-      console.error(e);
-      setError(
-        e.code === "OTP_SERVICE_NOT_CONFIGURED"
-          ? "خدمة إرسال الرمز غير مفعّلة حالياً."
-          : "فشل إرسال الرمز. جرّب مرة أخرى.",
-      );
-    } finally {
-      setLoading(false);
+    } catch {
+      // The hook exposes only its projected public error.
     }
   }
 
   async function handleVerifyOtp() {
-    setError("");
-    try {
-      setLoading(true);
+    if (!canVerify) return;
 
-      await verifyBackendOtp(normalizedPhone, otp.trim());
-      router.push(
-        `/userAppointments?phone=${encodeURIComponent(normalizedPhone)}`,
-      );
-    } catch (e) {
-      console.error(e);
-      setError("رمز غير صحيح. حاول مرة أخرى.");
-    } finally {
-      setLoading(false);
+    setLocalError("");
+    try {
+      const completion = await otpFlow.verify(otp.trim());
+      if (
+        completion?.success === true &&
+        completion?.purpose === "login"
+      ) {
+        router.push("/userAppointments");
+        return;
+      }
+      setLocalError("تعذر إكمال التحقق. يرجى المحاولة مرة أخرى.");
+    } catch {
+      // The hook exposes only its projected public error.
     }
+  }
+
+  async function handleResendOtp() {
+    if (otpFlow.loading || isCoolingDown) return;
+
+    setOtp("");
+    setLocalError("");
+    try {
+      await otpFlow.resend();
+    } catch {
+      setStep("phone");
+      // The hook retains its projected public error and cooldown.
+    }
+  }
+
+  function handleBackToPhone() {
+    otpFlow.reset();
+    setStep("phone");
+    setOtp("");
+    setLocalError("");
   }
 
   return (
@@ -102,7 +152,7 @@ export default function LoginPage() {
       </div>
 
       <div className="glass-card p-7 space-y-6">
-        <div id="recaptcha-container" />
+        <div id="login-recaptcha-container" />
 
         {step === "phone" && (
           <>
@@ -141,9 +191,9 @@ export default function LoginPage() {
               )}
             </div>
 
-            {error && (
+            {visibleError && (
               <div className="rounded-2xl border border-destructive/20 bg-destructive/10 p-3 text-sm text-foreground">
-                {error}
+                {visibleError}
               </div>
             )}
 
@@ -154,7 +204,11 @@ export default function LoginPage() {
             >
               <span className="flex items-center justify-center gap-2">
                 <ShieldCheck className="w-5 h-5" />
-                {loading ? "جاري الإرسال..." : "إرسال رمز التحقق"}
+                {otpFlow.loading
+                  ? "جاري الإرسال..."
+                  : isCoolingDown
+                    ? `انتظر ${otpFlow.cooldownSeconds} ثانية`
+                    : "إرسال رمز التحقق"}
               </span>
             </Button>
           </>
@@ -198,24 +252,21 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {error && (
+            {visibleError && (
               <div className="rounded-2xl border border-destructive/20 bg-destructive/10 p-3 text-sm text-foreground">
-                {error}
+                {visibleError}
               </div>
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={() => {
-                  setStep("phone");
-                  setOtp("");
-                  setError("");
-                }}
+                onClick={handleBackToPhone}
+                disabled={otpFlow.loading}
                 className="
                   rounded-2xl border border-foreground/10 bg-background/50 backdrop-blur
                   px-4 py-4 text-foreground/80 hover:text-foreground transition
-                  focus:outline-none focus:ring-4 focus:ring-primary/15
+                  focus:outline-none focus:ring-4 focus:ring-primary/15 disabled:opacity-50
                 "
               >
                 رجوع
@@ -226,17 +277,21 @@ export default function LoginPage() {
                 disabled={!canVerify}
                 className="rounded-2xl py-6 text-lg font-semibold"
               >
-                {loading ? "جاري التحقق..." : "تأكيد الرمز"}
+                {otpFlow.loading ? "جاري التحقق..." : "تأكيد الرمز"}
               </Button>
             </div>
 
             <button
               type="button"
-              onClick={handleSendOtp}
+              onClick={handleResendOtp}
               className="text-sm text-foreground/70 hover:text-foreground transition"
-              disabled={loading}
+              disabled={otpFlow.loading || isCoolingDown}
             >
-              إعادة إرسال الرمز
+              {isCoolingDown
+                ? `إعادة الإرسال خلال ${otpFlow.cooldownSeconds} ثانية`
+                : otpFlow.loading
+                  ? "جاري الإرسال..."
+                  : "إعادة إرسال الرمز"}
             </button>
           </>
         )}

@@ -1,111 +1,98 @@
 import { RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
 import { auth } from "./firebase";
 
-const RECAPTCHA_CONTAINER_ID = "recaptcha-container";
-let recaptchaSendInProgress = false;
-let recaptchaClearRequested = false;
+const verifiers = new Map();
+const sendsInProgress = new Set();
+const pendingClears = new Set();
 
 function getCurrentDomain() {
   if (typeof window === "undefined") return "server";
   return window.location.hostname;
 }
 
-function getRecaptchaContainer() {
-  if (typeof document === "undefined") return null;
-  return document.getElementById(RECAPTCHA_CONTAINER_ID);
+function getSafeFirebaseErrorCode(error) {
+  return typeof error?.code === "string" &&
+    /^auth\/[a-z0-9-]{1,59}$/.test(error.code)
+    ? error.code
+    : "auth/unknown";
 }
 
-export function clearRecaptchaVerifier() {
-  if (typeof window === "undefined") return;
+function clearVerifier(containerId, expectedVerifier) {
+  const verifier = verifiers.get(containerId);
+  if (expectedVerifier && verifier !== expectedVerifier) return;
 
-  if (recaptchaSendInProgress) {
-    recaptchaClearRequested = true;
+  if (sendsInProgress.has(containerId)) {
+    pendingClears.add(containerId);
     return;
   }
 
-  recaptchaClearRequested = false;
+  pendingClears.delete(containerId);
+  if (!verifier) return;
 
-  const verifier = window.recaptchaVerifier;
-
+  verifiers.delete(containerId);
   try {
-    if (verifier && typeof verifier.clear === "function") {
-      verifier.clear();
-    }
+    verifier.clear();
   } catch (error) {
-    console.warn("Failed to clear Firebase reCAPTCHA verifier", error);
-  } finally {
-    window.recaptchaVerifier = null;
+    console.warn("Failed to clear Firebase reCAPTCHA verifier", {
+      code: getSafeFirebaseErrorCode(error),
+    });
   }
 }
 
-function getOrCreateRecaptchaVerifier() {
-  if (typeof window === "undefined") {
+export function clearFirebaseRecaptcha(containerId) {
+  clearVerifier(containerId);
+}
+
+function getOrCreateRecaptchaVerifier(containerId) {
+  if (typeof window === "undefined" || typeof document === "undefined") {
     throw new Error("Firebase phone OTP can only be sent from the browser.");
   }
 
-  const container = getRecaptchaContainer();
-
+  const container = document.getElementById(containerId);
   if (!container) {
-    throw new Error(`#${RECAPTCHA_CONTAINER_ID} was not found on the page.`);
+    throw new Error(`#${containerId} was not found on the page.`);
   }
 
-  if (!window.recaptchaVerifier) {
-    window.recaptchaVerifier = new RecaptchaVerifier(
-      auth,
-      RECAPTCHA_CONTAINER_ID,
-      {
-        size: "invisible",
-        "expired-callback": () => {
-          recaptchaClearRequested = true;
-
-          if (!recaptchaSendInProgress) {
-            clearRecaptchaVerifier();
-          }
-        },
-      },
-    );
+  if (!verifiers.has(containerId)) {
+    let verifier;
+    verifier = new RecaptchaVerifier(auth, containerId, {
+      size: "invisible",
+      "expired-callback": () => clearVerifier(containerId, verifier),
+    });
+    verifiers.set(containerId, verifier);
   }
 
-  return window.recaptchaVerifier;
+  return verifiers.get(containerId);
 }
 
-function logOtpError(error, phone) {
-  console.error(
-    "Firebase signInWithPhoneNumber failed",
-    {
-      phone,
-      domain: getCurrentDomain(),
-      code: error?.code,
-      message: error?.message,
-      customData: error?.customData,
-    },
-    error,
-  );
+function logOtpError(error) {
+  console.error("Firebase signInWithPhoneNumber failed", {
+    domain: getCurrentDomain(),
+    code: getSafeFirebaseErrorCode(error),
+  });
 }
 
-export async function sendOTP(phone) {
-  let shouldClearVerifierAfterSend = false;
+export async function sendFirebaseOtp(phone, containerId) {
+  if (sendsInProgress.has(containerId)) {
+    const error = new Error("An OTP send is already in progress for this verifier.");
+    error.code = "OTP_REQUEST_IN_PROGRESS";
+    throw error;
+  }
+
+  let clearAfterSend = false;
 
   try {
-    console.debug("Firebase sendOTP started", {
-      phone,
-      domain: getCurrentDomain(),
-    });
-
-    const verifier = getOrCreateRecaptchaVerifier();
-
-    recaptchaSendInProgress = true;
+    const verifier = getOrCreateRecaptchaVerifier(containerId);
+    sendsInProgress.add(containerId);
     return await signInWithPhoneNumber(auth, phone, verifier);
   } catch (error) {
-    logOtpError(error, phone);
-    shouldClearVerifierAfterSend = true;
+    logOtpError(error);
+    clearAfterSend = true;
     throw error;
   } finally {
-    recaptchaSendInProgress = false;
-
-    if (shouldClearVerifierAfterSend || recaptchaClearRequested) {
-      recaptchaClearRequested = false;
-      clearRecaptchaVerifier();
+    sendsInProgress.delete(containerId);
+    if (clearAfterSend || pendingClears.has(containerId)) {
+      clearFirebaseRecaptcha(containerId);
     }
   }
 }

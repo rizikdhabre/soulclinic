@@ -49,14 +49,14 @@ export async function POST(req) {
     // 🍪 set cookie
     res.cookies.set("token", token, {
       httpOnly: true,
-      secure: false, // set true in production (https)
+      secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
     });
 
     return res;
   } catch (error) {
-    console.error("Login error:", error);
+    console.error("Login error");
     return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }

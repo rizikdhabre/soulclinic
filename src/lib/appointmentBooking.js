@@ -16,9 +16,9 @@ import {
   ensureDayDocument,
 } from "@/lib/appointmentConcurrency";
 import {
-  consumeOtpVerificationGrant,
-  releaseOtpVerificationGrant,
-} from "@/lib/otpSecurity";
+  consumeBookingGrant,
+  releaseBookingGrant,
+} from "@/lib/otp/bookingGrant";
 
 export class RequestValidationError extends Error {
   constructor(message = "Missing fields", code = "MISSING_FIELDS") {
@@ -159,8 +159,8 @@ async function sendAppointmentNotifications({
         5: time,
       },
     });
-  } catch (err) {
-    console.error("WhatsApp appointment notify failed:", err);
+  } catch {
+    console.error("Appointment notification failed.");
   }
 }
 
@@ -233,7 +233,7 @@ async function consumeOtpIfRequired({
 }) {
   if (!requireOtp) return false;
 
-  await consumeOtpVerificationGrant({
+  await consumeBookingGrant({
     phone: normalizedPhone,
     verificationToken,
     appointmentId,
@@ -250,13 +250,15 @@ async function releaseOtpIfNeeded({
   normalizedPhone,
   verificationToken,
   appointmentId,
+  session,
 }) {
   if (!requireOtp || !grantConsumed || appointmentSaved) return;
 
-  await releaseOtpVerificationGrant({
+  await releaseBookingGrant({
     phone: normalizedPhone,
     verificationToken,
     appointmentId,
+    ...(session ? { session } : {}),
   });
 }
 

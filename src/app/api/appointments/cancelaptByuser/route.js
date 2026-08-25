@@ -1,91 +1,88 @@
-import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
-import { sendWhatsAppTemplate } from "@/lib/whatsapp";
+import { cancelCustomerAppointment } from "@/lib/customerAppointments";
+import { requireCustomerSession } from "@/lib/customerSession";
+
+const CANONICAL_APPOINTMENT_ID = /^[0-9a-f]{24}$/;
+
+const ERROR_RESPONSES = Object.freeze({
+  CUSTOMER_UNAUTHORIZED: {
+    status: 401,
+    body: {
+      error: "CUSTOMER_UNAUTHORIZED",
+      message: "Customer session is invalid or expired.",
+    },
+  },
+  INVALID_APPOINTMENT_ID: {
+    status: 400,
+    body: {
+      error: "INVALID_APPOINTMENT_ID",
+      message: "Appointment ID is invalid.",
+    },
+  },
+  APPOINTMENT_NOT_FOUND: {
+    status: 404,
+    body: {
+      error: "APPOINTMENT_NOT_FOUND",
+      message: "Appointment was not found.",
+    },
+  },
+  CUSTOMER_CANCELLATION_FAILED: {
+    status: 500,
+    body: {
+      error: "CUSTOMER_CANCELLATION_FAILED",
+      message: "Appointment cancellation failed.",
+    },
+  },
+});
+
+function errorResponse(code) {
+  const response =
+    ERROR_RESPONSES[code] ?? ERROR_RESPONSES.CUSTOMER_CANCELLATION_FAILED;
+  return NextResponse.json(response.body, { status: response.status });
+}
 
 export async function DELETE(req) {
+  let session;
   try {
-    const { phone, date, time } = await req.json();
-
-    if (!phone || !date || !time) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 },
-      );
+    session = await requireCustomerSession(req);
+  } catch (error) {
+    if (error?.code === "CUSTOMER_UNAUTHORIZED" && error?.status === 401) {
+      return errorResponse("CUSTOMER_UNAUTHORIZED");
     }
+    return errorResponse("CUSTOMER_CANCELLATION_FAILED");
+  }
 
-    const usersCollection = await getCollection("usersData");
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return errorResponse("INVALID_APPOINTMENT_ID");
+  }
 
-    const userDoc = await usersCollection.findOne(
-      {
-        phone,
-        "appointments.date": date,
-        "appointments.time": time,
-      },
-      {
-        projection: {
-          firstName: 1,
-          lastName: 1,
-          phone: 1,
-          "appointments.$": 1,
-        },
-      },
-    );
-    if (!userDoc || !userDoc.appointments?.length) {
-      return NextResponse.json(
-        { error: "Appointment not found" },
-        { status: 404 },
-      );
-    }
+  const appointmentId = body?.appointmentId;
+  if (
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body) ||
+    typeof appointmentId !== "string" ||
+    !CANONICAL_APPOINTMENT_ID.test(appointmentId)
+  ) {
+    return errorResponse("INVALID_APPOINTMENT_ID");
+  }
 
-    const appointment = userDoc.appointments[0];
-    const fullName = `${userDoc.firstName} ${userDoc.lastName}`.trim();
-    const {
-      title,
-      date: apptDate,
-      time: apptTime,
-    } = appointment;
-
-    await usersCollection.updateOne(
-      { phone },
-      {
-        $pull: {
-          appointments: { date, time },
-          notes: { date, time },
-        },
-      },
-    );
-
-    const appointmentsCollection = await getCollection("appointments");
-    await appointmentsCollection.updateOne(
-      {
-        date,
-        "appointments.time": time,
-      },
-      {
-        $pull: {
-          appointments: { time },
-        },
-      },
-    );
-
-    await sendWhatsAppTemplate({
-      to: process.env.TWILIO_WHATSAPP_TO,
-      templateSid: process.env.TWILIO_TEMPLATE_CANCEL_CUSTUMER,
-      variables: {
-        1: "صقر",
-        2: title || "خدمة", 
-        3: fullName || "غير معروف",
-        4: apptDate,
-        5: apptTime,
-      },
+  try {
+    await cancelCustomerAppointment({
+      phone: session.phone,
+      appointmentId,
     });
-
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Cancel appointment error:", error);
-    return NextResponse.json(
-      { error: "Failed to cancel appointment" },
-      { status: 500 },
-    );
+    if (
+      ERROR_RESPONSES[error?.code] &&
+      ERROR_RESPONSES[error.code].status === error?.status
+    ) {
+      return errorResponse(error.code);
+    }
+    return errorResponse("CUSTOMER_CANCELLATION_FAILED");
   }
 }

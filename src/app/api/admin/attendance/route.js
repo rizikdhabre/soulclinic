@@ -1,8 +1,9 @@
 import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
+import { withAdminRoute } from "@/lib/adminAuth";
 
-export async function PATCH(req) {
+async function updateAttendance(req) {
   try {
     const { appointmentId, attended } = await req.json();
 
@@ -40,7 +41,7 @@ export async function PATCH(req) {
 }
 
 
-export async function GET(req) {
+async function getAttendance(req) {
   try {
     const { searchParams } = new URL(req.url);
     const type = searchParams.get("type");
@@ -110,3 +111,6 @@ export async function GET(req) {
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
+
+export const PATCH = withAdminRoute(updateAttendance);
+export const GET = withAdminRoute(getAttendance);

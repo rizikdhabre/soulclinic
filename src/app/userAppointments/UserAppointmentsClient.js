@@ -1,31 +1,32 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import axios from "axios";
-import { useSearchParams, useRouter } from "next/navigation";
-import { normalizeIsraeliPhone } from "@/lib/phone";
+import { useRouter } from "next/navigation";
+
+const PUBLIC_APPOINTMENT_ID = /^[0-9a-f]{24}$/;
+
+function getPublicAppointmentId(appointment) {
+  if (typeof appointment?._id !== "string") return null;
+  const appointmentId = String(appointment._id);
+  return PUBLIC_APPOINTMENT_ID.test(appointmentId) ? appointmentId : null;
+}
 
 export default function UserAppointmentsClient() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-
-  const rawPhone = searchParams.get("phone") || "";
-  const phone = useMemo(() => normalizeIsraeliPhone(rawPhone), [rawPhone]);
 
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const [confirmCancelKey, setConfirmCancelKey] = useState(null);
   const [cancelingKey, setCancelingKey] = useState(null);
+  const cancellationInFlightRef = useRef(false);
+  const fetchAppointmentsRef = useRef(null);
 
   /* ---------------- Fetch appointments ---------------- */
   useEffect(() => {
-    if (!phone) {
-      router.replace("/login");
-      return;
-    }
-
     let cancelled = false;
 
     const fetchAppointments = async () => {
@@ -33,9 +34,7 @@ export default function UserAppointmentsClient() {
         setLoading(true);
         setError("");
 
-        const res = await axios.get("/api/userAppointments/", {
-          params: { phone },
-        });
+        const res = await axios.get("/api/userAppointments");
 
         if (cancelled) return;
 
@@ -44,57 +43,86 @@ export default function UserAppointmentsClient() {
             ? res.data.appointments
             : []
         );
-      } catch (e) {
+      } catch (requestError) {
         if (cancelled) return;
-        setError(
-          e?.response?.data?.message ||
-            e?.message ||
-            "فشل تحميل المواعيد."
-        );
+        if (requestError?.response?.status === 401) {
+          router.replace("/login");
+          return;
+        }
+        setError("تعذر تحميل المواعيد. يرجى المحاولة مرة أخرى.");
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
 
+    fetchAppointmentsRef.current = fetchAppointments;
+
     fetchAppointments();
 
     return () => {
       cancelled = true;
+      if (fetchAppointmentsRef.current === fetchAppointments) {
+        fetchAppointmentsRef.current = null;
+      }
     };
-  }, [phone, router]);
+  }, [router]);
 
   /* ---------------- Helpers ---------------- */
+  async function handleLogout() {
+    if (loggingOut) return;
+
+    setLoggingOut(true);
+    setError("");
+    try {
+      await axios.post("/api/customer/logout");
+      router.replace("/login");
+    } catch {
+      setError("تعذر تسجيل الخروج. يرجى المحاولة مرة أخرى.");
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
   const isFutureAppointment = (a) => {
     if (!a?.date || !a?.time) return false;
     return new Date(`${a.date}T${a.time}:00`).getTime() > Date.now();
   };
-  const handleConfirmCancel = async (appointment) => {
-    const { date, time } = appointment;
-    const key = `${date}-${time}`;
+  async function handleConfirmCancel(appointment) {
+    const appointmentId = getPublicAppointmentId(appointment);
+    if (!appointmentId || cancellationInFlightRef.current) return;
 
-    setCancelingKey(key);
+    cancellationInFlightRef.current = true;
+    setCancelingKey(appointmentId);
+    setError("");
 
     try {
       await axios.delete("/api/appointments/cancelaptByuser", {
-        data: { phone, date, time },
+        data: { appointmentId: String(appointment._id) },
       });
 
       setAppointments((prev) =>
-        prev.filter(
-          (a) => !(a.date === date && a.time === time)
-        )
+        prev.filter((a) => String(a._id) !== appointmentId),
       );
-    } catch (e) {
-      setError(
-        e?.response?.data?.error ||
-          e?.message ||
-          "فشل إلغاء الموعد."
-      );
+    } catch (requestError) {
+      if (requestError?.response?.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (requestError?.response?.status === 404) {
+        setConfirmCancelKey(null);
+        const fetchAppointments = fetchAppointmentsRef.current;
+        if (fetchAppointments) {
+          await fetchAppointments({ showLoading: false });
+        }
+        return;
+      }
+      setError("تعذر إلغاء الموعد. يرجى المحاولة مرة أخرى.");
     } finally {
+      cancellationInFlightRef.current = false;
       setCancelingKey(null);
       setConfirmCancelKey(null);
     }
-  };
+  }
 
   /* ---------------- Render ---------------- */
   return (
@@ -107,18 +135,19 @@ export default function UserAppointmentsClient() {
               <h2 className="heading-section text-foreground mb-1">
                 مواعيدي
               </h2>
-              <p className="text-subtle">{phone}</p>
             </div>
 
             <button
-              onClick={() => router.push("/login")}
+              onClick={handleLogout}
+              disabled={loggingOut}
               className="
                 rounded-full px-5 py-3 text-sm font-semibold
                 border border-foreground/10 bg-background/50 backdrop-blur
                 hover:border-primary/30 hover:shadow-elevated transition
+                disabled:cursor-not-allowed disabled:opacity-50
               "
             >
-              رجوع
+              {loggingOut ? "جارٍ تسجيل الخروج..." : "تسجيل الخروج"}
             </button>
           </div>
 
@@ -132,7 +161,7 @@ export default function UserAppointmentsClient() {
           )}
 
           {!loading && !error && appointments.length === 0 && (
-            <p className="text-subtle">لا توجد مواعيد لهذا الرقم.</p>
+            <p className="text-subtle">لا توجد مواعيد.</p>
           )}
 
           {/* Table */}
@@ -149,9 +178,10 @@ export default function UserAppointmentsClient() {
                 </thead>
 
                 <tbody className="divide-y divide-foreground/10">
-                  {appointments.map((a) => {
+                  {appointments.map((a, index) => {
                     const future = isFutureAppointment(a);
-                    const key = `${a.date}-${a.time}`;
+                    const appointmentId = getPublicAppointmentId(a);
+                    const key = appointmentId ?? `invalid-appointment-${index}`;
                     const isConfirming = confirmCancelKey === key;
                     const isCanceling = cancelingKey === key;
 
@@ -164,7 +194,7 @@ export default function UserAppointmentsClient() {
                         </td>
 
                         <td className="px-4 py-3">
-                          {future ? (
+                          {future && appointmentId ? (
                             !isConfirming ? (
                               <button
                                 onClick={() =>
@@ -211,12 +241,23 @@ export default function UserAppointmentsClient() {
                                 </button>
                               </div>
                             )
-                          ) : (
+                          ) : !future ? (
                             <span className="text-xs text-foreground/70">
                               {a.attended
                                 ? "تم الحضور"
                                 : "لم يتم الحضور"}
                             </span>
+                          ) : (
+                            <button
+                              disabled
+                              className="
+                                rounded-full px-4 py-2 text-xs font-semibold
+                                bg-destructive/15 border border-destructive/20
+                                opacity-50
+                              "
+                            >
+                              إلغاء
+                            </button>
                           )}
                         </td>
                       </tr>

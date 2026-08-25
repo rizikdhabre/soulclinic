@@ -2,9 +2,35 @@ import { getCollection } from "@/lib/db";
 import { ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
 import { normalizeIsraeliPhone } from "@/lib/phone";
-export async function GET() {
+import { withAdminRoute } from "@/lib/adminAuth";
+
+async function getUsers(req) {
   try {
+    const searchParams = new URL(req.url).searchParams;
+    const hasPhoneQuery = searchParams.has("phone");
+    const rawPhone = searchParams.get("phone");
+    const phone = hasPhoneQuery ? normalizeIsraeliPhone(rawPhone) : null;
+
+    if (hasPhoneQuery && !phone) {
+      return NextResponse.json({ error: "INVALID_PHONE" }, { status: 400 });
+    }
+
     const collection = await getCollection("usersData");
+
+    if (phone) {
+      const user = await collection.findOne(
+        { phone },
+        { projection: { _id: 0, firstName: 1, lastName: 1 } },
+      );
+
+      return NextResponse.json({
+        exists: Boolean(user),
+        phone,
+        firstName: user?.firstName || "",
+        lastName: user?.lastName || "",
+      });
+    }
+
     const users = await collection.find({}).toArray();
 
     return NextResponse.json(
@@ -22,7 +48,7 @@ export async function GET() {
   }
 }
 
-export async function POST(req) {
+async function updateUserName(req) {
   try {
     const body = await req.json();
     const { userId, firstName, lastName } = body;
@@ -80,3 +106,6 @@ export async function POST(req) {
     );
   }
 }
+
+export const GET = withAdminRoute(getUsers);
+export const POST = withAdminRoute(updateUserName);

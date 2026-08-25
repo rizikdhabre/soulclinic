@@ -2,8 +2,10 @@ import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { sendWhatsAppTemplate } from "@/lib/whatsapp";
 import { normalizeIsraeliPhone } from "@/lib/phone";
+import { AdminAuthError, requireAdmin, withAdminRoute } from "@/lib/adminAuth";
+import { toPublicAvailability } from "@/lib/appointmentViews";
 import { TimeSlotUnavailableError } from "@/lib/appointmentRules";
-import { OtpVerificationGrantError } from "@/lib/otpSecurity";
+import { OtpVerificationGrantError } from "@/lib/otp/bookingGrant";
 import {
   RequestValidationError,
   createAppointmentBooking,
@@ -53,6 +55,17 @@ function getOtpVerificationErrorResponse(error) {
   );
 }
 
+function getAdminAuthorizationResponse(error) {
+  return NextResponse.json(
+    { error: error.code, message: error.message },
+    { status: error.status },
+  );
+}
+
+function getEmptyAvailability() {
+  return { appointments: [], blockedTimes: [], editedTimes: [] };
+}
+
 /* ---------------- GET ---------------- */
 
 export async function GET(req) {
@@ -61,42 +74,41 @@ export async function GET(req) {
     const date = searchParams.get("date");
     const isAdmin = searchParams.get("admin") === "true";
 
+    if (isAdmin) requireAdmin(req);
+
     if (!date) {
-      return NextResponse.json(
-        isAdmin ? { appointments: [], blockedTimes: [], editedTimes: [] } : [],
-      );
+      return NextResponse.json(getEmptyAvailability());
     }
 
     const appointmentsCollection = await getCollection("appointments");
 
-    const day = await appointmentsCollection.findOne(
-      { date },
-      {
-        projection: {
-          _id: 0,
-          blockedTimes: 1,
-          editedTimes: 1,
-          "appointments._id": 1,
-          "appointments.time": 1,
-          "appointments.duration": 1,
-          "appointments.firstName": 1,
-          "appointments.lastName": 1,
-          "appointments.phone": 1,
-        },
-      },
-    );
+    const day = await appointmentsCollection.findOne({ date }, {
+      projection: isAdmin
+        ? {
+            _id: 0,
+            blockedTimes: 1,
+            editedTimes: 1,
+            "appointments._id": 1,
+            "appointments.time": 1,
+            "appointments.duration": 1,
+            "appointments.firstName": 1,
+            "appointments.lastName": 1,
+            "appointments.phone": 1,
+          }
+        : {
+            _id: 0,
+            blockedTimes: 1,
+            editedTimes: 1,
+            "appointments.time": 1,
+            "appointments.duration": 1,
+          },
+    });
 
     if (!day) {
-      return NextResponse.json(
-        isAdmin ? { appointments: [], blockedTimes: [], editedTimes: [] } : [],
-      );
+      return NextResponse.json(getEmptyAvailability());
     }
     if (!isAdmin) {
-      return NextResponse.json({
-        appointments: day.appointments || [],
-        blockedTimes: day.blockedTimes || [],
-        editedTimes: day.editedTimes || [],
-      });
+      return NextResponse.json(toPublicAvailability(day));
     }
 
     const usersCollection = await getCollection("usersData");
@@ -143,7 +155,10 @@ export async function GET(req) {
       editedTimes: day.editedTimes || [],
     });
   } catch (error) {
-    console.error("Fetch appointments error:", error);
+    if (error instanceof AdminAuthError) {
+      return getAdminAuthorizationResponse(error);
+    }
+
     return NextResponse.json(
       { error: "Failed to fetch appointments" },
       { status: 500 },
@@ -160,12 +175,12 @@ export async function POST(req) {
       await createAppointmentBooking(body, { requireOtp: true }),
     );
   } catch (error) {
-    if (error instanceof TimeSlotUnavailableError || error?.status === 409) {
-      return getUnavailableResponse();
-    }
-
     if (error instanceof OtpVerificationGrantError) {
       return getOtpVerificationErrorResponse(error);
+    }
+
+    if (error instanceof TimeSlotUnavailableError || error?.status === 409) {
+      return getUnavailableResponse();
     }
 
     if (error instanceof RequestValidationError || error?.status === 400) {
@@ -176,7 +191,7 @@ export async function POST(req) {
       return NextResponse.json({ error: "Missing fields" }, { status: 400 });
     }
 
-    console.error("Create appointment error:", error);
+    console.error("Appointment booking failed.");
     return NextResponse.json(
       { error: "Failed to create appointment" },
       { status: 500 },
@@ -184,7 +199,7 @@ export async function POST(req) {
   }
 }
 
-export async function DELETE(req) {
+async function deleteAppointment(req) {
   try {
     const { phone, date, time } = await req.json();
 
@@ -244,10 +259,11 @@ export async function DELETE(req) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Cancel appointment error:", error);
     return NextResponse.json(
       { error: "Failed to cancel appointment" },
       { status: 500 },
     );
   }
 }
+
+export const DELETE = withAdminRoute(deleteAppointment);

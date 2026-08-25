@@ -1,8 +1,9 @@
 import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
 import crypto from "crypto";
+import { withAdminRoute } from "@/lib/adminAuth";
 
-export async function POST(req) {
+async function createAdminNote(req) {
   const { phone, text } = await req.json();
   if (!phone || !text) {
     return NextResponse.json({ error: "Missing data" }, { status: 400 });
@@ -26,7 +27,7 @@ export async function POST(req) {
 }
 
 
-export async function DELETE(req) {
+async function deleteAdminNote(req) {
   const { phone, noteId } = await req.json();
 
   const users = await getCollection("usersData");
@@ -39,7 +40,7 @@ export async function DELETE(req) {
   return NextResponse.json({ success: true });
 }
 
-export async function PUT(req) {
+async function updateAdminNote(req) {
   const { phone, noteId, text } = await req.json();
 
   const users = await getCollection("usersData");
@@ -56,3 +57,7 @@ export async function PUT(req) {
 
   return NextResponse.json({ success: true });
 }
+
+export const POST = withAdminRoute(createAdminNote);
+export const DELETE = withAdminRoute(deleteAdminNote);
+export const PUT = withAdminRoute(updateAdminNote);

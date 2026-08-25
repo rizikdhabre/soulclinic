@@ -261,7 +261,7 @@ export default function BookForCustomer() {
     setMessage("");
 
     try {
-      const { data: payload } = await axios.get("/api/appointments/user", {
+      const { data: payload } = await axios.get("/api/admin/users", {
         params: { phone },
         headers: { "Cache-Control": "no-store" },
       });
