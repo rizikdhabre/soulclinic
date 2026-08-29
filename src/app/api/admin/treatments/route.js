@@ -2,10 +2,16 @@ import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { getStorage } from "firebase-admin/storage";
+import {
+  advanceTreatmentCatalogCacheGeneration,
+  getTreatmentCatalogWithCache,
+} from "@/lib/cache/redisReadCache";
 export async function GET() {
   try {
-    const collection = await getCollection("treatments");
-    const treatments = await collection.find({}).toArray();
+    const treatments = await getTreatmentCatalogWithCache(async () => {
+      const collection = await getCollection("treatments");
+      return collection.find({}).toArray();
+    });
 
     return NextResponse.json(treatments, { status: 200 });
   } catch (error) {
@@ -39,6 +45,7 @@ export async function PUT(req) {
     const collection = await getCollection("treatments");
 
     await collection.updateOne({ _id: new ObjectId(id) }, { $set: update });
+    await advanceTreatmentCatalogCacheGeneration().catch(() => false);
 
     return NextResponse.json(
       { message: "Treatment updated successfully" },
@@ -76,6 +83,7 @@ export async function POST(req) {
     };
 
     const result = await collection.insertOne(newTreatment);
+    await advanceTreatmentCatalogCacheGeneration().catch(() => false);
 
     return NextResponse.json(
       {
@@ -136,6 +144,7 @@ export async function DELETE(req) {
     }
 
     await collection.deleteOne({ _id: new ObjectId(id) });
+    await advanceTreatmentCatalogCacheGeneration().catch(() => false);
 
     return NextResponse.json(
       {

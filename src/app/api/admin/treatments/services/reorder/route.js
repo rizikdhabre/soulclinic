@@ -1,6 +1,7 @@
 import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
+import { advanceTreatmentCatalogCacheGeneration } from "@/lib/cache/redisReadCache";
 
 export async function PUT(req) {
   try {
@@ -24,6 +25,7 @@ export async function PUT(req) {
         },
       }
     );
+    await advanceTreatmentCatalogCacheGeneration().catch(() => false);
 
     return NextResponse.json(
       { message: "Services reordered" },

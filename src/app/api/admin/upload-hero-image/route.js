@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getCollection } from "@/lib/db";
 import { bucket } from "@/lib/firebaseAdmin";
+import {
+  advanceHeroCacheGeneration,
+  getHomepageHeroWithCache,
+} from "@/lib/cache/redisReadCache";
 
 export async function POST(req) {
   try {
@@ -53,6 +57,9 @@ export async function POST(req) {
         }
       );
     }
+
+    await advanceHeroCacheGeneration().catch(() => false);
+
     if (oldImagePath) {
       try {
         await bucket.file(oldImagePath).delete();
@@ -84,15 +91,16 @@ export async function POST(req) {
 
 export async function GET() {
   try {
-    const collection = await getCollection("settings");
-    const settings = await collection.findOne({ key: "homepage" });
+    const hero = await getHomepageHeroWithCache(async () => {
+      const collection = await getCollection("settings");
+      const settings = await collection.findOne({ key: "homepage" });
 
-    return NextResponse.json(
-      {
+      return {
         heroImageUrl: settings?.heroImageUrl || null,
-      },
-      { status: 200 }
-    );
+      };
+    });
+
+    return NextResponse.json(hero, { status: 200 });
   } catch (error) {
     console.error("Error fetching hero image:", error);
     return NextResponse.json(

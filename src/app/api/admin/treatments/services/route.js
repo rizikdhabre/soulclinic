@@ -2,6 +2,18 @@ import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { getStorage } from "firebase-admin/storage";
+import { advanceTreatmentCatalogCacheGeneration } from "@/lib/cache/redisReadCache";
+
+function parseServiceIndex(value) {
+  const index =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^\d+$/.test(value)
+        ? Number(value)
+        : Number.NaN;
+
+  return Number.isSafeInteger(index) && index >= 0 ? index : null;
+}
 
 /* =========================
    POST – add sub-treatment
@@ -26,6 +38,7 @@ export async function POST(req) {
         $set: { updatedAt: new Date() },
       }
     );
+    await advanceTreatmentCatalogCacheGeneration().catch(() => false);
 
     return NextResponse.json(
       { message: "Service added successfully" },
@@ -76,6 +89,8 @@ export async function PUT(req) {
         $currentDate: { updatedAt: true },
       }
     );
+    await advanceTreatmentCatalogCacheGeneration().catch(() => false);
+
     if (
       oldImagePath &&
       service.imagePath &&
@@ -105,8 +120,9 @@ export async function PUT(req) {
 export async function DELETE(req) {
   try {
     const { treatmentId, serviceIndex } = await req.json();
+    const targetServiceIndex = parseServiceIndex(serviceIndex);
 
-    if (!treatmentId || serviceIndex === undefined) {
+    if (!treatmentId || targetServiceIndex === null) {
       return NextResponse.json(
         { message: "Invalid request data" },
         { status: 400 }
@@ -119,24 +135,42 @@ export async function DELETE(req) {
       _id: new ObjectId(treatmentId),
     });
 
-    const service = treatment?.services?.[serviceIndex];
+    const service = treatment?.services?.[targetServiceIndex];
     const imagePath = service?.imagePath;
 
-    // 🔹 remove service
     await collection.updateOne(
       { _id: new ObjectId(treatmentId) },
-      {
-        $unset: { [`services.${serviceIndex}`]: 1 },
-      }
+      [
+        {
+          $set: {
+            services: {
+              $let: {
+                vars: { services: { $ifNull: ["$services", []] } },
+                in: {
+                  $map: {
+                    input: {
+                      $filter: {
+                        input: { $range: [0, { $size: "$$services" }] },
+                        as: "serviceIndex",
+                        cond: {
+                          $ne: ["$$serviceIndex", targetServiceIndex],
+                        },
+                      },
+                    },
+                    as: "serviceIndex",
+                    in: {
+                      $arrayElemAt: ["$$services", "$$serviceIndex"],
+                    },
+                  },
+                },
+              },
+            },
+            updatedAt: "$$NOW",
+          },
+        },
+      ]
     );
-
-    await collection.updateOne(
-      { _id: new ObjectId(treatmentId) },
-      {
-        $pull: { services: null },
-        $set: { updatedAt: new Date() },
-      }
-    );
+    await advanceTreatmentCatalogCacheGeneration().catch(() => false);
 
     // 🔥 DELETE IMAGE FROM FIREBASE
     if (imagePath) {

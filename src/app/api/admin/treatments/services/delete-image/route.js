@@ -2,6 +2,7 @@ import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { getStorage } from "firebase-admin/storage";
+import { advanceTreatmentCatalogCacheGeneration } from "@/lib/cache/redisReadCache";
 
 export async function POST(req) {
   try {
@@ -38,6 +39,7 @@ export async function POST(req) {
         },
       }
     );
+    await advanceTreatmentCatalogCacheGeneration().catch(() => false);
 
     return NextResponse.json(
       { message: "Image deleted" },
