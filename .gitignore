@@ -14,6 +14,9 @@
 /coverage
 /tests/
 
+# local development documentation
+/docs/
+
 # next.js
 /.next/
 /out/
