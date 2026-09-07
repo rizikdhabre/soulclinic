@@ -10,10 +10,12 @@ import {
   OTP_SOURCE_FALLBACK_SHORT_LIMIT,
   OTP_SOURCE_HOUR_WINDOW_MS,
   OTP_SOURCE_SHORT_WINDOW_MS,
+  OTP_SOURCE_LIMIT_CONFIG,
   OTP_STATE_CAS_MAX_ATTEMPTS,
   OTP_STATE_RETENTION_MS,
 } from "./constants";
-import { OtpError } from "./errors";
+import { OtpError, otpRetryMetadata } from "./errors";
+import { logOtpEvent } from "./diagnostics";
 
 const SOURCE_POLICIES = {
   challenge: {
@@ -32,12 +34,26 @@ const SOURCE_POLICIES = {
   },
 };
 
-function retryAfterSeconds(milliseconds) {
-  return Math.max(1, Math.ceil(milliseconds / 1_000));
+function rateError(code, message, retryMilliseconds, now, scope = "phone") {
+  const metadata = otpRetryMetadata(new Date(now.getTime() + retryMilliseconds), now, scope);
+  return new OtpError(code, 429, message, metadata.retryAfterSeconds, metadata);
 }
 
-function rateError(code, message, retryMilliseconds) {
-  return new OtpError(code, 429, message, retryAfterSeconds(retryMilliseconds));
+function sourcePolicies(env) {
+  const limits = {};
+  for (const [key, { defaultValue, max }] of Object.entries(OTP_SOURCE_LIMIT_CONFIG)) {
+    const raw = env?.[key];
+    const value = typeof raw === "string" && /^[1-9]\d*$/.test(raw) ? Number(raw) : raw;
+    const valid = Number.isSafeInteger(value) && value >= 1 && value <= max;
+    limits[key] = valid ? value : defaultValue;
+    if (raw !== undefined && !valid) {
+      logOtpEvent({ stage: "configuration", decision: "reject", errorCode: "OTP_RATE_LIMIT_CONFIG_INVALID" });
+    }
+  }
+  return {
+    challenge: { ...SOURCE_POLICIES.challenge, shortLimit: limits.OTP_SOURCE_CHALLENGE_SHORT_LIMIT, hourLimit: limits.OTP_SOURCE_CHALLENGE_HOUR_LIMIT },
+    fallback: { ...SOURCE_POLICIES.fallback, shortLimit: limits.OTP_SOURCE_FALLBACK_SHORT_LIMIT, hourLimit: limits.OTP_SOURCE_FALLBACK_HOUR_LIMIT },
+  };
 }
 
 function activeWindow(startedAt, now, duration) {
@@ -107,6 +123,7 @@ function evaluatePhoneStart(current, now, phone) {
       "OTP_RATE_LIMITED",
       "OTP request rate limit exceeded.",
       Math.max(...retryIntervals),
+      now,
     );
   }
 
@@ -118,7 +135,12 @@ function evaluatePhoneStart(current, now, phone) {
       sendCount: sendCount + 1,
       ...activityFields(now),
     },
-    publicResult: { retryAfterSeconds: OTP_PHONE_START_COOLDOWN_MS / 1_000 },
+    publicResult: otpRetryMetadata(new Date(Math.max(
+      now.getTime() + OTP_PHONE_START_COOLDOWN_MS,
+      sendCount + 1 >= OTP_PHONE_START_WINDOW_LIMIT
+        ? sendWindowStartedAt.getTime() + OTP_PHONE_START_WINDOW_MS
+        : 0,
+    )), now),
   };
 }
 
@@ -156,7 +178,7 @@ function evaluateSourceAction(current, now, sourceHash, policy) {
     );
   }
   if (retryIntervals.length > 0) {
-    throw rateError(policy.code, policy.message, Math.max(...retryIntervals));
+    throw rateError(policy.code, policy.message, Math.max(...retryIntervals), now, "source");
   }
 
   return {
@@ -191,6 +213,7 @@ function evaluateVerifyFailure(current, now, phone) {
       "OTP_VERIFY_RATE_LIMITED",
       "OTP verification rate limit exceeded.",
       verifyWindowStartedAt.getTime() + OTP_PHONE_VERIFY_WINDOW_MS - now.getTime(),
+      now,
     );
   }
 
@@ -242,6 +265,7 @@ function evaluateVerifyAttemptReservation(current, now, phone, reservationId) {
       "OTP_VERIFY_RATE_LIMITED",
       "OTP verification rate limit exceeded.",
       verifyWindowStartedAt.getTime() + OTP_PHONE_VERIFY_WINDOW_MS - now.getTime(),
+      now,
     );
   }
 
@@ -340,7 +364,9 @@ export function createOtpRateLimitStore({
   phoneCollection,
   sourceCollection,
   clock = { now: () => new Date() },
+  env = process.env,
 }) {
+  const policies = sourcePolicies(env);
   const indexesReady = Promise.all([
     phoneCollection.createIndex(
       { phone: 1 },
@@ -375,7 +401,7 @@ export function createOtpRateLimitStore({
     },
 
     claimSourceAction(sourceHash, action) {
-      const policy = SOURCE_POLICIES[action];
+      const policy = policies[action];
       if (!policy) throw new TypeError("Unknown OTP source action.");
 
       return withIndexes((now) =>
@@ -407,6 +433,7 @@ export function createOtpRateLimitStore({
           current.verifyWindowStartedAt.getTime() +
             OTP_PHONE_VERIFY_WINDOW_MS -
             now.getTime(),
+          now,
         );
       }
 

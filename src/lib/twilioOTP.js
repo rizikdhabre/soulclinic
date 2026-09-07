@@ -143,10 +143,12 @@ export function classifyTwilioSendError(error) {
 
   if (isServerErrorStatus(status)) {
     return {
-      errorCode: "TWILIO_REQUEST_FAILED",
-      errorCategory: "PROVIDER_TEMPORARY",
-      retryable: true,
-      unknown: false,
+      // SMS POSTs are not idempotent: a 5xx does not prove non-acceptance.
+      // https://www.twilio.com/docs/api/errors/20500
+      errorCode: "OTP_SEND_PENDING",
+      errorCategory: "UNKNOWN_PROVIDER_RESULT",
+      retryable: false,
+      unknown: true,
       providerHttpStatus: status,
       providerErrorCode,
     };

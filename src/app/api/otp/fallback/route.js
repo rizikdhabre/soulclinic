@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
-import { OtpError } from "@/lib/otp/errors";
+import { OtpError, otpErrorMetadata } from "@/lib/otp/errors";
 import { requestTwilioFallback } from "@/lib/otp/twilioFallback";
 
 const SAFE_MESSAGES = {
   OTP_CHALLENGE_FAILED: "Invalid or expired OTP challenge.",
+  OTP_CHALLENGE_EXPIRED: "OTP challenge has expired.",
+  OTP_PROVIDER_REJECTED: "The OTP provider rejected the request.",
+  OTP_PERSISTENCE_FAILED: "OTP state could not be saved or read.",
   OTP_FALLBACK_ALREADY_USED: "OTP fallback has already been requested.",
   OTP_FALLBACK_FAILED: "Failed to request OTP fallback.",
   OTP_FALLBACK_NOT_ALLOWED: "OTP fallback is not available for this request.",
@@ -17,12 +20,12 @@ const SAFE_MESSAGES = {
   OTP_STATE_BUSY: "OTP security state is busy.",
 };
 
-function errorResponse(code, status, retryAfterSeconds) {
+function errorResponse(code, status, error) {
   return NextResponse.json(
     {
       error: code,
       message: SAFE_MESSAGES[code],
-      ...(retryAfterSeconds ? { retryAfterSeconds } : {}),
+      ...otpErrorMetadata(error),
     },
     { status },
   );
@@ -54,7 +57,7 @@ export async function POST(request) {
     return NextResponse.json({ provider: result.provider, status: result.status });
   } catch (error) {
     if (error instanceof OtpError && SAFE_MESSAGES[error.code]) {
-      return errorResponse(error.code, error.status, error.retryAfterSeconds);
+      return errorResponse(error.code, error.status, error);
     }
     return errorResponse("OTP_FALLBACK_FAILED", 500);
   }

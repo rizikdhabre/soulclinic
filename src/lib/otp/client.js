@@ -1,5 +1,19 @@
 import axios from "axios";
 import { classifyFirebaseSendError } from "./firebaseErrors";
+import { logOtpEvent } from "./diagnostics";
+
+function assertCurrent(isCurrentAttempt) {
+  if (!isCurrentAttempt()) {
+    const error = new Error("OTP flow was cancelled.");
+    error.code = "OTP_FLOW_CANCELLED";
+    throw error;
+  }
+}
+
+function responseErrorCode(error) {
+  const value = error?.response?.data?.error;
+  return (typeof value === "string" ? value : value?.code) || error?.code;
+}
 
 export function createOtpApiClient(http = axios) {
   return {
@@ -19,14 +33,41 @@ export async function startOtpClientFlow({
   api,
   sendFirebaseOtp,
   clearFirebaseRecaptcha,
+  onChallenge = () => {},
+  isCurrentAttempt = () => true,
 }) {
-  const challenge = await api.challenge({ phone, purpose });
+  let challenge;
+  try {
+    assertCurrent(isCurrentAttempt);
+    challenge = await api.challenge({ phone, purpose });
+  } catch (error) {
+    const response = error?.response?.data;
+    logOtpEvent({
+      stage: "challenge",
+      decision: "reject",
+      errorCode: responseErrorCode(error),
+      correlationId: response?.correlationId,
+      restrictionScope: response?.restrictionScope,
+      retryAt: response?.retryAt,
+      retryAfterSeconds: response?.retryAfterSeconds,
+    });
+    throw error;
+  }
   const flow = {
     challengeToken: challenge.challengeToken,
     provider: challenge.provider,
     expiresAt: challenge.expiresAt,
     retryAfterSeconds: challenge.retryAfterSeconds,
+    ...(challenge.retryAt ? { retryAt: challenge.retryAt } : {}),
+    ...(challenge.serverTime ? { serverTime: challenge.serverTime } : {}),
+    ...(challenge.correlationId ? { correlationId: challenge.correlationId } : {}),
   };
+  onChallenge({
+    retryAfterSeconds: challenge.retryAfterSeconds,
+    retryAt: challenge.retryAt,
+    serverTime: challenge.serverTime,
+  });
+  assertCurrent(isCurrentAttempt);
 
   if (challenge.provider === "development") {
     return flow;
@@ -38,34 +79,81 @@ export async function startOtpClientFlow({
     throw error;
   }
 
+  let confirmationResult;
   try {
-    const confirmationResult = await sendFirebaseOtp(phone, containerId);
-    return { ...flow, confirmationResult };
+    confirmationResult = await sendFirebaseOtp(phone, containerId);
   } catch (error) {
+    assertCurrent(isCurrentAttempt);
     const classification = classifyFirebaseSendError(error);
+    logOtpEvent({
+      correlationId: flow.correlationId,
+      stage: "firebase_send",
+      provider: "firebase",
+      errorCode: classification.code,
+      decision: classification.action,
+    });
     if (classification.action !== "fallback") {
       throw error;
     }
 
     clearFirebaseRecaptcha(containerId);
-    const fallback = await api.fallback({
-      challengeToken: challenge.challengeToken,
-      firebaseErrorCode: classification.code,
-    });
+    let fallback;
+    try {
+      fallback = await api.fallback({
+        challengeToken: challenge.challengeToken,
+        firebaseErrorCode: classification.code,
+      });
+    } catch (fallbackError) {
+      const response = fallbackError?.response?.data;
+      logOtpEvent({
+        correlationId: flow.correlationId,
+        stage: "fallback",
+        provider: "twilio",
+        errorCode: responseErrorCode(fallbackError),
+        decision: "failed",
+        restrictionScope: response?.restrictionScope,
+        retryAt: response?.retryAt,
+        retryAfterSeconds: response?.retryAfterSeconds,
+      });
+      throw fallbackError;
+    }
+    assertCurrent(isCurrentAttempt);
+    logOtpEvent({ correlationId: flow.correlationId, stage: "fallback", provider: "twilio", decision: "success" });
 
     return {
-      challengeToken: challenge.challengeToken,
+      ...flow,
       provider: "twilio",
-      expiresAt: challenge.expiresAt,
       retryAfterSeconds:
         fallback.retryAfterSeconds ?? challenge.retryAfterSeconds,
     };
   }
+  // Keep post-send work outside the send-error catch: success must never fall back.
+  assertCurrent(isCurrentAttempt);
+  logOtpEvent({ correlationId: flow.correlationId, stage: "firebase_send", provider: "firebase", decision: "success" });
+  return { ...flow, confirmationResult };
 }
 
-export async function completeOtpClientFlow({ flow, code, api }) {
+export async function completeOtpClientFlow({
+  flow,
+  code,
+  api,
+  isCurrentAttempt = () => true,
+}) {
+  assertCurrent(isCurrentAttempt);
+  const complete = async (payload) => {
+    try {
+      assertCurrent(isCurrentAttempt);
+      const result = await api.complete(payload);
+      assertCurrent(isCurrentAttempt);
+      logOtpEvent({ correlationId: flow.correlationId, stage: "complete", provider: flow.provider, decision: "success" });
+      return result;
+    } catch (error) {
+      logOtpEvent({ correlationId: flow.correlationId, stage: "complete", provider: flow.provider, decision: "failed", errorCode: responseErrorCode(error) });
+      throw error;
+    }
+  };
   if (flow.provider === "twilio" || flow.provider === "development") {
-    return api.complete({
+    return complete({
       challengeToken: flow.challengeToken,
       provider: flow.provider,
       code,
@@ -78,9 +166,23 @@ export async function completeOtpClientFlow({ flow, code, api }) {
     throw error;
   }
 
-  const credential = await flow.confirmationResult.confirm(code);
-  let idToken = await credential.user.getIdToken();
-  const result = await api.complete({
+  let idToken;
+  try {
+    const credential = await flow.confirmationResult.confirm(code);
+    assertCurrent(isCurrentAttempt);
+    idToken = await credential.user.getIdToken();
+    assertCurrent(isCurrentAttempt);
+  } catch (error) {
+    logOtpEvent({
+      correlationId: flow.correlationId,
+      stage: "complete",
+      provider: "firebase",
+      decision: "failed",
+      errorCode: responseErrorCode(error),
+    });
+    throw error;
+  }
+  const result = await complete({
     challengeToken: flow.challengeToken,
     provider: "firebase",
     idToken,

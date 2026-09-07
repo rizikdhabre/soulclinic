@@ -12,16 +12,37 @@ function getOtpErrorMessage(error) {
     case "INVALID_PHONE":
       return "رقم الهاتف غير صالح.";
     case "OTP_RATE_LIMITED":
+      return "يرجى الانتظار قبل طلب رمز جديد لهذا الرقم.";
     case "OTP_SOURCE_RATE_LIMITED":
     case "OTP_FALLBACK_SOURCE_RATE_LIMITED":
+      return "تم تجاوز عدد طلبات التحقق من هذه الشبكة مؤقتًا. يرجى الانتظار ثم المحاولة مجددًا.";
     case "auth/too-many-requests":
-      return "تم إرسال طلبات كثيرة. انتظر قليلاً ثم حاول مرة أخرى.";
+      return "تم تقييد طلب التحقق مؤقتًا. يرجى الانتظار والمحاولة لاحقًا.";
     case "OTP_REQUEST_IN_PROGRESS":
     case "OTP_STATE_BUSY":
       return "يوجد طلب تحقق قيد المعالجة حاليًا.";
     case "OTP_SERVICE_NOT_CONFIGURED":
+    case "OTP_RATE_LIMIT_CONFIG_INVALID":
     case "OTP_SOURCE_UNAVAILABLE":
+    case "auth/app-not-authorized":
+    case "auth/unauthorized-domain":
+    case "auth/operation-not-allowed":
+    case "auth/invalid-api-key":
       return "خدمة التحقق غير متاحة حاليًا.";
+    case "OTP_SEND_FAILED":
+    case "OTP_PROVIDER_REJECTED":
+    case "OTP_FALLBACK_FAILED":
+    case "OTP_SEND_RETRIES_EXHAUSTED":
+      return "تعذر إرسال رمز التحقق عبر خدمة الرسائل. حاول مجددًا بعد انتهاء الانتظار.";
+    case "OTP_SEND_PENDING":
+      return "لم نتمكن من تأكيد إرسال الرمز. يرجى الانتظار قبل طلب رمز آخر.";
+    case "OTP_CHALLENGE_FAILED":
+    case "OTP_CHALLENGE_EXPIRED":
+    case "OTP_FALLBACK_ALREADY_USED":
+    case "OTP_FALLBACK_NOT_ALLOWED":
+      return "طلب التحقق غير متاح أو انتهت صلاحيته. اطلب رمزًا جديدًا بعد انتهاء الانتظار.";
+    case "OTP_PERSISTENCE_FAILED":
+      return "تعذر حفظ حالة التحقق. يرجى المحاولة لاحقًا.";
     case "OTP_VERIFY_RATE_LIMITED":
       return "تم إدخال رمز خاطئ عدة مرات. يرجى الانتظار قبل المحاولة مرة أخرى.";
     case "OTP_VERIFICATION_EXPIRED":
@@ -172,7 +193,8 @@ export function AppointmentForm({
     try {
       await otpFlow.resend();
     } catch {
-      // The hook exposes only its projected public error.
+      setStep("phone");
+      // Keep the hook's error and deadline while allowing a fresh attempt later.
     }
   };
 
@@ -312,15 +334,18 @@ export function AppointmentForm({
                 placeholder="رقم الهاتف"
                 value={data.phone}
                 onChange={(event) => {
+                  const changedPhone = otpFlow.setPhone(event.target.value);
                   setData((current) => ({
                     ...current,
                     phone: event.target.value,
                     firstName: "",
                     lastName: "",
                   }));
-                  bookingFlow.phoneChanged();
-                  syncVerifiedFlowState();
-                  setOtp("");
+                  if (changedPhone) {
+                    bookingFlow.phoneChanged();
+                    syncVerifiedFlowState();
+                    setOtp("");
+                  }
                   setMessage("");
                 }}
                 inputMode="tel"

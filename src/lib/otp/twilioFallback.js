@@ -1,5 +1,7 @@
 import { hashBearerToken } from "./crypto";
-import { OtpError } from "./errors";
+import { OtpError, attachOtpAttemptMetadata, otpPersistence } from "./errors";
+import { OTP_PHONE_START_COOLDOWN_MS } from "./constants";
+import { logOtpEvent } from "./diagnostics";
 import { isServerApprovedFallbackCode } from "./firebaseErrors";
 import { getOtpChallengeStore } from "./challengeStore";
 import { createOtpRateLimitStore } from "./rateLimitStore";
@@ -9,7 +11,6 @@ import {
   sendTwilioVerification,
 } from "@/lib/twilioOTP";
 
-const MAX_SEND_ATTEMPTS = 3;
 const TERMINAL_SEND_STATUSES = new Set([
   "approved",
   "canceled",
@@ -21,17 +22,17 @@ const TERMINAL_SEND_STATUSES = new Set([
 const systemClock = { now: () => new Date() };
 let productionRateStorePromise;
 
-async function getProductionRateStore() {
-  if (!productionRateStorePromise) {
-    productionRateStorePromise = import("@/lib/db").then(({ getCollection }) =>
+async function getProductionRateStore(env = process.env, clock = systemClock) {
+  const create = () => import("@/lib/db").then(({ getCollection }) =>
       Promise.all([
         getCollection("otpSecurityState"),
         getCollection("otpSourceSecurityState"),
       ]).then(([phoneCollection, sourceCollection]) =>
-        createOtpRateLimitStore({ phoneCollection, sourceCollection }),
+        createOtpRateLimitStore({ phoneCollection, sourceCollection, env, clock }),
       ),
     );
-  }
+  if (env !== process.env || clock !== systemClock) return create();
+  if (!productionRateStorePromise) productionRateStorePromise = create();
   return productionRateStorePromise;
 }
 
@@ -39,9 +40,9 @@ function fallbackError(code, status, message) {
   return new OtpError(code, status, message);
 }
 
-function invalidChallenge() {
+function invalidChallenge(expired = false) {
   return fallbackError(
-    "OTP_CHALLENGE_FAILED",
+    expired ? "OTP_CHALLENGE_EXPIRED" : "OTP_CHALLENGE_FAILED",
     400,
     "Invalid or expired OTP challenge.",
   );
@@ -63,7 +64,7 @@ function fallbackNotAllowed() {
   );
 }
 
-function publicSendFailure(classification, finalAttempt) {
+function publicSendFailure(classification) {
   if (classification?.unknown) {
     return {
       code: "OTP_SEND_PENDING",
@@ -84,11 +85,11 @@ function publicSendFailure(classification, finalAttempt) {
     };
   }
 
-  if (classification?.retryable && finalAttempt) {
+  if (["AUTH", "PROVIDER_RATE_LIMIT", "PROVIDER_VALIDATION", "PROVIDER_PERMANENT"].includes(classification?.errorCategory)) {
     return {
-      code: "OTP_SEND_RETRIES_EXHAUSTED",
+      code: "OTP_PROVIDER_REJECTED",
       status: 503,
-      message: "Failed to send OTP after multiple attempts.",
+      message: "The OTP provider rejected the request.",
       challengeStatus: "failed",
       providerStatus: "failed",
     };
@@ -124,135 +125,101 @@ function resolvedSendFailure(providerStatus) {
 }
 
 export async function requestTwilioFallback(input, deps = {}) {
-  if (typeof input?.challengeToken !== "string" || !input.challengeToken) {
-    throw invalidChallenge();
-  }
-
-  const hashToken = deps.hashToken ?? hashBearerToken;
-  const challengeTokenHash = hashToken(input.challengeToken);
-  const challengeStore = deps.challengeStore ?? (await getOtpChallengeStore());
-  const challenge = await challengeStore.findByTokenHash(challengeTokenHash);
   const clock = deps.clock ?? systemClock;
-  const lookupNow = new Date(clock.now());
-
-  if (
-    !challenge ||
-    !(challenge.expiresAt instanceof Date) ||
-    challenge.expiresAt <= lookupNow
-  ) {
-    throw invalidChallenge();
-  }
-
-  const env = deps.env ?? process.env;
-  const deriveSourceHash = deps.deriveSourceHash ?? deriveOtpSourceHash;
-  const sourceHash = await deriveSourceHash(input.request, { env });
-  const rateStore = deps.rateStore ?? (await getProductionRateStore());
-  await rateStore.claimSourceAction(sourceHash, "fallback");
-
-  if (challenge.fallbackUsed === true) {
-    throw fallbackAlreadyUsed();
-  }
-
-  if (challenge.provider !== "firebase" || challenge.status !== "pending") {
-    throw fallbackNotAllowed();
-  }
-
-  const isApprovedFallbackCode =
-    deps.isApprovedFallbackCode ?? isServerApprovedFallbackCode;
-  if (!isApprovedFallbackCode(input.firebaseErrorCode)) {
-    throw fallbackNotAllowed();
-  }
-
-  const reserved = await challengeStore.reserveFallback({
-    challengeId: challenge._id,
-    challengeTokenHash,
-    firebaseErrorCode: input.firebaseErrorCode,
-    now: new Date(clock.now()),
-  });
-  if (!reserved) {
-    const freshChallenge = await challengeStore.findByTokenHash(
-      challengeTokenHash,
+  let challenge;
+  let phoneRetryAt;
+  try {
+    if (typeof input?.challengeToken !== "string" || !input.challengeToken) throw invalidChallenge();
+    const challengeTokenHash = (deps.hashToken ?? hashBearerToken)(input.challengeToken);
+    const challengeStore = deps.challengeStore ?? (await otpPersistence(() => getOtpChallengeStore()));
+    challenge = await otpPersistence(() => challengeStore.findByTokenHash(challengeTokenHash));
+    const lookupNow = new Date(clock.now());
+    phoneRetryAt = challenge?.retryAt ?? (
+      challenge?.createdAt instanceof Date
+        ? new Date(challenge.createdAt.getTime() + OTP_PHONE_START_COOLDOWN_MS)
+        : undefined
     );
-    const freshNow = new Date(clock.now());
-    if (
-      !freshChallenge ||
-      !(freshChallenge.expiresAt instanceof Date) ||
-      freshChallenge.expiresAt <= freshNow
-    ) {
-      throw invalidChallenge();
-    }
-    if (freshChallenge.fallbackUsed === true) {
-      throw fallbackAlreadyUsed();
-    }
-    throw fallbackNotAllowed();
-  }
+    logOtpEvent({ correlationId: challenge?.correlationId, stage: "fallback", decision: "started" });
+    if (!challenge || !(challenge.expiresAt instanceof Date)) throw invalidChallenge();
+    if (challenge.expiresAt <= lookupNow) throw invalidChallenge(true);
 
-  const sendVerification = deps.sendVerification ?? sendTwilioVerification;
-  const classifySendError = deps.classifySendError ?? classifyTwilioSendError;
+    const env = deps.env ?? process.env;
+    const deriveSourceHash = deps.deriveSourceHash ?? deriveOtpSourceHash;
+    const sourceHash = await deriveSourceHash(input.request, { env });
+    const rateStore = deps.rateStore ?? (await otpPersistence(() => getProductionRateStore(env, clock)));
+    await otpPersistence(() => rateStore.claimSourceAction(sourceHash, "fallback"));
 
-  for (let attempt = 1; attempt <= MAX_SEND_ATTEMPTS; attempt += 1) {
+    if (challenge.fallbackUsed === true) throw fallbackAlreadyUsed();
+    if (challenge.provider !== "firebase" || challenge.status !== "pending") throw fallbackNotAllowed();
+    const isApprovedFallbackCode = deps.isApprovedFallbackCode ?? isServerApprovedFallbackCode;
+    if (!isApprovedFallbackCode(input.firebaseErrorCode)) {
+      logOtpEvent({ correlationId: challenge.correlationId, stage: "firebase_send", provider: "firebase", errorCode: input.firebaseErrorCode, decision: "reject" });
+      throw fallbackNotAllowed();
+    }
+    logOtpEvent({ correlationId: challenge.correlationId, stage: "firebase_send", provider: "firebase", errorCode: input.firebaseErrorCode, decision: "fallback" });
+
+    const reserved = await otpPersistence(() => challengeStore.reserveFallback({
+      challengeId: challenge._id, challengeTokenHash,
+      firebaseErrorCode: input.firebaseErrorCode, now: new Date(clock.now()),
+    }));
+    if (!reserved) {
+      const fresh = await otpPersistence(() => challengeStore.findByTokenHash(challengeTokenHash));
+      if (!fresh || !(fresh.expiresAt instanceof Date)) throw invalidChallenge();
+      if (fresh.expiresAt <= new Date(clock.now())) throw invalidChallenge(true);
+      if (fresh.fallbackUsed === true) throw fallbackAlreadyUsed();
+      throw fallbackNotAllowed();
+    }
+    logOtpEvent({ correlationId: challenge.correlationId, stage: "fallback", provider: "twilio", decision: "reserved" });
+
+    async function rejectChangedChallenge() {
+      const fresh = await otpPersistence(() => challengeStore.findByTokenHash(challengeTokenHash));
+      if (!fresh || !(fresh.expiresAt instanceof Date)) throw invalidChallenge();
+      if (fresh.expiresAt <= new Date(clock.now())) throw invalidChallenge(true);
+      if (fresh.provider !== "twilio" || fresh.status !== "twilio_sending" || fresh.fallbackUsed !== true) {
+        throw fallbackNotAllowed();
+      }
+      throw fallbackError("OTP_STATE_BUSY", 503, "OTP security state is busy.");
+    }
+
+    async function recordFailure(failure) {
+      logOtpEvent({ correlationId: challenge.correlationId, stage: "twilio", provider: "twilio", decision: "failed", errorCode: failure.code });
+      const saved = await otpPersistence(() => challengeStore.markTwilioFailure({
+        challengeId: challenge._id, challengeTokenHash,
+        status: failure.challengeStatus, providerAttemptCount: 1,
+        lastProviderStatus: failure.providerStatus, lastProviderErrorCode: failure.code,
+        now: new Date(clock.now()),
+      }));
+      if (!saved) await rejectChangedChallenge();
+      throw fallbackError(failure.code, failure.status, failure.message);
+    }
+
+    // One logical reservation permits one provider invocation, never an automatic resend.
+    const sendVerification = deps.sendVerification ?? sendTwilioVerification;
+    const classifySendError = deps.classifySendError ?? classifyTwilioSendError;
+    logOtpEvent({ correlationId: challenge.correlationId, stage: "twilio", provider: "twilio", decision: "started" });
     let verification;
     try {
       verification = await sendVerification(challenge.phone);
     } catch (error) {
-      const classification = classifySendError(error);
-      const finalAttempt = attempt === MAX_SEND_ATTEMPTS;
-      if (classification?.retryable && !finalAttempt) continue;
-
-      const failure = publicSendFailure(classification, finalAttempt);
-      await challengeStore.markTwilioFailure({
-        challengeId: challenge._id,
-        challengeTokenHash,
-        status: failure.challengeStatus,
-        providerAttemptCount: attempt,
-        lastProviderStatus: failure.providerStatus,
-        lastProviderErrorCode: failure.code,
-        now: new Date(clock.now()),
-      });
-      throw fallbackError(failure.code, failure.status, failure.message);
+      await recordFailure(publicSendFailure(classifySendError(error)));
     }
 
     const providerStatus = verification?.status;
-    if (providerStatus !== "pending") {
-      const failure = resolvedSendFailure(providerStatus);
-      await challengeStore.markTwilioFailure({
-        challengeId: challenge._id,
-        challengeTokenHash,
-        status: failure.challengeStatus,
-        providerAttemptCount: attempt,
-        lastProviderStatus: failure.providerStatus,
-        lastProviderErrorCode: failure.code,
-        now: new Date(clock.now()),
-      });
-      throw fallbackError(failure.code, failure.status, failure.message);
-    }
-
-    let sent;
-    try {
-      sent = await challengeStore.markTwilioSent({
-        challengeId: challenge._id,
-        challengeTokenHash,
-        providerAttemptCount: attempt,
-        lastProviderStatus: providerStatus,
-        now: new Date(clock.now()),
-      });
-    } catch {
-      throw fallbackError(
-        "OTP_SEND_PENDING",
-        503,
-        "The verification request may still be processing.",
-      );
-    }
-
-    if (!sent) {
-      throw fallbackError(
-        "OTP_SEND_PENDING",
-        503,
-        "The verification request may still be processing.",
-      );
-    }
+    if (providerStatus !== "pending") await recordFailure(resolvedSendFailure(providerStatus));
+    logOtpEvent({ correlationId: challenge.correlationId, stage: "twilio", provider: "twilio", decision: "success" });
+    const sent = await otpPersistence(() => challengeStore.markTwilioSent({
+      challengeId: challenge._id, challengeTokenHash, providerAttemptCount: 1,
+      lastProviderStatus: providerStatus, now: new Date(clock.now()),
+    }));
+    if (!sent) await rejectChangedChallenge();
+    logOtpEvent({ correlationId: challenge.correlationId, stage: "fallback", provider: "twilio", decision: "success" });
     return { provider: "twilio", status: providerStatus };
+  } catch (error) {
+    const failure = attachOtpAttemptMetadata(
+      error instanceof OtpError ? error : fallbackError("OTP_FALLBACK_FAILED", 500, "Failed to request OTP fallback."),
+      { correlationId: challenge?.correlationId, phoneRetryAt, now: new Date(clock.now()) },
+    );
+    logOtpEvent({ ...failure, errorCode: failure.code, stage: "fallback", provider: "twilio", decision: failure.status === 429 ? "blocked" : "failed" });
+    throw failure;
   }
-
-  throw fallbackError("OTP_SEND_FAILED", 503, "Failed to send OTP.");
 }

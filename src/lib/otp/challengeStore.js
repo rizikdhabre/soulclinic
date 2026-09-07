@@ -126,7 +126,7 @@ export function createOtpChallengeStore({ collection }) {
     },
 
     async rotate(
-      { phone, purpose, challengeTokenHash, provider, now, expiresAt },
+      { phone, purpose, challengeTokenHash, provider, now, expiresAt, correlationId, retryAt },
       options = {},
     ) {
       await indexesReady;
@@ -146,8 +146,14 @@ export function createOtpChallengeStore({ collection }) {
             createdAt: now,
             updatedAt: now,
             expiresAt,
+            ...(correlationId === undefined ? {} : { correlationId }),
+            ...(retryAt === undefined ? {} : { retryAt }),
           },
-          $unset: ROTATION_RESIDUE,
+          $unset: {
+            ...ROTATION_RESIDUE,
+            ...(correlationId === undefined ? { correlationId: "" } : {}),
+            ...(retryAt === undefined ? { retryAt: "" } : {}),
+          },
         },
         {
           ...sessionOptions(options),

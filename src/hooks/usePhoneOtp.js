@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { normalizeIsraeliPhone } from "@/lib/phone";
+import { getRetryDeadline, getRestrictionScope } from "@/lib/otp/retry";
 import {
   clearFirebaseRecaptcha,
   sendFirebaseOtp,
@@ -35,6 +37,16 @@ const PUBLIC_FIREBASE_ERROR_CODES = new Set([
   "auth/too-many-requests",
   "auth/unknown",
   "auth/user-disabled",
+  "auth/recaptcha-not-enabled",
+  "auth/missing-recaptcha-token",
+  "auth/invalid-recaptcha-token",
+  "auth/invalid-recaptcha-action",
+  "auth/missing-client-type",
+  "auth/missing-recaptcha-version",
+  "auth/invalid-recaptcha-version",
+  "auth/invalid-req-type",
+  "auth/unauthorized-domain",
+  "auth/invalid-api-key",
 ]);
 
 const PUBLIC_OTP_ERROR_CODES = new Set([
@@ -43,14 +55,20 @@ const PUBLIC_OTP_ERROR_CODES = new Set([
   "INVALID_PHONE",
   "OTP_CHALLENGE_ALREADY_COMPLETED",
   "OTP_CHALLENGE_FAILED",
+  "OTP_CHALLENGE_EXPIRED",
   "OTP_COMPLETION_IN_PROGRESS",
   "OTP_FALLBACK_ALREADY_USED",
+  "OTP_FALLBACK_NOT_ALLOWED",
+  "OTP_FALLBACK_FAILED",
   "OTP_FALLBACK_SOURCE_RATE_LIMITED",
   "OTP_FLOW_CANCELLED",
   "OTP_FLOW_NOT_STARTED",
   "OTP_LOGIN_COMPLETION_UNAVAILABLE",
   "OTP_PROVIDER_MISMATCH",
   "OTP_PROVIDER_UNSUPPORTED",
+  "OTP_PROVIDER_REJECTED",
+  "OTP_PERSISTENCE_FAILED",
+  "OTP_RATE_LIMIT_CONFIG_INVALID",
   "OTP_RATE_LIMITED",
   "OTP_REQUEST_FAILED",
   "OTP_REQUEST_IN_PROGRESS",
@@ -68,6 +86,7 @@ const PUBLIC_OTP_ERROR_CODES = new Set([
   "OTP_VERIFY_FAILED",
   "OTP_VERIFY_RATE_LIMITED",
   "OTP_VERIFY_TEMPORARY_FAILURE",
+  "otp/recaptcha-setup-failed",
 ]);
 
 const defaultApi = createOtpApiClient();
@@ -130,11 +149,14 @@ export function createPhoneOtpController({
   clearFirebaseRecaptcha: clearRecaptcha = clearFirebaseRecaptcha,
   schedule = setTimeout,
   cancel = clearTimeout,
+  now = () => Date.now(),
   flowRef = { current: null },
   inFlightRef = { current: false },
 }) {
   let state = { ...INITIAL_STATE };
-  let lastPhone = null;
+  let currentPhone = null;
+  const phoneDeadlines = new Map();
+  let sourceRestriction = null;
   let version = 0;
   let disposed = false;
   let activeOperation = null;
@@ -163,29 +185,78 @@ export function createPhoneOtpController({
     }
   }
 
-  function setCooldown(value) {
+  function refreshCooldown() {
     stopCooldown();
-    const seconds = normalizeCooldown(value);
+    const time = now();
+    for (const [phone, deadline] of phoneDeadlines) {
+      if (deadline <= time) phoneDeadlines.delete(phone);
+    }
+    if (sourceRestriction?.deadline <= time) {
+      if (state.error === sourceRestriction.error) updateState({ error: null });
+      sourceRestriction = null;
+    }
+    const deadline = Math.max(phoneDeadlines.get(currentPhone) || 0, sourceRestriction?.deadline || 0);
+    const seconds = Math.max(0, Math.ceil((deadline - time) / 1000));
     updateState({ cooldownSeconds: seconds });
     if (!seconds || disposed) return;
 
     cooldownTimer = schedule(() => {
       cooldownTimer = null;
-      setCooldown(seconds - 1);
+      refreshCooldown();
     }, 1000);
+  }
+
+  function rememberRestriction(phone, value, error = null) {
+    const deadline = getRetryDeadline(value, now());
+    if (deadline > now()) {
+      if (getRestrictionScope(error?.code) === "source") {
+        if (!sourceRestriction || deadline >= sourceRestriction.deadline) {
+          sourceRestriction = { deadline, error };
+        }
+        updateState({ error: sourceRestriction.error });
+      } else if (phone) {
+        phoneDeadlines.set(phone, Math.max(deadline, phoneDeadlines.get(phone) || 0));
+      }
+    }
+    refreshCooldown();
+    // Bound browser-only history; the authoritative server limits still apply.
+    while (phoneDeadlines.size > 100) phoneDeadlines.delete(phoneDeadlines.keys().next().value);
+  }
+
+  function setPhone(value) {
+    const phone = normalizeIsraeliPhone(value);
+    if (phone === currentPhone) return false;
+    const hadAttempt = currentPhone !== null || flowRef.current !== null;
+    currentPhone = phone;
+    version += 1;
+    flowRef.current = null;
+    if (hadAttempt) clearRecaptcha(recaptchaContainerId);
+    updateState({ ...INITIAL_STATE, loading: inFlightRef.current, error: sourceRestriction?.error || null });
+    refreshCooldown();
+    return true;
   }
 
   async function runStart(phone, clearBeforeStart) {
     if (disposed) return { started: false, reason: "inactive" };
+    setPhone(phone);
     if (inFlightRef.current) return { started: false, reason: "in-flight" };
+    refreshCooldown();
     if (state.cooldownSeconds > 0) {
       return { started: false, reason: "cooldown" };
     }
+    if (!currentPhone) {
+      const error = new Error("Invalid phone number.");
+      error.code = "INVALID_PHONE";
+      throw error;
+    }
+    phone = currentPhone;
 
     const operation = Symbol("otp-start");
     activeOperation = operation;
     inFlightRef.current = true;
     const operationVersion = ++version;
+    const isCurrentAttempt = () => !disposed && operationVersion === version;
+    let reservationObserved = false;
     if (clearBeforeStart || flowRef.current) {
       clearRecaptcha(recaptchaContainerId);
     }
@@ -205,6 +276,11 @@ export function createPhoneOtpController({
         api,
         sendFirebaseOtp: sendFirebase,
         clearFirebaseRecaptcha: clearRecaptcha,
+        isCurrentAttempt,
+        onChallenge: (reservation) => {
+          reservationObserved = true;
+          rememberRestriction(phone, reservation);
+        },
       });
 
       if (disposed || operationVersion !== version) {
@@ -215,11 +291,11 @@ export function createPhoneOtpController({
       }
 
       flowRef.current = nextFlow;
-      lastPhone = phone;
       if (nextFlow.provider !== "firebase") {
         clearRecaptcha(recaptchaContainerId);
       }
-      setCooldown(nextFlow.retryAfterSeconds);
+      if (!reservationObserved) rememberRestriction(phone, nextFlow);
+      else refreshCooldown();
       updateState({
         phase: "code",
         provider: nextFlow.provider,
@@ -228,21 +304,27 @@ export function createPhoneOtpController({
       });
       return { started: true, provider: nextFlow.provider };
     } catch (error) {
+      const publicError = projectError(error, "start");
+      const response = error?.response?.data;
+      rememberRestriction(phone, {
+        retryAt: response?.retryAt ?? error?.retryAt,
+        serverTime: response?.serverTime ?? error?.serverTime,
+        retryAfterSeconds: publicError.retryAfterSeconds,
+      }, publicError);
       if (!disposed && operationVersion === version) {
-        const publicError = projectError(error, "start");
-        setCooldown(publicError.retryAfterSeconds);
         updateState({
           phase: "idle",
           provider: null,
           loading: false,
           error: publicError,
         });
-      }
+      } else return { started: false, reason: "cancelled" };
       throw error;
     } finally {
       if (activeOperation === operation) {
         activeOperation = null;
         inFlightRef.current = false;
+        updateState({ loading: false });
       }
     }
   }
@@ -251,7 +333,8 @@ export function createPhoneOtpController({
     return runStart(phone, false);
   }
 
-  async function resend(phone = lastPhone) {
+  async function resend(phone = currentPhone) {
+    if (normalizeIsraeliPhone(phone) !== currentPhone) setPhone(phone);
     if (state.phase !== "code" || !flowRef.current) {
       return { started: false, reason: "not-ready" };
     }
@@ -270,13 +353,12 @@ export function createPhoneOtpController({
     updateState({ loading: true, error: null });
 
     try {
-      const result = await completeFlow({ flow: activeFlow, code, api });
+      const result = await completeFlow({ flow: activeFlow, code, api, isCurrentAttempt: () => !disposed && operationVersion === version });
       if (disposed || operationVersion !== version) {
         throw createFlowCancelledError();
       }
 
       flowRef.current = null;
-      lastPhone = null;
       stopCooldown();
       clearRecaptcha(recaptchaContainerId);
       updateState({
@@ -300,6 +382,7 @@ export function createPhoneOtpController({
       if (activeOperation === operation) {
         activeOperation = null;
         inFlightRef.current = false;
+        updateState({ loading: false });
       }
     }
   }
@@ -307,10 +390,10 @@ export function createPhoneOtpController({
   function reset() {
     version += 1;
     flowRef.current = null;
-    lastPhone = null;
     stopCooldown();
     clearRecaptcha(recaptchaContainerId);
-    updateState({ ...INITIAL_STATE });
+    updateState({ ...INITIAL_STATE, loading: inFlightRef.current, error: sourceRestriction?.error || null });
+    refreshCooldown();
   }
 
   function dispose() {
@@ -320,7 +403,7 @@ export function createPhoneOtpController({
     activeOperation = null;
     inFlightRef.current = false;
     flowRef.current = null;
-    lastPhone = null;
+    currentPhone = null;
     stopCooldown();
     clearRecaptcha(recaptchaContainerId);
     listeners.clear();
@@ -337,6 +420,8 @@ export function createPhoneOtpController({
     verify,
     resend,
     reset,
+    setPhone,
+    refreshCooldown,
     activate,
     dispose,
   };
@@ -363,7 +448,12 @@ export function usePhoneOtp({ purpose, recaptchaContainerId }) {
 
   useEffect(() => {
     controller.activate();
-    return () => controller.dispose();
+    const refresh = () => controller.refreshCooldown();
+    globalThis.document?.addEventListener?.("visibilitychange", refresh);
+    return () => {
+      globalThis.document?.removeEventListener?.("visibilitychange", refresh);
+      controller.dispose();
+    };
   }, [controller]);
 
   return {
@@ -372,5 +462,6 @@ export function usePhoneOtp({ purpose, recaptchaContainerId }) {
     verify: controller.verify,
     resend: controller.resend,
     reset: controller.reset,
+    setPhone: controller.setPhone,
   };
 }

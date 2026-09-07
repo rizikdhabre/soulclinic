@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createOtpChallenge } from "@/lib/otp/challengeService";
-import { OtpError } from "@/lib/otp/errors";
+import { OtpError, otpErrorMetadata } from "@/lib/otp/errors";
 
 const SAFE_MESSAGES = {
   INVALID_PHONE: "Invalid phone number.",
@@ -9,14 +9,16 @@ const SAFE_MESSAGES = {
   OTP_SOURCE_RATE_LIMITED: "OTP challenge rate limit exceeded.",
   OTP_SOURCE_UNAVAILABLE: "OTP source identity is unavailable.",
   OTP_CHALLENGE_FAILED: "Failed to create OTP challenge.",
+  OTP_PERSISTENCE_FAILED: "OTP state could not be saved or read.",
+  OTP_STATE_BUSY: "OTP security state is busy.",
 };
 
-function errorResponse(code, status, retryAfterSeconds) {
+function errorResponse(code, status, error) {
   return NextResponse.json(
     {
       error: code,
       message: SAFE_MESSAGES[code],
-      ...(retryAfterSeconds ? { retryAfterSeconds } : {}),
+      ...otpErrorMetadata(error),
     },
     { status },
   );
@@ -39,7 +41,7 @@ export async function POST(request) {
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof OtpError && SAFE_MESSAGES[error.code]) {
-      return errorResponse(error.code, error.status, error.retryAfterSeconds);
+      return errorResponse(error.code, error.status, error);
     }
     return errorResponse("OTP_CHALLENGE_FAILED", 500);
   }

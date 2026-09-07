@@ -12,28 +12,42 @@ function getLoginErrorMessage(error) {
     case "INVALID_PHONE":
       return "رقم الهاتف غير صحيح. أدخل رقمًا إسرائيليًا صالحًا.";
     case "OTP_RATE_LIMITED":
+      return "يرجى الانتظار قبل طلب رمز جديد لهذا الرقم.";
     case "OTP_SOURCE_RATE_LIMITED":
     case "OTP_FALLBACK_SOURCE_RATE_LIMITED":
+      return "تم تجاوز عدد طلبات التحقق من هذه الشبكة مؤقتًا. يرجى الانتظار ثم المحاولة مجددًا.";
     case "auth/too-many-requests":
-      return "تم إرسال طلبات كثيرة. انتظر قليلًا ثم حاول مرة أخرى.";
+      return "تم تقييد طلب التحقق مؤقتًا. يرجى الانتظار والمحاولة لاحقًا.";
     case "OTP_VERIFY_RATE_LIMITED":
       return "تم إدخال رمز خاطئ عدة مرات. انتظر قبل المحاولة مرة أخرى.";
     case "OTP_SEND_PENDING":
     case "auth/network-request-failed":
-      return "قد يكون الرمز في طريقه إليك. انتظر قليلًا قبل المحاولة مرة أخرى.";
+      return "لم نتمكن من تأكيد إرسال الرمز. يرجى الانتظار قبل طلب رمز آخر.";
     case "OTP_SERVICE_NOT_CONFIGURED":
+    case "OTP_RATE_LIMIT_CONFIG_INVALID":
     case "OTP_SOURCE_UNAVAILABLE":
     case "OTP_PROVIDER_UNSUPPORTED":
     case "auth/app-not-authorized":
+    case "auth/unauthorized-domain":
+    case "auth/invalid-api-key":
     case "auth/invalid-app-credential":
     case "auth/missing-app-credential":
     case "auth/operation-not-allowed":
       return "خدمة التحقق غير متاحة حاليًا. يرجى المحاولة لاحقًا.";
     case "OTP_SEND_FAILED":
+    case "OTP_PROVIDER_REJECTED":
+    case "OTP_FALLBACK_FAILED":
     case "OTP_SEND_RETRIES_EXHAUSTED":
+      return "تعذر إرسال رمز التحقق عبر خدمة الرسائل. حاول مجددًا بعد انتهاء الانتظار.";
+    case "OTP_PERSISTENCE_FAILED":
+      return "تعذر حفظ حالة التحقق. يرجى المحاولة لاحقًا.";
+    case "OTP_CHALLENGE_FAILED":
+    case "OTP_CHALLENGE_EXPIRED":
+    case "OTP_FALLBACK_ALREADY_USED":
+    case "OTP_FALLBACK_NOT_ALLOWED":
+      return "طلب التحقق غير متاح أو انتهت صلاحيته. اطلب رمزًا جديدًا بعد انتهاء الانتظار.";
     case "OTP_VERIFY_FAILED":
     case "OTP_VERIFY_TEMPORARY_FAILURE":
-    case "OTP_CHALLENGE_FAILED":
     case "OTP_REQUEST_IN_PROGRESS":
     case "OTP_STATE_BUSY":
     case "auth/captcha-check-failed":
@@ -168,7 +182,13 @@ export default function LoginPage() {
 
                 <input
                   value={rawPhone}
-                  onChange={(e) => setRawPhone(e.target.value)}
+                  onChange={(e) => {
+                    if (otpFlow.setPhone(e.target.value)) {
+                      setOtp("");
+                      setLocalError("");
+                    }
+                    setRawPhone(e.target.value);
+                  }}
                   inputMode="tel"
                   autoComplete="tel"
                   placeholder="مثال: 05XXXXXXXX"

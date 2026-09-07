@@ -21,6 +21,16 @@ export const OTP_SOURCE_CHALLENGE_HOUR_LIMIT = 30;
 export const OTP_SOURCE_FALLBACK_SHORT_LIMIT = 3;
 export const OTP_SOURCE_FALLBACK_HOUR_LIMIT = 10;
 
+// Operator-tunable per-source ceilings, not claims about observed clinic traffic.
+// At most 3x challenge capacity and about 3x paid-fallback capacity; phone and
+// one-use challenge controls remain independent. Raise only with traffic/spend evidence.
+export const OTP_SOURCE_LIMIT_CONFIG = Object.freeze({
+  OTP_SOURCE_CHALLENGE_SHORT_LIMIT: { defaultValue: OTP_SOURCE_CHALLENGE_SHORT_LIMIT, max: 30 },
+  OTP_SOURCE_CHALLENGE_HOUR_LIMIT: { defaultValue: OTP_SOURCE_CHALLENGE_HOUR_LIMIT, max: 90 },
+  OTP_SOURCE_FALLBACK_SHORT_LIMIT: { defaultValue: OTP_SOURCE_FALLBACK_SHORT_LIMIT, max: 10 },
+  OTP_SOURCE_FALLBACK_HOUR_LIMIT: { defaultValue: OTP_SOURCE_FALLBACK_HOUR_LIMIT, max: 30 },
+});
+
 export function assertOtpPurpose(value) {
   if (!OTP_PURPOSES.has(value)) {
     throw new OtpError("INVALID_OTP_PURPOSE", 400, "Invalid OTP purpose.");
