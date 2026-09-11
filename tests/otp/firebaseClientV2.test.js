@@ -34,6 +34,7 @@ function makeSdk() {
   const app = { name: "soulclinic-phone-otp-v2" };
   const auth = { app };
   const instances = [];
+  const renderedHosts = new WeakSet();
   const user = { getIdToken: vi.fn().mockResolvedValue("private-id-token") };
   const credential = { user, providerId: "phone", operationType: "signIn" };
   const confirmation = { verificationId: "private-verification-id", confirm: vi.fn().mockResolvedValue(credential) };
@@ -50,7 +51,14 @@ function makeSdk() {
       this.clear = vi.fn();
       instances.push(this);
     }
-    render() { return hooks.render(); }
+    async render() {
+      if (this.rendered) return 1;
+      if (renderedHosts.has(this.container)) throw new Error("reCAPTCHA has already been rendered in this element");
+      const id = await hooks.render();
+      renderedHosts.add(this.container);
+      this.rendered = true;
+      return id;
+    }
     verify() { return hooks.verify(); }
   }
   const sdk = {
@@ -251,19 +259,31 @@ describe("lazy memory-only Firebase initialization", () => {
 });
 
 describe("verifier ownership and send lifetime", () => {
-  it("uses the same owned host under a stable form container on sequential sends", async () => {
-    const root = document.roots.get("login-recaptcha");
-    const value = client();
+  it.each(["login-recaptcha", "booking-recaptcha"])("resends with a fresh widget host and stable %s form container", async (containerId) => {
+    const root = document.roots.get(containerId);
+    const value = client({ containerId });
     await value.send(PHONE);
     const host = fixture.instances[0].container;
-    await value.send(PHONE);
-    expect(fixture.instances[1].container).toBe(host);
-    expect(root.childNodes).toEqual([host]);
+    await expect(value.send(PHONE)).resolves.toBe(fixture.confirmation);
+    expect(fixture.instances[1].container).not.toBe(host);
+    expect(fixture.sdk.signInWithPhoneNumber).toHaveBeenCalledTimes(2);
+    expect(root.childNodes).toEqual([]);
+    expect(host.parentNode).toBeNull();
     expect(fixture.instances[0].clear).toHaveBeenCalledTimes(1);
     expect(fixture.instances[1].clear).toHaveBeenCalledTimes(1);
     value.dispose();
     expect(root.childNodes).toEqual([]);
-    expect(document.getElementById("login-recaptcha")).toBe(root);
+    expect(document.getElementById(containerId)).toBe(root);
+  });
+
+  it.each(["login-recaptcha", "booking-recaptcha"])("can send again after a settled SDK failure in %s", async (containerId) => {
+    fixture.sdk.signInWithPhoneNumber.mockRejectedValueOnce(sdkError("auth/too-many-requests"));
+    const value = client({ containerId });
+    await expect(value.send(PHONE)).rejects.toHaveProperty("code", "auth/too-many-requests");
+    // The controller/server, not this adapter, decide when a new attempt is permitted.
+    await expect(value.send(PHONE)).resolves.toBe(fixture.confirmation);
+    expect(fixture.sdk.signInWithPhoneNumber).toHaveBeenCalledTimes(2);
+    expect(document.roots.get(containerId).childNodes).toEqual([]);
   });
 
   it("requires an existing mounted form container", async () => {

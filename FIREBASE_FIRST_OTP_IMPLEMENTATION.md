@@ -270,6 +270,50 @@ In-flight challenges retain their original frozen provider policy and can finish
 Keep dependencies and adapters deployed until those challenges expire. Main/production
 rollout, changes to production settings, and any production rollback require later approval.
 
+## Resend Repair (2026-09-11)
+
+The approved Preview smoke test confirmed actual Firebase SMS receipt from the booking
+form on `soulclinic-g9n87vjde-rizik-dhabres-projects.vercel.app`. A separate eligible
+pre-send reCAPTCHA technical failure completed a real Twilio login and application logout.
+No appointment was created. Firebase code confirmation/Admin verification and the
+post-fix real resend remain to be tested. The original resend's server event omitted
+its underlying error, so the exact historical exception cannot be conclusively recovered.
+
+The resend adapter reused the same inner HTML element after clearing an invisible
+verifier. The installed SDK's `clear()` destroys the verifier without unregistering that
+element from the underlying reCAPTCHA renderer. Cleanup now removes and retires only the
+adapter-owned child after the send settles, allowing a fresh child for a later send.
+The form root and ownership lock remain stable; no live send is cancelled or raced.
+Provider policy, fallback eligibility, limits, sessions, grants and booking rules are unchanged.
+
+The earlier SDK doubles did not model duplicate rendered-host rejection. Strengthening
+them reproduced the generic `client/unclassified` / `recaptcha_render` failure before
+the production fix: 5 client cases failed and all 4 login/booking desktop/mobile resend
+cases failed. These are isolated reproductions, not a claim that the historical browser
+exception was captured. The browser regression now verifies the new challenge's code
+and proof, not just its request count, and asserts no fallback or rejected send.
+
+Actual post-fix verification:
+
+- Pre-edit baseline: 1368/1368 tests, 35 files, 32.40 seconds.
+- Focused Firebase adapter: 70/70 tests.
+- Focused Playwright resend: 4/4, 9.9 seconds.
+- Full suite: 1371/1371, 35 files, 29.35 seconds.
+- Full Playwright: 98/98, 178.209 seconds; no failures, skips or flaky cases.
+- Focused ESLint: exit 0, no warnings/errors.
+- Production build: exit 0; 24.5-second compilation, TypeScript phase and 56 pages passed.
+  The first local build used the wrong database variable name and failed at page-data
+  collection; the successful rerun supplied process-only `MONGO_URI` with an unreachable
+  loopback URL and synthetic public Firebase configuration. No env files were read/copied.
+  The existing stale Browserslist-data warning remains; dependencies were not changed.
+- No real SMS or appointment writes during this repair's automated tests.
+
+Repair files: `src/lib/otp/firebaseClient.js`, `tests/otp/firebaseClientV2.test.js`,
+`tests/e2e/firebaseOtpV2/sdk.mock.js`, `tests/e2e/firebaseOtpV2/otp.spec.cjs`, and this report.
+The tests are tracked despite the unchanged ignore rules. Push/redeployment is scoped to
+`codex/firebase-first-otp-v2` only. A new immutable Preview hostname must be checked against
+Authorized Domains before a real-provider retry; the old immutable URL keeps its old code.
+
 ## References
 
 - [Firebase modular web phone authentication](https://firebase.google.com/docs/auth/web/phone-auth)

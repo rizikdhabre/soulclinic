@@ -162,14 +162,22 @@ for (const purpose of ['login', 'booking']) {
       expect((await otp.snapshot()).sdk.sends).toEqual([OTHER_NORMALIZED]);
     });
 
-    test('resend observes absolute deadline and creates one new challenge', async ({ page, otp }) => {
+    test('resend observes absolute deadline and verifies the new Firebase challenge', async ({ page, otp }) => {
       await page.clock.install(); await otp.open(purpose); const ui = await otp.start(purpose);
+      const root = await ui.scope.locator('[id^="otp-"]').elementHandle();
       await expect(ui.resend).toBeDisabled();
       await page.clock.fastForward(58000); await expect(ui.resend).toBeDisabled();
       expect(otp.count('/api/otp/challenge')).toHaveLength(1);
       await page.clock.fastForward(2100); await expect(ui.resend).toBeEnabled();
       await ui.resend.click(); await expect(ui.back).toBeEnabled();
       expect(otp.count('/api/otp/challenge')).toHaveLength(2); expect((await otp.snapshot()).sdk.sends).toHaveLength(2);
+      expect(otp.count('/api/otp/firebase-send', 'accepted')).toHaveLength(2);
+      expect(otp.count('/api/otp/firebase-send', 'rejected')).toHaveLength(0);
+      expect(otp.count('/api/otp/fallback')).toHaveLength(0);
+      expect(await root.evaluate(element => element.isConnected)).toBe(true);
+      await expect(ui.scope.getByText('تعذر إكمال التحقق. يرجى المحاولة مرة أخرى.', { exact: true })).toHaveCount(0);
+      await otp.verify(purpose); await otp.success(purpose);
+      expect(otp.count('/api/otp/complete')[0].body).toMatchObject({ challengeToken: 'mock-challenge-2', purpose, idToken: `mock-id-token:${NORMALIZED}` });
     });
 
     test('visibility foreground recalculates cooldown without another send', async ({ page, otp }) => {

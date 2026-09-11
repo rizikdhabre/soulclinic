@@ -178,7 +178,10 @@ export function createFirebasePhoneClient({
     verifier = undefined;
     // Cleanup is best effort and can never change an SDK send outcome.
     try { previous?.clear(); } catch { /* No raw SDK errors in diagnostics. */ }
-    try { host?.replaceChildren(); } catch { /* Parent still belongs to the form. */ }
+    // Invisible reCAPTCHA retains its rendered host identity after clear().
+    // Retire only our child after the operation settles; keep the form root stable.
+    try { host?.remove(); } catch { /* Parent still belongs to the form. */ }
+    host = undefined;
   }
 
   function releaseContainer() {

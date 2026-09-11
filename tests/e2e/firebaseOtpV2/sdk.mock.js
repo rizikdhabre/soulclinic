@@ -2,6 +2,7 @@
 const state = () => window.__otpTest;
 const sdkError = code => Object.assign(new Error('Synthetic SDK error'), { code });
 const apps = [];
+const renderedHosts = new WeakSet();
 export const inMemoryPersistence = {};
 export const getApps = () => apps;
 export function initializeApp(config, name) {
@@ -17,7 +18,12 @@ export class RecaptchaVerifier {
     state().sdk.construct += 1;
   }
   async render() {
+    if (this.rendered) return 1;
+    // Clearing an invisible Firebase verifier does not unregister Google's host element.
+    if (renderedHosts.has(this.host)) throw new Error('reCAPTCHA has already been rendered in this element');
     if (state().scenario.renderError) throw sdkError(state().scenario.renderError);
+    renderedHosts.add(this.host);
+    this.rendered = true;
     return 1;
   }
   async verify() { return 'test-only-captcha-token'; }
