@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { bucket } from "@/lib/firebaseAdmin";
+import { getStorageBucket } from "@/lib/cloudStorage";
 
 export async function POST(req) {
   try {
@@ -28,6 +28,7 @@ export async function POST(req) {
     const buffer = Buffer.from(await image.arrayBuffer());
 
     const filePath = `services/${treatmentId}/${Date.now()}.jpg`;
+    const bucket = await getStorageBucket();
     const file = bucket.file(filePath);
 
     await file.save(buffer, {
@@ -45,8 +46,8 @@ export async function POST(req) {
       url: cacheBustedUrl,
       path: filePath,
     });
-  } catch (err) {
-    console.error("UPLOAD ERROR:", err);
+  } catch {
+    console.error("Service image upload failed");
     return NextResponse.json({ error: "Upload failed" }, { status: 500 });
   }
 }

@@ -25,7 +25,10 @@ export function getTwilioVerifyConfig() {
 export function getTwilioClient() {
   if (!cachedClient) {
     const { accountSid, authToken } = getTwilioVerifyConfig();
-    cachedClient = twilio(accountSid, authToken);
+    cachedClient = twilio(accountSid, authToken, {
+      autoRetry: false,
+      timeout: 15000,
+    });
   }
 
   return cachedClient;

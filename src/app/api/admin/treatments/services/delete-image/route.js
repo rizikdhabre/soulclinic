@@ -1,7 +1,7 @@
 import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
-import { getStorage } from "firebase-admin/storage";
+import { getStorageBucket } from "@/lib/cloudStorage";
 import { advanceTreatmentCatalogCacheGeneration } from "@/lib/cache/redisReadCache";
 
 export async function POST(req) {
@@ -25,7 +25,7 @@ export async function POST(req) {
     const imagePath = service?.imagePath;
 
     if (imagePath) {
-      const bucket = getStorage().bucket();
+      const bucket = await getStorageBucket();
       await bucket.file(imagePath).delete();
     }
 
@@ -45,8 +45,8 @@ export async function POST(req) {
       { message: "Image deleted" },
       { status: 200 }
     );
-  } catch (err) {
-    console.error(err);
+  } catch {
+    console.error("Failed to delete service image");
     return NextResponse.json(
       { message: "Failed to delete image" },
       { status: 500 }

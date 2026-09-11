@@ -1,53 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { normalizeIsraeliPhone } from "@/lib/phone";
 import { getRetryDeadline, getRestrictionScope } from "@/lib/otp/retry";
-import {
-  clearFirebaseRecaptcha,
-  sendFirebaseOtp,
-} from "@/lib/phoneAuth";
 import {
   completeOtpClientFlow,
   createOtpApiClient,
   startOtpClientFlow,
+  sendOtpClientFlow,
 } from "@/lib/otp/client";
 
 const INITIAL_STATE = {
   phase: "idle",
+  smsSent: false,
+  canRetrySend: false,
   provider: null,
   loading: false,
   error: null,
   cooldownSeconds: 0,
 };
-
-const PUBLIC_FIREBASE_ERROR_CODES = new Set([
-  "auth/app-not-authorized",
-  "auth/captcha-check-failed",
-  "auth/code-expired",
-  "auth/internal-error",
-  "auth/invalid-app-credential",
-  "auth/invalid-phone-number",
-  "auth/invalid-verification-code",
-  "auth/missing-app-credential",
-  "auth/missing-verification-code",
-  "auth/network-request-failed",
-  "auth/operation-not-allowed",
-  "auth/quota-exceeded",
-  "auth/too-many-requests",
-  "auth/unknown",
-  "auth/user-disabled",
-  "auth/recaptcha-not-enabled",
-  "auth/missing-recaptcha-token",
-  "auth/invalid-recaptcha-token",
-  "auth/invalid-recaptcha-action",
-  "auth/missing-client-type",
-  "auth/missing-recaptcha-version",
-  "auth/invalid-recaptcha-version",
-  "auth/invalid-req-type",
-  "auth/unauthorized-domain",
-  "auth/invalid-api-key",
-]);
 
 const PUBLIC_OTP_ERROR_CODES = new Set([
   "INVALID_OTP",
@@ -57,23 +28,24 @@ const PUBLIC_OTP_ERROR_CODES = new Set([
   "OTP_CHALLENGE_FAILED",
   "OTP_CHALLENGE_EXPIRED",
   "OTP_COMPLETION_IN_PROGRESS",
-  "OTP_FALLBACK_ALREADY_USED",
-  "OTP_FALLBACK_NOT_ALLOWED",
-  "OTP_FALLBACK_FAILED",
-  "OTP_FALLBACK_SOURCE_RATE_LIMITED",
   "OTP_FLOW_CANCELLED",
   "OTP_FLOW_NOT_STARTED",
   "OTP_LOGIN_COMPLETION_UNAVAILABLE",
   "OTP_PROVIDER_MISMATCH",
   "OTP_PROVIDER_UNSUPPORTED",
   "OTP_PROVIDER_REJECTED",
+  "OTP_PURPOSE_MISMATCH",
   "OTP_PERSISTENCE_FAILED",
   "OTP_RATE_LIMIT_CONFIG_INVALID",
   "OTP_RATE_LIMITED",
+  "OTP_RECOVERY_INVALID",
   "OTP_REQUEST_FAILED",
   "OTP_REQUEST_IN_PROGRESS",
   "OTP_SEND_FAILED",
   "OTP_SEND_PENDING",
+  "OTP_SEND_TEMPORARY_FAILURE",
+  "OTP_SEND_SOURCE_RATE_LIMITED",
+  "OTP_SEND_BUDGET_EXCEEDED",
   "OTP_SEND_RETRIES_EXHAUSTED",
   "OTP_SERVICE_NOT_CONFIGURED",
   "OTP_SOURCE_RATE_LIMITED",
@@ -86,19 +58,17 @@ const PUBLIC_OTP_ERROR_CODES = new Set([
   "OTP_VERIFY_FAILED",
   "OTP_VERIFY_RATE_LIMITED",
   "OTP_VERIFY_TEMPORARY_FAILURE",
-  "otp/recaptcha-setup-failed",
 ]);
 
 const defaultApi = createOtpApiClient();
 
-function normalizeCooldown(value) {
+function normalizeCooldown(value, code) {
   if (!Number.isFinite(value) || value <= 0) return 0;
-  return Math.min(Math.ceil(value), 3600);
+  return Math.min(Math.ceil(value), getRestrictionScope(code) === "global" ? 86400 : 3600);
 }
 
 function safeErrorCode(value) {
-  return PUBLIC_FIREBASE_ERROR_CODES.has(value) ||
-    PUBLIC_OTP_ERROR_CODES.has(value)
+  return PUBLIC_OTP_ERROR_CODES.has(value)
     ? value
     : null;
 }
@@ -115,6 +85,7 @@ function projectError(error, operation) {
     "OTP_REQUEST_FAILED";
   const retryAfterSeconds = normalizeCooldown(
     error?.retryAfterSeconds ?? response?.retryAfterSeconds,
+    code,
   );
 
   return {
@@ -141,12 +112,10 @@ function createFlowCancelledError() {
 
 export function createPhoneOtpController({
   purpose,
-  recaptchaContainerId,
   api = defaultApi,
   startFlow = startOtpClientFlow,
+  sendFlow = sendOtpClientFlow,
   completeFlow = completeOtpClientFlow,
-  sendFirebaseOtp: sendFirebase = sendFirebaseOtp,
-  clearFirebaseRecaptcha: clearRecaptcha = clearFirebaseRecaptcha,
   schedule = setTimeout,
   cancel = clearTimeout,
   now = () => Date.now(),
@@ -174,7 +143,11 @@ export function createPhoneOtpController({
 
   function updateState(patch) {
     if (disposed) return;
-    state = { ...state, ...patch };
+    state = {
+      ...state,
+      ...patch,
+      canRetrySend: flowRef.current?.sendStatus === "prepared",
+    };
     for (const listener of listeners) listener();
   }
 
@@ -207,9 +180,10 @@ export function createPhoneOtpController({
   }
 
   function rememberRestriction(phone, value, error = null) {
-    const deadline = getRetryDeadline(value, now());
+    const scope = getRestrictionScope(error?.code);
+    const deadline = getRetryDeadline({ ...value, restrictionScope: scope }, now());
     if (deadline > now()) {
-      if (getRestrictionScope(error?.code) === "source") {
+      if (scope === "source" || scope === "global") {
         if (!sourceRestriction || deadline >= sourceRestriction.deadline) {
           sourceRestriction = { deadline, error };
         }
@@ -226,22 +200,21 @@ export function createPhoneOtpController({
   function setPhone(value) {
     const phone = normalizeIsraeliPhone(value);
     if (phone === currentPhone) return false;
-    const hadAttempt = currentPhone !== null || flowRef.current !== null;
     currentPhone = phone;
     version += 1;
     flowRef.current = null;
-    if (hadAttempt) clearRecaptcha(recaptchaContainerId);
     updateState({ ...INITIAL_STATE, loading: inFlightRef.current, error: sourceRestriction?.error || null });
     refreshCooldown();
     return true;
   }
 
-  async function runStart(phone, clearBeforeStart) {
+  async function runStart(phone) {
     if (disposed) return { started: false, reason: "inactive" };
     setPhone(phone);
     if (inFlightRef.current) return { started: false, reason: "in-flight" };
+    const preparedFlow = flowRef.current?.sendStatus === "prepared" ? flowRef.current : null;
     refreshCooldown();
-    if (state.cooldownSeconds > 0) {
+    if (state.cooldownSeconds > 0 && !preparedFlow) {
       return { started: false, reason: "cooldown" };
     }
     if (!currentPhone) {
@@ -256,49 +229,46 @@ export function createPhoneOtpController({
     inFlightRef.current = true;
     const operationVersion = ++version;
     const isCurrentAttempt = () => !disposed && operationVersion === version;
-    let reservationObserved = false;
-    if (clearBeforeStart || flowRef.current) {
-      clearRecaptcha(recaptchaContainerId);
-    }
-    flowRef.current = null;
+    let reservationObserved = Boolean(preparedFlow);
+    if (!preparedFlow) flowRef.current = null;
     updateState({
-      phase: "idle",
-      provider: null,
+      phase: preparedFlow ? "code" : "idle",
+      provider: preparedFlow?.provider || null,
+      smsSent: false,
       loading: true,
       error: null,
     });
 
     try {
-      const nextFlow = await startFlow({
-        phone,
-        purpose,
-        containerId: recaptchaContainerId,
-        api,
-        sendFirebaseOtp: sendFirebase,
-        clearFirebaseRecaptcha: clearRecaptcha,
-        isCurrentAttempt,
-        onChallenge: (reservation) => {
-          reservationObserved = true;
-          rememberRestriction(phone, reservation);
-        },
-      });
+      const nextFlow = preparedFlow
+        ? await sendFlow({ flow: preparedFlow, api, isCurrentAttempt })
+        : await startFlow({
+          phone,
+          purpose,
+          api,
+          isCurrentAttempt,
+          onChallenge: (reservation) => {
+            reservationObserved = true;
+            rememberRestriction(phone, reservation);
+          },
+          onPrepared: (flow) => {
+            if (isCurrentAttempt()) {
+              flowRef.current = flow;
+              updateState({ phase: "code", provider: flow.provider, smsSent: false });
+            }
+          },
+        });
 
-      if (disposed || operationVersion !== version) {
-        if (nextFlow?.provider === "firebase") {
-          clearRecaptcha(recaptchaContainerId);
-        }
-        return { started: false, reason: "cancelled" };
-      }
+      if (!isCurrentAttempt()) return { started: false, reason: "cancelled" };
 
       flowRef.current = nextFlow;
-      if (nextFlow.provider !== "firebase") {
-        clearRecaptcha(recaptchaContainerId);
-      }
       if (!reservationObserved) rememberRestriction(phone, nextFlow);
-      else refreshCooldown();
+      if (nextFlow.sendRetry) rememberRestriction(phone, nextFlow.sendRetry);
+      else if (reservationObserved) refreshCooldown();
       updateState({
         phase: "code",
         provider: nextFlow.provider,
+        smsSent: true,
         loading: false,
         error: null,
       });
@@ -311,14 +281,14 @@ export function createPhoneOtpController({
         serverTime: response?.serverTime ?? error?.serverTime,
         retryAfterSeconds: publicError.retryAfterSeconds,
       }, publicError);
-      if (!disposed && operationVersion === version) {
-        updateState({
-          phase: "idle",
-          provider: null,
-          loading: false,
-          error: publicError,
-        });
-      } else return { started: false, reason: "cancelled" };
+      if (!isCurrentAttempt()) return { started: false, reason: "cancelled" };
+      updateState({
+        phase: flowRef.current ? "code" : "idle",
+        provider: flowRef.current?.provider || null,
+        smsSent: false,
+        loading: false,
+        error: publicError,
+      });
       throw error;
     } finally {
       if (activeOperation === operation) {
@@ -330,7 +300,7 @@ export function createPhoneOtpController({
   }
 
   async function start(phone) {
-    return runStart(phone, false);
+    return runStart(phone);
   }
 
   async function resend(phone = currentPhone) {
@@ -338,7 +308,7 @@ export function createPhoneOtpController({
     if (state.phase !== "code" || !flowRef.current) {
       return { started: false, reason: "not-ready" };
     }
-    return runStart(phone, true);
+    return runStart(phone);
   }
 
   async function verify(code) {
@@ -360,7 +330,6 @@ export function createPhoneOtpController({
 
       flowRef.current = null;
       stopCooldown();
-      clearRecaptcha(recaptchaContainerId);
       updateState({
         phase: "complete",
         provider: activeFlow.provider,
@@ -391,7 +360,6 @@ export function createPhoneOtpController({
     version += 1;
     flowRef.current = null;
     stopCooldown();
-    clearRecaptcha(recaptchaContainerId);
     updateState({ ...INITIAL_STATE, loading: inFlightRef.current, error: sourceRestriction?.error || null });
     refreshCooldown();
   }
@@ -405,7 +373,6 @@ export function createPhoneOtpController({
     flowRef.current = null;
     currentPhone = null;
     stopCooldown();
-    clearRecaptcha(recaptchaContainerId);
     listeners.clear();
   }
 
@@ -427,18 +394,10 @@ export function createPhoneOtpController({
   };
 }
 
-export function usePhoneOtp({ purpose, recaptchaContainerId }) {
-  const flowRef = useRef(null);
-  const inFlightRef = useRef(false);
+export function usePhoneOtp({ purpose }) {
   const controller = useMemo(
-    () =>
-      createPhoneOtpController({
-        purpose,
-        recaptchaContainerId,
-        flowRef,
-        inFlightRef,
-      }),
-    [purpose, recaptchaContainerId],
+    () => createPhoneOtpController({ purpose }),
+    [purpose],
   );
   const state = useSyncExternalStore(
     controller.subscribe,

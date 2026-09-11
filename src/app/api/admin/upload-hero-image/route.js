@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCollection } from "@/lib/db";
-import { bucket } from "@/lib/firebaseAdmin";
+import { getStorageBucket } from "@/lib/cloudStorage";
 import {
   advanceHeroCacheGeneration,
   getHomepageHeroWithCache,
@@ -27,6 +27,7 @@ export async function POST(req) {
     const buffer = Buffer.from(await image.arrayBuffer());
 
     const filePath = `homepage/hero-${Date.now()}.jpg`;
+    const bucket = await getStorageBucket();
     const file = bucket.file(filePath);
 
     await file.save(buffer, {
@@ -63,11 +64,8 @@ export async function POST(req) {
     if (oldImagePath) {
       try {
         await bucket.file(oldImagePath).delete();
-      } catch (err) {
-        console.error(
-          "Failed to delete old hero image:",
-          err.message
-        );
+      } catch {
+        console.error("Failed to delete old hero image");
       }
     }
 
@@ -80,8 +78,8 @@ export async function POST(req) {
       },
       { status: 200 }
     );
-  } catch (error) {
-    console.error("Error uploading hero image:", error);
+  } catch {
+    console.error("Error uploading hero image");
     return NextResponse.json(
       { message: "Failed to upload hero image" },
       { status: 500 }
@@ -101,8 +99,8 @@ export async function GET() {
     });
 
     return NextResponse.json(hero, { status: 200 });
-  } catch (error) {
-    console.error("Error fetching hero image:", error);
+  } catch {
+    console.error("Error fetching hero image");
     return NextResponse.json(
       { message: "Failed to fetch hero image" },
       { status: 500 }

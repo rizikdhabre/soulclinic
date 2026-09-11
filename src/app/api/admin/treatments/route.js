@@ -1,7 +1,7 @@
 import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
-import { getStorage } from "firebase-admin/storage";
+import { getStorageBucket } from "@/lib/cloudStorage";
 import {
   advanceTreatmentCatalogCacheGeneration,
   getTreatmentCatalogWithCache,
@@ -14,8 +14,8 @@ export async function GET() {
     });
 
     return NextResponse.json(treatments, { status: 200 });
-  } catch (error) {
-    console.error("Error in fetching treatments", error);
+  } catch {
+    console.error("Error in fetching treatments");
     return NextResponse.json(
       { message: "Failed to fetch treatments" },
       { status: 500 },
@@ -51,8 +51,8 @@ export async function PUT(req) {
       { message: "Treatment updated successfully" },
       { status: 200 },
     );
-  } catch (error) {
-    console.error("Error updating treatment", error);
+  } catch {
+    console.error("Error updating treatment");
     return NextResponse.json(
       { message: "Failed to update treatment" },
       { status: 500 },
@@ -92,8 +92,8 @@ export async function POST(req) {
       },
       { status: 201 },
     );
-  } catch (error) {
-    console.error("Error creating treatment", error);
+  } catch {
+    console.error("Error creating treatment");
     return NextResponse.json(
       { message: "Failed to create treatment" },
       { status: 500 },
@@ -130,14 +130,14 @@ export async function DELETE(req) {
       .filter(Boolean);
 
     if (imagePaths.length > 0) {
-      const bucket = getStorage().bucket();
+      const bucket = await getStorageBucket();
 
       await Promise.all(
         imagePaths.map(async (path) => {
           try {
             await bucket.file(path).delete();
-          } catch (err) {
-            console.error("Failed to delete image:", path, err.message);
+          } catch {
+            console.error("Failed to delete treatment image");
           }
         }),
       );
@@ -152,8 +152,8 @@ export async function DELETE(req) {
       },
       { status: 200 },
     );
-  } catch (error) {
-    console.error("Error deleting treatment", error);
+  } catch {
+    console.error("Error deleting treatment");
     return NextResponse.json(
       { message: "Failed to delete treatment" },
       { status: 500 },

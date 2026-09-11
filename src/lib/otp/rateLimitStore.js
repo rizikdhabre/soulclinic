@@ -1,4 +1,8 @@
 import {
+  OTP_GLOBAL_SEND_DAY_WINDOW_MS,
+  OTP_GLOBAL_SEND_HOUR_WINDOW_MS,
+  OTP_GLOBAL_SEND_LIMIT_CONFIG,
+  OTP_GLOBAL_SEND_RETENTION_MS,
   OTP_PHONE_START_COOLDOWN_MS,
   OTP_PHONE_START_WINDOW_LIMIT,
   OTP_PHONE_START_WINDOW_MS,
@@ -6,8 +10,8 @@ import {
   OTP_PHONE_VERIFY_WINDOW_MS,
   OTP_SOURCE_CHALLENGE_HOUR_LIMIT,
   OTP_SOURCE_CHALLENGE_SHORT_LIMIT,
-  OTP_SOURCE_FALLBACK_HOUR_LIMIT,
-  OTP_SOURCE_FALLBACK_SHORT_LIMIT,
+  OTP_SOURCE_SEND_HOUR_LIMIT,
+  OTP_SOURCE_SEND_SHORT_LIMIT,
   OTP_SOURCE_HOUR_WINDOW_MS,
   OTP_SOURCE_SHORT_WINDOW_MS,
   OTP_SOURCE_LIMIT_CONFIG,
@@ -17,6 +21,11 @@ import {
 import { OtpError, otpRetryMetadata } from "./errors";
 import { logOtpEvent } from "./diagnostics";
 
+// Not a source-identity hash; all application instances share this budget row.
+const GLOBAL_SEND_SOURCE_HASH = "otp:global-send";
+const DURABLE_READ_OPTIONS = { readPreference: "primary", readConcern: { level: "majority" } };
+const DURABLE_WRITE_OPTIONS = { writeConcern: { w: "majority" } };
+
 const SOURCE_POLICIES = {
   challenge: {
     prefix: "challenge",
@@ -25,12 +34,12 @@ const SOURCE_POLICIES = {
     code: "OTP_SOURCE_RATE_LIMITED",
     message: "OTP challenge rate limit exceeded.",
   },
-  fallback: {
-    prefix: "fallback",
-    shortLimit: OTP_SOURCE_FALLBACK_SHORT_LIMIT,
-    hourLimit: OTP_SOURCE_FALLBACK_HOUR_LIMIT,
-    code: "OTP_FALLBACK_SOURCE_RATE_LIMITED",
-    message: "OTP fallback rate limit exceeded.",
+  send: {
+    prefix: "send",
+    shortLimit: OTP_SOURCE_SEND_SHORT_LIMIT,
+    hourLimit: OTP_SOURCE_SEND_HOUR_LIMIT,
+    code: "OTP_SEND_SOURCE_RATE_LIMITED",
+    message: "OTP send rate limit exceeded.",
   },
 };
 
@@ -39,9 +48,9 @@ function rateError(code, message, retryMilliseconds, now, scope = "phone") {
   return new OtpError(code, 429, message, metadata.retryAfterSeconds, metadata);
 }
 
-function sourcePolicies(env) {
+function configuredLimits(env, configuration) {
   const limits = {};
-  for (const [key, { defaultValue, max }] of Object.entries(OTP_SOURCE_LIMIT_CONFIG)) {
+  for (const [key, { defaultValue, max }] of Object.entries(configuration)) {
     const raw = env?.[key];
     const value = typeof raw === "string" && /^[1-9]\d*$/.test(raw) ? Number(raw) : raw;
     const valid = Number.isSafeInteger(value) && value >= 1 && value <= max;
@@ -50,9 +59,14 @@ function sourcePolicies(env) {
       logOtpEvent({ stage: "configuration", decision: "reject", errorCode: "OTP_RATE_LIMIT_CONFIG_INVALID" });
     }
   }
+  return limits;
+}
+
+function sourcePolicies(env) {
+  const limits = configuredLimits(env, OTP_SOURCE_LIMIT_CONFIG);
   return {
     challenge: { ...SOURCE_POLICIES.challenge, shortLimit: limits.OTP_SOURCE_CHALLENGE_SHORT_LIMIT, hourLimit: limits.OTP_SOURCE_CHALLENGE_HOUR_LIMIT },
-    fallback: { ...SOURCE_POLICIES.fallback, shortLimit: limits.OTP_SOURCE_FALLBACK_SHORT_LIMIT, hourLimit: limits.OTP_SOURCE_FALLBACK_HOUR_LIMIT },
+    send: { ...SOURCE_POLICIES.send, shortLimit: limits.OTP_SOURCE_SEND_SHORT_LIMIT, hourLimit: limits.OTP_SOURCE_SEND_HOUR_LIMIT },
   };
 }
 
@@ -80,10 +94,10 @@ function sourceDefaults(sourceHash) {
     challengeShortCount: 0,
     challengeHourStartedAt: null,
     challengeHourCount: 0,
-    fallbackShortWindowStartedAt: null,
-    fallbackShortCount: 0,
-    fallbackHourStartedAt: null,
-    fallbackHourCount: 0,
+    sendShortWindowStartedAt: null,
+    sendShortCount: 0,
+    sendHourStartedAt: null,
+    sendHourCount: 0,
   };
 }
 
@@ -189,6 +203,46 @@ function evaluateSourceAction(current, now, sourceHash, policy) {
       [hourStartedKey]: hourStartedAt,
       [hourCountKey]: hourCount + 1,
       ...activityFields(now),
+    },
+    publicResult: undefined,
+  };
+}
+
+function evaluateGlobalSend(current, now, limits) {
+  const state = current ?? {};
+  const hourActive = activeWindow(state.globalHourStartedAt, now, OTP_GLOBAL_SEND_HOUR_WINDOW_MS);
+  const dayActive = activeWindow(state.globalDayStartedAt, now, OTP_GLOBAL_SEND_DAY_WINDOW_MS);
+  const globalHourStartedAt = hourActive ? state.globalHourStartedAt : now;
+  const globalDayStartedAt = dayActive ? state.globalDayStartedAt : now;
+  const globalHourCount = hourActive ? state.globalHourCount : 0;
+  const globalDayCount = dayActive ? state.globalDayCount : 0;
+  const retryIntervals = [];
+
+  if (globalHourCount >= limits.OTP_GLOBAL_SEND_HOUR_LIMIT) {
+    retryIntervals.push(globalHourStartedAt.getTime() + OTP_GLOBAL_SEND_HOUR_WINDOW_MS - now.getTime());
+  }
+  if (globalDayCount >= limits.OTP_GLOBAL_SEND_DAY_LIMIT) {
+    retryIntervals.push(globalDayStartedAt.getTime() + OTP_GLOBAL_SEND_DAY_WINDOW_MS - now.getTime());
+  }
+  if (retryIntervals.length > 0) {
+    throw rateError(
+      "OTP_SEND_BUDGET_EXCEEDED",
+      "OTP send budget exceeded.",
+      Math.max(...retryIntervals),
+      now,
+      "global",
+    );
+  }
+
+  return {
+    next: {
+      ...state,
+      globalHourStartedAt,
+      globalHourCount: globalHourCount + 1,
+      globalDayStartedAt,
+      globalDayCount: globalDayCount + 1,
+      updatedAt: now,
+      expiresAt: new Date(now.getTime() + OTP_GLOBAL_SEND_RETENTION_MS),
     },
     publicResult: undefined,
   };
@@ -333,13 +387,13 @@ function evaluateClearVerifyFailures(current, now) {
 
 async function mutateWithCas(collection, key, now, evaluate) {
   for (let attempt = 0; attempt < OTP_STATE_CAS_MAX_ATTEMPTS; attempt += 1) {
-    const current = await collection.findOne(key);
+    const current = await collection.findOne(key, DURABLE_READ_OPTIONS);
     const decision = evaluate(current, now);
     if (decision.skip) return decision.publicResult;
 
     if (!current) {
       try {
-        await collection.insertOne({ ...key, ...decision.next, version: 1 });
+        await collection.insertOne({ ...key, ...decision.next, version: 1 }, DURABLE_WRITE_OPTIONS);
         return decision.publicResult;
       } catch (error) {
         if (error?.code === 11000) continue;
@@ -353,6 +407,7 @@ async function mutateWithCas(collection, key, now, evaluate) {
     const result = await collection.updateOne(
       { _id: current._id, version: current.version },
       { $set: next, $inc: { version: 1 } },
+      DURABLE_WRITE_OPTIONS,
     );
     if (result.modifiedCount === 1) return decision.publicResult;
   }
@@ -367,31 +422,44 @@ export function createOtpRateLimitStore({
   env = process.env,
 }) {
   const policies = sourcePolicies(env);
-  const indexesReady = Promise.all([
-    phoneCollection.createIndex(
-      { phone: 1 },
-      { unique: true, name: "otp_security_phone" },
-    ),
-    phoneCollection.createIndex(
-      { expiresAt: 1 },
-      { expireAfterSeconds: 0, name: "otp_security_expires_ttl" },
-    ),
-    sourceCollection.createIndex(
-      { sourceHash: 1 },
-      { unique: true, name: "otp_source_security_source_hash" },
-    ),
-    sourceCollection.createIndex(
-      { expiresAt: 1 },
-      { expireAfterSeconds: 0, name: "otp_source_security_expires_ttl" },
-    ),
-  ]);
+  const globalLimits = configuredLimits(env, OTP_GLOBAL_SEND_LIMIT_CONFIG);
+  let indexesReady;
+
+  function ensureIndexes() {
+    if (!indexesReady) {
+      indexesReady = Promise.all([
+        phoneCollection.createIndex(
+          { phone: 1 },
+          { unique: true, name: "otp_security_phone", ...DURABLE_WRITE_OPTIONS },
+        ),
+        phoneCollection.createIndex(
+          { expiresAt: 1 },
+          { expireAfterSeconds: 0, name: "otp_security_expires_ttl", ...DURABLE_WRITE_OPTIONS },
+        ),
+        sourceCollection.createIndex(
+          { sourceHash: 1 },
+          { unique: true, name: "otp_source_security_source_hash", ...DURABLE_WRITE_OPTIONS },
+        ),
+        sourceCollection.createIndex(
+          { expiresAt: 1 },
+          { expireAfterSeconds: 0, name: "otp_source_security_expires_ttl", ...DURABLE_WRITE_OPTIONS },
+        ),
+      ]).catch((error) => {
+        indexesReady = undefined;
+        throw error;
+      });
+    }
+    return indexesReady;
+  }
 
   async function withIndexes(operation) {
-    await indexesReady;
+    await ensureIndexes();
     return operation(new Date(clock.now()));
   }
 
   return {
+    ensureIndexes,
+
     claimPhoneStart(phone) {
       return withIndexes((now) =>
         mutateWithCas(phoneCollection, { phone }, now, (current) =>
@@ -401,8 +469,9 @@ export function createOtpRateLimitStore({
     },
 
     claimSourceAction(sourceHash, action) {
+      if (!Object.hasOwn(policies, action)) throw new TypeError("Unknown OTP source action.");
+      if (sourceHash === GLOBAL_SEND_SOURCE_HASH) throw new TypeError("Reserved OTP source key.");
       const policy = policies[action];
-      if (!policy) throw new TypeError("Unknown OTP source action.");
 
       return withIndexes((now) =>
         mutateWithCas(sourceCollection, { sourceHash }, now, (current) =>
@@ -411,10 +480,18 @@ export function createOtpRateLimitStore({
       );
     },
 
+    claimGlobalSend() {
+      return withIndexes((now) =>
+        mutateWithCas(sourceCollection, { sourceHash: GLOBAL_SEND_SOURCE_HASH }, now, (current) =>
+          evaluateGlobalSend(current, now, globalLimits),
+        ),
+      );
+    },
+
     async getPhoneVerifyLimit(phone) {
-      await indexesReady;
+      await ensureIndexes();
       const now = new Date(clock.now());
-      const current = await phoneCollection.findOne({ phone });
+      const current = await phoneCollection.findOne({ phone }, DURABLE_READ_OPTIONS);
       if (
         !current ||
         !activeWindow(current.verifyWindowStartedAt, now, OTP_PHONE_VERIFY_WINDOW_MS)

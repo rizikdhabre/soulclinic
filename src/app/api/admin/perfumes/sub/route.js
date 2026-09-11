@@ -1,7 +1,7 @@
 import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
-import { getStorage } from "firebase-admin/storage";
+import { getStorageBucket } from "@/lib/cloudStorage";
 
 /* ================= ADD PERFUME ================= */
 export async function POST(req) {
@@ -33,8 +33,8 @@ export async function POST(req) {
     );
 
     return NextResponse.json(newPerfume, { status: 201 });
-  } catch (err) {
-    console.error(err);
+  } catch {
+    console.error("Failed to add perfume");
     return NextResponse.json({ message: "Failed" }, { status: 500 });
   }
 }
@@ -73,14 +73,14 @@ export async function PUT(req) {
 
     if (oldPath && oldPath !== perfume.imagePath) {
       try {
-        const bucket = getStorage().bucket();
+        const bucket = await getStorageBucket();
         await bucket.file(oldPath).delete();
       } catch {}
     }
 
     return NextResponse.json({ message: "Updated" });
-  } catch (err) {
-    console.error(err);
+  } catch {
+    console.error("Failed to update perfume");
     return NextResponse.json({ message: "Failed" }, { status: 500 });
   }
 }
@@ -101,7 +101,7 @@ export async function DELETE(req) {
     );
 
     if (perfume?.imagePath) {
-      const bucket = getStorage().bucket();
+      const bucket = await getStorageBucket();
       await bucket.file(perfume.imagePath).delete();
     }
 
@@ -114,8 +114,8 @@ export async function DELETE(req) {
     );
 
     return NextResponse.json({ message: "Deleted" });
-  } catch (err) {
-    console.error(err);
+  } catch {
+    console.error("Failed to delete perfume");
     return NextResponse.json({ message: "Failed" }, { status: 500 });
   }
 }

@@ -14,55 +14,42 @@ function getLoginErrorMessage(error) {
     case "OTP_RATE_LIMITED":
       return "يرجى الانتظار قبل طلب رمز جديد لهذا الرقم.";
     case "OTP_SOURCE_RATE_LIMITED":
-    case "OTP_FALLBACK_SOURCE_RATE_LIMITED":
+    case "OTP_SEND_SOURCE_RATE_LIMITED":
       return "تم تجاوز عدد طلبات التحقق من هذه الشبكة مؤقتًا. يرجى الانتظار ثم المحاولة مجددًا.";
-    case "auth/too-many-requests":
-      return "تم تقييد طلب التحقق مؤقتًا. يرجى الانتظار والمحاولة لاحقًا.";
+    case "OTP_SEND_BUDGET_EXCEEDED":
+      return "تم بلوغ الحد اليومي للرسائل. يرجى المحاولة بعد انتهاء مدة الانتظار.";
     case "OTP_VERIFY_RATE_LIMITED":
       return "تم إدخال رمز خاطئ عدة مرات. انتظر قبل المحاولة مرة أخرى.";
     case "OTP_SEND_PENDING":
-    case "auth/network-request-failed":
-      return "لم نتمكن من تأكيد إرسال الرمز. يرجى الانتظار قبل طلب رمز آخر.";
+      return "لم نتمكن من تأكيد إرسال الرمز. إذا وصلك رمز فأدخله، أو أعد محاولة الإرسال بعد الانتظار.";
     case "OTP_SERVICE_NOT_CONFIGURED":
     case "OTP_RATE_LIMIT_CONFIG_INVALID":
     case "OTP_SOURCE_UNAVAILABLE":
     case "OTP_PROVIDER_UNSUPPORTED":
-    case "auth/app-not-authorized":
-    case "auth/unauthorized-domain":
-    case "auth/invalid-api-key":
-    case "auth/invalid-app-credential":
-    case "auth/missing-app-credential":
-    case "auth/operation-not-allowed":
       return "خدمة التحقق غير متاحة حاليًا. يرجى المحاولة لاحقًا.";
     case "OTP_SEND_FAILED":
+    case "OTP_SEND_TEMPORARY_FAILURE":
     case "OTP_PROVIDER_REJECTED":
-    case "OTP_FALLBACK_FAILED":
     case "OTP_SEND_RETRIES_EXHAUSTED":
-      return "تعذر إرسال رمز التحقق عبر خدمة الرسائل. حاول مجددًا بعد انتهاء الانتظار.";
+      return "تعذر تأكيد إرسال رمز التحقق عبر خدمة الرسائل. أعد محاولة الإرسال بعد انتهاء الانتظار.";
     case "OTP_PERSISTENCE_FAILED":
-      return "تعذر حفظ حالة التحقق. يرجى المحاولة لاحقًا.";
+      return "تعذر حفظ حالة التحقق. أعد المحاولة بنفس الطلب.";
     case "OTP_CHALLENGE_FAILED":
     case "OTP_CHALLENGE_EXPIRED":
-    case "OTP_FALLBACK_ALREADY_USED":
-    case "OTP_FALLBACK_NOT_ALLOWED":
       return "طلب التحقق غير متاح أو انتهت صلاحيته. اطلب رمزًا جديدًا بعد انتهاء الانتظار.";
+    case "OTP_COMPLETION_IN_PROGRESS":
+      return "يجري إكمال التحقق حاليًا. أعد تأكيد الرمز بعد قليل.";
     case "OTP_VERIFY_FAILED":
     case "OTP_VERIFY_TEMPORARY_FAILURE":
     case "OTP_REQUEST_IN_PROGRESS":
     case "OTP_STATE_BUSY":
-    case "auth/captcha-check-failed":
-    case "auth/internal-error":
-    case "auth/quota-exceeded":
-      return "حدث عطل مؤقت في التحقق. يرجى المحاولة مرة أخرى.";
+      return "حدث عطل مؤقت في التحقق. أعد تأكيد الرمز نفسه.";
     case "INVALID_OTP":
     case "OTP_VERIFICATION_INVALID":
-    case "auth/invalid-verification-code":
       return "رمز التحقق غير صحيح. حاول مرة أخرى.";
     case "OTP_VERIFICATION_REQUIRED":
-    case "auth/missing-verification-code":
       return "أدخل رمز التحقق المرسل إلى هاتفك.";
     case "OTP_VERIFICATION_EXPIRED":
-    case "auth/code-expired":
     case "OTP_FLOW_NOT_STARTED":
       return "انتهت صلاحية رمز التحقق. أعد إرسال الرمز وحاول مرة أخرى.";
     default:
@@ -73,23 +60,23 @@ function getLoginErrorMessage(error) {
 export default function LoginPage() {
   const router = useRouter();
 
-  const [step, setStep] = useState("phone");
   const [rawPhone, setRawPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [localError, setLocalError] = useState("");
   const otpFlow = usePhoneOtp({
     purpose: "login",
-    recaptchaContainerId: "login-recaptcha-container",
   });
+
+  const step = otpFlow.phase === "code" || otpFlow.phase === "complete" ? "otp" : "phone";
 
   const normalizedPhone = useMemo(
     () => normalizeIsraeliPhone(rawPhone),
     [rawPhone],
   );
 
-  const isCoolingDown = otpFlow.cooldownSeconds > 0;
+  const isSendCooldownBlocking = otpFlow.cooldownSeconds > 0 && !otpFlow.canRetrySend;
   const canSend = Boolean(
-    normalizedPhone && !otpFlow.loading && !isCoolingDown,
+    normalizedPhone && !otpFlow.loading && !isSendCooldownBlocking,
   );
   const canVerify = Boolean(
     otp.trim().length >= 6 && !otpFlow.loading,
@@ -98,7 +85,7 @@ export default function LoginPage() {
     (otpFlow.error ? getLoginErrorMessage(otpFlow.error) : "");
 
   async function handleSendOtp() {
-    if (otpFlow.loading || isCoolingDown) return;
+    if (otpFlow.loading || isSendCooldownBlocking) return;
 
     setLocalError("");
     if (!normalizedPhone) {
@@ -107,9 +94,7 @@ export default function LoginPage() {
     }
 
     try {
-      const startOutcome = await otpFlow.start(normalizedPhone);
-      if (!startOutcome.started) return;
-      setStep("otp");
+      await otpFlow.start(normalizedPhone);
     } catch {
       // The hook exposes only its projected public error.
     }
@@ -135,21 +120,19 @@ export default function LoginPage() {
   }
 
   async function handleResendOtp() {
-    if (otpFlow.loading || isCoolingDown) return;
+    if (otpFlow.loading || isSendCooldownBlocking) return;
 
     setOtp("");
     setLocalError("");
     try {
       await otpFlow.resend();
     } catch {
-      setStep("phone");
-      // The hook retains its projected public error and cooldown.
+      // Keep the prepared challenge and projected error available for manual retry.
     }
   }
 
   function handleBackToPhone() {
     otpFlow.reset();
-    setStep("phone");
     setOtp("");
     setLocalError("");
   }
@@ -166,8 +149,6 @@ export default function LoginPage() {
       </div>
 
       <div className="glass-card p-7 space-y-6">
-        <div id="login-recaptcha-container" />
-
         {step === "phone" && (
           <>
             <div>
@@ -226,7 +207,7 @@ export default function LoginPage() {
                 <ShieldCheck className="w-5 h-5" />
                 {otpFlow.loading
                   ? "جاري الإرسال..."
-                  : isCoolingDown
+                  : isSendCooldownBlocking
                     ? `انتظر ${otpFlow.cooldownSeconds} ثانية`
                     : "إرسال رمز التحقق"}
               </span>
@@ -238,7 +219,9 @@ export default function LoginPage() {
           <>
             <div className="text-center">
               <p className="text-subtle">
-                تم إرسال رمز إلى رقمك. أدخل الرمز للمتابعة.
+                {otpFlow.smsSent
+                  ? "تم إرسال رمز إلى رقمك. أدخل الرمز للمتابعة."
+                  : "إذا وصلك رمز فأدخله للمتابعة."}
               </p>
               <p className="mt-1 text-xs text-foreground/60">
                 {normalizedPhone}
@@ -305,13 +288,15 @@ export default function LoginPage() {
               type="button"
               onClick={handleResendOtp}
               className="text-sm text-foreground/70 hover:text-foreground transition"
-              disabled={otpFlow.loading || isCoolingDown}
+              disabled={otpFlow.loading || isSendCooldownBlocking}
             >
-              {isCoolingDown
+              {isSendCooldownBlocking
                 ? `إعادة الإرسال خلال ${otpFlow.cooldownSeconds} ثانية`
                 : otpFlow.loading
                   ? "جاري الإرسال..."
-                  : "إعادة إرسال الرمز"}
+                  : otpFlow.smsSent
+                    ? "إعادة إرسال الرمز"
+                    : "إعادة محاولة الإرسال"}
             </button>
           </>
         )}

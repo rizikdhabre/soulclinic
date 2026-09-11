@@ -1,7 +1,7 @@
 import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
-import { getStorage } from "firebase-admin/storage";
+import { getStorageBucket } from "@/lib/cloudStorage";
 import { advanceTreatmentCatalogCacheGeneration } from "@/lib/cache/redisReadCache";
 
 function parseServiceIndex(value) {
@@ -44,8 +44,8 @@ export async function POST(req) {
       { message: "Service added successfully" },
       { status: 201 }
     );
-  } catch (error) {
-    console.error("Error adding service", error);
+  } catch {
+    console.error("Error adding service");
     return NextResponse.json(
       { message: "Failed to add service" },
       { status: 500 }
@@ -97,10 +97,10 @@ export async function PUT(req) {
       oldImagePath !== service.imagePath
     ) {
       try {
-        const bucket = getStorage().bucket();
+        const bucket = await getStorageBucket();
         await bucket.file(oldImagePath).delete();
-      } catch (err) {
-        console.error("Failed to delete old image:", err.message);
+      } catch {
+        console.error("Failed to delete old image");
       }
     }
 
@@ -108,8 +108,8 @@ export async function PUT(req) {
       { message: "Service updated successfully" },
       { status: 200 }
     );
-  } catch (error) {
-    console.error("Error updating service", error);
+  } catch {
+    console.error("Error updating service");
     return NextResponse.json(
       { message: "Failed to update service" },
       { status: 500 }
@@ -172,13 +172,12 @@ export async function DELETE(req) {
     );
     await advanceTreatmentCatalogCacheGeneration().catch(() => false);
 
-    // 🔥 DELETE IMAGE FROM FIREBASE
     if (imagePath) {
       try {
-        const bucket = getStorage().bucket();
+        const bucket = await getStorageBucket();
         await bucket.file(imagePath).delete();
-      } catch (err) {
-        console.error("Failed to delete image:", err.message);
+      } catch {
+        console.error("Failed to delete image");
       }
     }
 
@@ -186,8 +185,8 @@ export async function DELETE(req) {
       { message: "Service deleted successfully" },
       { status: 200 }
     );
-  } catch (error) {
-    console.error("Error deleting service", error);
+  } catch {
+    console.error("Error deleting service");
     return NextResponse.json(
       { message: "Failed to delete service" },
       { status: 500 }

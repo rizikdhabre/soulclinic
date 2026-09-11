@@ -1,14 +1,12 @@
 import { ObjectId } from "mongodb";
 import { isTransactionUnsupportedError } from "@/lib/mongoTransactions";
-import {
-  OTP_COMPLETION_LEASE_MS,
-  OTP_GRANT_TTL_MS,
-} from "@/lib/otp/constants";
-import { createBearerToken, hashBearerToken } from "@/lib/otp/crypto";
+import { normalizeIsraeliPhone } from "@/lib/phone";
+import { OTP_GRANT_TTL_MS } from "@/lib/otp/constants";
+import { hashBearerToken } from "@/lib/otp/crypto";
 import { getOtpChallengeStore } from "@/lib/otp/challengeStore";
 
 const GRANT_COLLECTION_NAME = "otpVerificationGrants";
-const CHALLENGE_COLLECTION_NAME = "otpChallenges";
+const CHALLENGE_COLLECTION_NAME = "otpChallengesV2";
 const COMPLETION_ERROR_CODES = new Set([
   "OTP_COMPLETION_IN_PROGRESS",
   "OTP_CHALLENGE_ALREADY_COMPLETED",
@@ -40,995 +38,368 @@ function grantError(code) {
   return new OtpVerificationGrantError(code);
 }
 
-function sessionOptions(session) {
-  return session ? { session } : {};
+function issueReadOptions(session) {
+  return session ? { session } : {
+    readPreference: "primary",
+    readConcern: { level: "majority" },
+  };
 }
 
-function eligibleStatusFor(challenge) {
-  if (challenge?.purpose !== "booking") {
-    throw grantError("OTP_VERIFICATION_INVALID");
-  }
-  if (challenge.provider === "twilio") return "twilio_sent";
-  if (challenge.provider === "firebase" || challenge.provider === "development") {
-    return "pending";
-  }
-  throw grantError("OTP_VERIFICATION_INVALID");
+function issueWriteOptions(session) {
+  return session ? { session } : { writeConcern: { w: "majority" } };
+}
+
+function validDate(value) {
+  return value instanceof Date && Number.isFinite(value.getTime());
+}
+
+function datesEqual(left, right) {
+  return validDate(left) && validDate(right) && left.getTime() === right.getTime();
+}
+
+function idsEqual(left, right) {
+  return left instanceof ObjectId && right instanceof ObjectId && left.equals(right);
+}
+
+function nonemptyString(value) {
+  return typeof value === "string" && value.length > 0 && value.trim() === value;
+}
+
+function nowFrom(clock) {
+  const now = new Date(clock.now());
+  if (!validDate(now)) throw grantError("OTP_VERIFICATION_INVALID");
+  return now;
 }
 
 function ensureGrantIndexes(grants) {
   if (!grantIndexes.has(grants)) {
-    grantIndexes.set(
-      grants,
-      Promise.all([
-        grants.createIndex(
-          { tokenHash: 1 },
-          { unique: true, name: "otp_grant_unique_tokenHash" },
-        ),
-        grants.createIndex(
-          { challengeId: 1 },
-          {
-            unique: true,
-            name: "otp_grant_unique_challenge",
-            partialFilterExpression: { challengeId: { $type: "objectId" } },
-          },
-        ),
-        grants.createIndex(
-          { expiresAt: 1 },
-          { expireAfterSeconds: 0, name: "otp_grant_expiresAt_ttl" },
-        ),
-      ]),
-    );
+    const ready = Promise.all([
+      grants.createIndex({ tokenHash: 1 }, { unique: true, name: "otp_grant_unique_tokenHash" }),
+      grants.createIndex({ challengeId: 1 }, {
+        unique: true,
+        name: "otp_grant_unique_challenge",
+        partialFilterExpression: { challengeId: { $type: "objectId" } },
+      }),
+      grants.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: "otp_grant_expiresAt_ttl" }),
+    ]).catch((error) => {
+      grantIndexes.delete(grants);
+      throw error;
+    });
+    grantIndexes.set(grants, ready);
   }
   return grantIndexes.get(grants);
 }
 
 async function getProductionGrantsCollection() {
   if (!productionGrantsPromise) {
-    productionGrantsPromise = import("@/lib/db").then(({ getCollection }) =>
-      getCollection(GRANT_COLLECTION_NAME),
-    );
+    productionGrantsPromise = import("@/lib/db")
+      .then(({ getCollection }) => getCollection(GRANT_COLLECTION_NAME))
+      .catch((error) => { productionGrantsPromise = null; throw error; });
   }
   return productionGrantsPromise;
 }
 
 async function resolveIssueDependencies(deps) {
-  let getMongoClient;
-  if (!deps.client) {
-    ({ getMongoClient } = await import("@/lib/db"));
-  }
-  const [challengeStore, grants, client] = await Promise.all([
-    deps.challengeStore ?? getOtpChallengeStore(),
-    deps.grants ?? getProductionGrantsCollection(),
-    deps.client ?? getMongoClient(),
-  ]);
-
+  const challengeStore = deps.challengeStore ?? await getOtpChallengeStore();
+  const grants = deps.grants ?? await getProductionGrantsCollection();
+  const client = deps.client ?? await (await import("@/lib/db")).getMongoClient();
+  await challengeStore.ensureIndexes();
+  await ensureGrantIndexes(grants);
   return { challengeStore, grants, client };
 }
 
 async function resolveGrantDependencies(deps) {
-  let getCollection;
-  if (!deps.challenges) {
-    ({ getCollection } = await import("@/lib/db"));
-  }
-  const [challenges, grants] = await Promise.all([
-    deps.challenges ?? getCollection(CHALLENGE_COLLECTION_NAME),
-    deps.grants ?? getProductionGrantsCollection(),
-  ]);
+  const challenges = deps.challenges ??
+    await (await import("@/lib/db")).getCollection(CHALLENGE_COLLECTION_NAME);
+  const grants = deps.grants ?? await getProductionGrantsCollection();
+  await ensureGrantIndexes(grants);
   return { challenges, grants };
 }
 
-async function readChallenge(challengeStore, challengeTokenHash, session) {
-  return challengeStore.findByTokenHash(
-    challengeTokenHash,
-    sessionOptions(session),
-  );
+function validateChallenge(challenge, challengeTokenHash, now) {
+  if (
+    !(challenge?._id instanceof ObjectId) ||
+    !nonemptyString(challengeTokenHash) ||
+    challenge.challengeTokenHash !== challengeTokenHash ||
+    challenge.provider !== "twilio" || challenge.purpose !== "booking" ||
+    !["approved", "completed"].includes(challenge.status) ||
+    !nonemptyString(challenge.phone) || normalizeIsraeliPhone(challenge.phone) !== challenge.phone ||
+    !validDate(challenge.approvedAt) || challenge.approvedAt > now ||
+    !validDate(challenge.expiresAt) || !validDate(challenge.completionExpiresAt) ||
+    challenge.completionExpiresAt.getTime() !== challenge.approvedAt.getTime() + OTP_GRANT_TTL_MS
+  ) {
+    throw grantError("OTP_VERIFICATION_INVALID");
+  }
+  if (challenge.completionExpiresAt <= now) throw grantError("OTP_VERIFICATION_EXPIRED");
 }
 
-function challengeStateError(current) {
-  if (current?.status === "completing") {
-    return grantError("OTP_COMPLETION_IN_PROGRESS");
-  }
-  if (current?.status === "completed") {
-    return grantError("OTP_CHALLENGE_ALREADY_COMPLETED");
-  }
-  return grantError("OTP_VERIFICATION_INVALID");
-}
-
-async function completeInTransaction({
-  challenge,
-  challengeTokenHash,
-  eligibleStatus,
-  completionId,
-  tokenHash,
-  challengeStore,
-  grants,
-  client,
-  clock,
-}) {
-  let session;
-  let grant;
-  let error;
-  let writeSucceeded = false;
-  let commitConfirmed = false;
-  let cleanupError;
-  let attemptedGrant;
-
-  try {
-    session = client.startSession();
-    grant = await session.withTransaction(async () => {
-      const attemptNow = new Date(clock.now());
-      const attemptGrant = buildGrant({
-        challenge,
-        completionId,
-        tokenHash,
-        now: attemptNow,
-      });
-      attemptedGrant = attemptGrant;
-      const completed = await challengeStore.completeBooking(
-        {
-          challengeId: challenge._id,
-          challengeTokenHash,
-          provider: challenge.provider,
-          eligibleStatus,
-          completionId,
-          now: attemptNow,
-        },
-        { session },
-      );
-
-      if (!completed) {
-        const current = await readChallenge(
-          challengeStore,
-          challengeTokenHash,
-          session,
-        );
-        throw challengeStateError(current);
-      }
-
-      writeSucceeded = true;
-      await grants.deleteOne(
-        {
-          challengeId: challenge._id,
-          completionId: { $ne: completionId },
-        },
-        { session },
-      );
-      await grants.insertOne(attemptGrant, { session });
-      return attemptGrant;
-    });
-    commitConfirmed = true;
-  } catch (caught) {
-    error = caught;
-  }
-
-  if (session) {
-    try {
-      await session.endSession();
-    } catch (caught) {
-      cleanupError = caught;
-    }
-  }
-
+function challengeIdentity(challenge) {
   return {
-    error,
-    grant: grant ?? attemptedGrant,
-    writeSucceeded,
-    commitConfirmed,
-    cleanupError,
+    _id: challenge._id,
+    challengeTokenHash: challenge.challengeTokenHash,
+    provider: "twilio",
+    purpose: "booking",
+    phone: challenge.phone,
+    approvedAt: challenge.approvedAt,
+    completionExpiresAt: challenge.completionExpiresAt,
+    expiresAt: challenge.expiresAt,
   };
 }
 
-function idsEqual(left, right) {
-  if (left === right) return true;
-  if (typeof left?.equals === "function") return left.equals(right);
-  if (typeof right?.equals === "function") return right.equals(left);
-  return false;
+function assertCurrentChallenge(current, context) {
+  const { challenge, challengeTokenHash, expectedGrant, clock } = context;
+  validateChallenge(current, challengeTokenHash, nowFrom(clock));
+  if (
+    !idsEqual(current._id, challenge._id) || current.phone !== challenge.phone ||
+    !datesEqual(current.approvedAt, challenge.approvedAt) ||
+    !datesEqual(current.completionExpiresAt, challenge.completionExpiresAt) ||
+    !datesEqual(current.expiresAt, challenge.expiresAt) ||
+    (current.status === "completed" && (
+      !idsEqual(current.completionId, expectedGrant.completionId) ||
+      current.bookingGrantTokenHash !== expectedGrant.tokenHash
+    ))
+  ) {
+    throw grantError("OTP_VERIFICATION_INVALID");
+  }
 }
 
-function buildGrant({ challenge, completionId, tokenHash, now }) {
+function buildGrant(challenge, tokenHash) {
   return {
     challengeId: challenge._id,
-    completionId,
+    completionId: challenge._id,
     phone: challenge.phone,
+    purpose: "booking",
     tokenHash,
     status: "prepared",
     used: false,
     usedAt: null,
     appointmentId: null,
-    createdAt: now,
-    expiresAt: new Date(now.getTime() + OTP_GRANT_TTL_MS),
+    createdAt: challenge.approvedAt,
+    expiresAt: challenge.completionExpiresAt,
   };
 }
 
-function completionMatches(challenge, completionId, tokenHash) {
-  return (
-    idsEqual(challenge?.completionId, completionId) &&
-    challenge?.bookingGrantTokenHash === tokenHash
-  );
-}
-
-function completedMatches(challenge, completionId) {
-  return (
-    challenge?.status === "completed" &&
-    idsEqual(challenge.completionId, completionId)
-  );
-}
-
-function validCompletionLease({ current, challenge, eligibleStatus }) {
-  return (
-    idsEqual(current?._id, challenge._id) &&
-    current?.provider === challenge.provider &&
-    current?.completionPreviousStatus === eligibleStatus &&
-    current?.completionId &&
-    current?.bookingGrantTokenHash
-  );
-}
-
-function grantMatches(grant, { challenge, completionId, tokenHash }) {
-  return (
-    grant &&
-    idsEqual(grant.challengeId, challenge._id) &&
-    idsEqual(grant.completionId, completionId) &&
-    grant.phone === challenge.phone &&
-    grant.tokenHash === tokenHash &&
-    grant.status === "prepared" &&
-    grant.used === false
-  );
-}
-
-function datesEqual(left, right) {
-  return (
-    left instanceof Date &&
-    right instanceof Date &&
-    Number.isFinite(left.getTime()) &&
-    Number.isFinite(right.getTime()) &&
-    left.getTime() === right.getTime()
-  );
-}
-
-function exactUnusedGrantMatches(grant, expectedGrant) {
-  return (
-    grant &&
-    (!expectedGrant._id || idsEqual(grant._id, expectedGrant._id)) &&
-    idsEqual(grant.challengeId, expectedGrant.challengeId) &&
-    idsEqual(grant.completionId, expectedGrant.completionId) &&
-    grant.phone === expectedGrant.phone &&
-    grant.tokenHash === expectedGrant.tokenHash &&
-    grant.status === "prepared" &&
-    grant.used === false &&
-    grant.usedAt === null &&
-    grant.appointmentId === null &&
-    datesEqual(grant.createdAt, expectedGrant.createdAt) &&
-    datesEqual(grant.expiresAt, expectedGrant.expiresAt)
-  );
-}
-
-async function inspectTransactionDurability({
-  challenge,
-  challengeTokenHash,
-  completionId,
-  tokenHash,
-  expectedGrant,
-  challengeStore,
-  grants,
-  clock,
-}) {
-  const [current, grant] = await Promise.all([
-    readChallenge(challengeStore, challengeTokenHash),
-    grants.findOne({
-      challengeId: challenge._id,
-      completionId,
-      tokenHash,
-    }),
-  ]);
-
-  const exact =
-    idsEqual(current?._id, challenge._id) &&
-    completedMatches(current, completionId) &&
-    exactUnusedGrantMatches(grant, expectedGrant);
-  if (!exact) return { status: "mismatch" };
-
-  const freshNow = new Date(clock.now());
-  if (!Number.isFinite(freshNow.getTime())) return { status: "mismatch" };
-  if (grant.expiresAt <= freshNow) {
-    return { status: "expired", grant };
+function assertUnusedGrant(grant, phone, now) {
+  if (!grant || grant.phone !== phone || grant.purpose !== "booking" || grant.status !== "prepared") {
+    throw grantError("OTP_VERIFICATION_INVALID");
   }
-  return { status: "durable", grant };
+  if (grant.used === true) throw grantError("OTP_VERIFICATION_ALREADY_USED");
+  if (!validDate(grant.expiresAt) || grant.expiresAt <= now) {
+    throw grantError("OTP_VERIFICATION_EXPIRED");
+  }
+  if (grant.used !== false || grant.usedAt !== null || grant.appointmentId !== null) {
+    throw grantError("OTP_VERIFICATION_INVALID");
+  }
 }
 
-function exactExpiredGrantFilter(grant) {
+function assertExactGrant(grant, expected, now) {
+  if (
+    !grant || !idsEqual(grant.challengeId, expected.challengeId) ||
+    !idsEqual(grant.completionId, expected.completionId) ||
+    grant.tokenHash !== expected.tokenHash ||
+    !datesEqual(grant.createdAt, expected.createdAt) ||
+    !datesEqual(grant.expiresAt, expected.expiresAt)
+  ) {
+    throw grantError("OTP_VERIFICATION_INVALID");
+  }
+  assertUnusedGrant(grant, expected.phone, now);
+}
+
+async function readCurrentChallenge(context, session) {
+  const current = await context.challengeStore.findByTokenHash(
+    context.challengeTokenHash, issueReadOptions(session),
+  );
+  assertCurrentChallenge(current, context);
+  return current;
+}
+
+async function readExactGrant(context, session) {
+  const grant = await context.grants.findOne(
+    { challengeId: context.challenge._id }, issueReadOptions(session),
+  );
+  assertExactGrant(grant, context.expectedGrant, nowFrom(context.clock));
+  return grant;
+}
+
+async function inspectPublished(context, session) {
+  const current = await readCurrentChallenge(context, session);
+  if (current.status !== "completed") return false;
+  // Read the grant last so concurrent consumption cannot be hidden by an old grant read.
+  await readExactGrant(context, session);
+  return true;
+}
+
+async function prepareAndPublish(context, session) {
+  const current = await readCurrentChallenge(context, session);
+  if (current.status === "completed") {
+    await readExactGrant(context, session);
+    return;
+  }
+  const { grants, expectedGrant, challengeStore, challengeTokenHash, challenge, clock } = context;
+  const existing = await grants.findOne({ challengeId: challenge._id }, issueReadOptions(session));
+  if (existing) assertExactGrant(existing, expectedGrant, nowFrom(clock));
+
+  // Exact $setOnInsert never rotates, resets, or deletes a competing request's grant.
+  context.writeStarted = true;
+  try {
+    await grants.updateOne(expectedGrant, { $setOnInsert: expectedGrant }, {
+      ...issueWriteOptions(session), upsert: true,
+    });
+  } catch (error) {
+    if (error?.code !== 11000 || session) throw error;
+    await readExactGrant(context);
+  }
+  await readExactGrant(context, session);
+  const now = nowFrom(clock);
+  validateChallenge(challenge, challengeTokenHash, now);
+  const completed = await challengeStore.transition({
+    challengeTokenHash,
+    from: "approved",
+    now,
+    match: {
+      ...challengeIdentity(challenge),
+      completionExpiresAt: { $gt: now },
+      $expr: { $eq: ["$completionExpiresAt", challenge.completionExpiresAt] },
+    },
+    patch: {
+      status: "completed",
+      completionId: expectedGrant.completionId,
+      bookingGrantTokenHash: expectedGrant.tokenHash,
+      completedAt: now,
+    },
+  }, issueWriteOptions(session));
+  if (completed) assertCurrentChallenge(completed, context);
+  if (!(await inspectPublished(context, session))) {
+    throw grantError("OTP_COMPLETION_IN_PROGRESS");
+  }
+}
+
+export async function issueBookingGrant(
+  { challenge, challengeTokenHash, verificationToken }, deps = {},
+) {
+  const clock = deps.clock ?? systemClock;
+  validateChallenge(challenge, challengeTokenHash, nowFrom(clock));
+  if (!nonemptyString(verificationToken)) throw grantError("OTP_VERIFICATION_INVALID");
+  const tokenHash = (deps.hashToken ?? hashBearerToken)(verificationToken);
+  if (!nonemptyString(tokenHash)) throw grantError("OTP_VERIFICATION_INVALID");
+  const dependencies = await resolveIssueDependencies(deps);
+  const context = {
+    ...dependencies, challenge, challengeTokenHash, clock,
+    expectedGrant: buildGrant(challenge, tokenHash), writeStarted: false,
+  };
+
+  let session;
+  let failure;
+  try {
+    session = dependencies.client.startSession();
+    await session.withTransaction(() => prepareAndPublish(context, session), {
+      readConcern: { level: "snapshot" }, writeConcern: { w: "majority" }, readPreference: "primary",
+    });
+  } catch (error) {
+    failure = error;
+  } finally {
+    try {
+      await session?.endSession();
+    } catch {
+      // Session cleanup cannot undo a commit; durable records decide the result.
+    }
+  }
+
+  if (failure && !context.writeStarted && isTransactionUnsupportedError(failure)) {
+    try {
+      await prepareAndPublish(context);
+      failure = undefined;
+    } catch (error) {
+      failure = error;
+    }
+  }
+
+  try {
+    if (await inspectPublished(context)) return { verificationToken };
+  } catch (error) {
+    if (error instanceof OtpVerificationGrantError || !failure) throw error;
+    throw failure;
+  }
+  if (failure?.code === 11000) throw grantError("OTP_COMPLETION_IN_PROGRESS");
+  throw failure ?? grantError("OTP_COMPLETION_IN_PROGRESS");
+}
+
+async function readLinkedChallenge({ challenges, grant, session }) {
+  if (
+    !idsEqual(grant.challengeId, grant.completionId) || grant.purpose !== "booking" ||
+    !validDate(grant.createdAt) || !validDate(grant.expiresAt) ||
+    grant.expiresAt.getTime() !== grant.createdAt.getTime() + OTP_GRANT_TTL_MS
+  ) return null;
+  return challenges.findOne({
+    _id: grant.challengeId,
+    provider: "twilio",
+    purpose: "booking",
+    phone: grant.phone,
+    status: "completed",
+    completionId: grant.completionId,
+    bookingGrantTokenHash: grant.tokenHash,
+    approvedAt: grant.createdAt,
+    completionExpiresAt: grant.expiresAt,
+  }, issueReadOptions(session));
+}
+
+function grantUpdateFilter(grant, now) {
   return {
     _id: grant._id,
     challengeId: grant.challengeId,
     completionId: grant.completionId,
     phone: grant.phone,
+    purpose: "booking",
     tokenHash: grant.tokenHash,
     status: "prepared",
-    used: false,
-    usedAt: null,
-    appointmentId: null,
+    used: grant.used,
+    usedAt: grant.usedAt,
+    appointmentId: grant.appointmentId,
     createdAt: grant.createdAt,
-    expiresAt: grant.expiresAt,
+    expiresAt: { $gt: now },
+    $expr: { $eq: ["$expiresAt", grant.expiresAt] },
   };
 }
 
-async function reissueExpiredGrant({
-  challenge,
-  challengeTokenHash,
-  completionId,
-  expiredGrant,
-  challengeStore,
-  grants,
-  client,
-  clock,
-  tokenFactory,
-  hashToken,
-}) {
-  const verificationToken = tokenFactory();
-  const tokenHash = hashToken(verificationToken);
-  if (!tokenHash || tokenHash === expiredGrant.tokenHash) {
-    throw grantError("OTP_COMPLETION_IN_PROGRESS");
-  }
-
-  let session;
-  let expectedGrant;
-  let writeSucceeded = false;
-  let commitConfirmed = false;
-  let error;
-
-  try {
-    session = client.startSession();
-    expectedGrant = await session.withTransaction(async () => {
-      const current = await readChallenge(
-        challengeStore,
-        challengeTokenHash,
-        session,
-      );
-      if (
-        !idsEqual(current?._id, challenge._id) ||
-        !completedMatches(current, completionId)
-      ) {
-        throw grantError("OTP_COMPLETION_IN_PROGRESS");
-      }
-
-      const attemptNow = new Date(clock.now());
-      if (!Number.isFinite(attemptNow.getTime())) {
-        throw grantError("OTP_COMPLETION_IN_PROGRESS");
-      }
-      const attemptGrant = {
-        ...expiredGrant,
-        tokenHash,
-        createdAt: attemptNow,
-        expiresAt: new Date(attemptNow.getTime() + OTP_GRANT_TTL_MS),
-      };
-      expectedGrant = attemptGrant;
-      const updated = await grants.findOneAndUpdate(
-        exactExpiredGrantFilter(expiredGrant),
-        {
-          $set: {
-            tokenHash: attemptGrant.tokenHash,
-            createdAt: attemptGrant.createdAt,
-            expiresAt: attemptGrant.expiresAt,
-          },
-        },
-        { session, returnDocument: "after" },
-      );
-      if (!exactUnusedGrantMatches(updated, attemptGrant)) {
-        throw grantError("OTP_COMPLETION_IN_PROGRESS");
-      }
-      writeSucceeded = true;
-      return attemptGrant;
-    });
-    commitConfirmed = true;
-  } catch (caught) {
-    error = caught;
-  }
-
-  if (session) {
-    try {
-      await session.endSession();
-    } catch {
-      // A confirmed commit is authoritative over session cleanup failure.
-    }
-  }
-
-  if (commitConfirmed) return { verificationToken };
-  if (writeSucceeded && expectedGrant) {
-    let durability;
-    try {
-      durability = await inspectTransactionDurability({
-        challenge,
-        challengeTokenHash,
-        completionId,
-        tokenHash,
-        expectedGrant,
-        challengeStore,
-        grants,
-        clock,
-      });
-    } catch {
-      durability = { status: "mismatch" };
-    }
-    if (durability.status === "durable") return { verificationToken };
-  }
-  throw error ?? grantError("OTP_COMPLETION_IN_PROGRESS");
-}
-
-function staleGrantDeleteFilter(grant, challengeId) {
-  const identityFields = [
-    "_id",
-    "challengeId",
-    "completionId",
-    "phone",
-    "tokenHash",
-    "status",
-    "used",
-    "usedAt",
-    "appointmentId",
-    "createdAt",
-    "expiresAt",
-  ];
-  if (
-    !grant ||
-    !idsEqual(grant.challengeId, challengeId) ||
-    grant.status !== "prepared" ||
-    identityFields.some(
-      (field) => !Object.hasOwn(grant, field) || grant[field] === undefined,
-    )
-  ) {
-    return null;
-  }
-
-  return Object.fromEntries(
-    identityFields.map((field) => [field, grant[field]]),
-  );
-}
-
-function isDuplicateKeyError(error) {
-  return error?.code === 11000;
-}
-
-async function recoverExpiredLease({
-  current,
-  challenge,
-  challengeTokenHash,
-  eligibleStatus,
-  challengeStore,
-  grants,
-  clock,
-}) {
-  if (current?.status !== "completing") return current;
-  if (!validCompletionLease({ current, challenge, eligibleStatus })) {
-    throw grantError("OTP_COMPLETION_IN_PROGRESS");
-  }
-
-  const recoveryNow = new Date(clock.now());
-  const restored = await challengeStore.restoreCompletionLease({
-    challengeId: challenge._id,
-    challengeTokenHash,
-    completionId: current.completionId,
-    bookingGrantTokenHash: current.bookingGrantTokenHash,
-    previousStatus: eligibleStatus,
-    now: recoveryNow,
-    expiredOnly: true,
-  });
-  if (!restored) {
-    return readChallenge(challengeStore, challengeTokenHash);
-  }
-
-  await grants.deleteOne({
-    challengeId: challenge._id,
-    completionId: current.completionId,
-    status: "prepared",
-  });
-
-  return restored;
-}
-
-async function compensateLease({
-  challenge,
-  challengeTokenHash,
-  eligibleStatus,
-  completionId,
-  tokenHash,
-  challengeStore,
-  grants,
-  now,
-}) {
-  let restored;
-  try {
-    restored = await challengeStore.restoreCompletionLease({
-      challengeId: challenge._id,
-      challengeTokenHash,
-      completionId,
-      bookingGrantTokenHash: tokenHash,
-      previousStatus: eligibleStatus,
-      now,
-    });
-  } catch (error) {
-    throw new AggregateError(
-      [error],
-      "OTP completion compensation failed.",
-    );
-  }
-  if (!restored) return false;
-
-  try {
-    await grants.deleteOne({
-      challengeId: challenge._id,
-      completionId,
-      status: "prepared",
-    });
-  } catch (error) {
-    throw new AggregateError(
-      [error],
-      "OTP completion compensation failed.",
-    );
-  }
-  return true;
-}
-
-async function readGrantByChallenge(grants, challengeId) {
-  return grants.findOne({ challengeId });
-}
-
-async function prepareLeaseGrant({
-  challenge,
-  challengeTokenHash,
-  eligibleStatus,
-  completionId,
-  tokenHash,
-  grant,
-  preReservationGrant,
-  challengeStore,
-  grants,
-  clock,
-}) {
-  try {
-    if (
-      preReservationGrant &&
-      !idsEqual(preReservationGrant.completionId, completionId)
-    ) {
-      const deleteFilter = staleGrantDeleteFilter(
-        preReservationGrant,
-        challenge._id,
-      );
-      if (!deleteFilter) {
-        throw grantError("OTP_COMPLETION_IN_PROGRESS");
-      }
-      const removed = await grants.deleteOne(deleteFilter);
-      if (removed.deletedCount !== 1) {
-        throw grantError("OTP_COMPLETION_IN_PROGRESS");
-      }
-    }
-
-    const exactExisting = await grants.findOne({
-      challengeId: challenge._id,
-      completionId,
-    });
-    if (!exactExisting) {
-      await grants.updateOne(
-        { challengeId: challenge._id, completionId },
-        { $setOnInsert: grant },
-        { upsert: true },
-      );
-    }
-
-    const prepared = await grants.findOne({
-      challengeId: challenge._id,
-      completionId,
-      tokenHash,
-      status: "prepared",
-      used: false,
-    });
-    if (!grantMatches(prepared, { challenge, completionId, tokenHash })) {
-      throw grantError("OTP_COMPLETION_IN_PROGRESS");
-    }
-    return prepared;
-  } catch (error) {
-    if (isDuplicateKeyError(error)) {
-      const winner = await readGrantByChallenge(grants, challenge._id);
-      if (grantMatches(winner, { challenge, completionId, tokenHash })) {
-        return winner;
-      }
-    }
-
-    try {
-      await compensateLease({
-        challenge,
-        challengeTokenHash,
-        eligibleStatus,
-        completionId,
-        tokenHash,
-        challengeStore,
-        grants,
-        now: new Date(clock.now()),
-      });
-    } catch (compensationError) {
-      throw new AggregateError(
-        [error, compensationError],
-        "OTP completion failed and compensation was incomplete.",
-      );
-    }
-
-    if (isDuplicateKeyError(error)) {
-      throw grantError("OTP_COMPLETION_IN_PROGRESS");
-    }
-    throw error;
-  }
-}
-
-async function completeWithLease({
-  challenge,
-  challengeTokenHash,
-  eligibleStatus,
-  completionId,
-  tokenHash,
-  challengeStore,
-  grants,
-  clock,
-}) {
-  let current = await readChallenge(challengeStore, challengeTokenHash);
-  current = await recoverExpiredLease({
-    current,
-    challenge,
-    challengeTokenHash,
-    eligibleStatus,
-    challengeStore,
-    grants,
-    clock,
-  });
-  if (current?.status === "completed") throw challengeStateError(current);
-
-  const preReservationGrant = await readGrantByChallenge(
-    grants,
-    challenge._id,
-  );
-
-  let reserved;
-  let reservationTime;
-  if (
-    current?.status === "completing" &&
-    validCompletionLease({ current, challenge, eligibleStatus }) &&
-    completionMatches(current, completionId, tokenHash)
-  ) {
-    reserved = current;
-    reservationTime =
-      current.updatedAt instanceof Date
-        ? current.updatedAt
-        : new Date(clock.now());
-  } else {
-    reservationTime = new Date(clock.now());
-    reserved = await challengeStore.reserveCompletionLease({
-      challengeId: challenge._id,
-      challengeTokenHash,
-      provider: challenge.provider,
-      eligibleStatus,
-      completionId,
-      bookingGrantTokenHash: tokenHash,
-      now: reservationTime,
-      leaseExpiresAt: new Date(
-        reservationTime.getTime() + OTP_COMPLETION_LEASE_MS,
-      ),
-    });
-  }
-  if (!reserved) {
-    const observed = await readChallenge(challengeStore, challengeTokenHash);
-    if (
-      observed?.status !== "completing" ||
-      !validCompletionLease({ current: observed, challenge, eligibleStatus }) ||
-      !completionMatches(observed, completionId, tokenHash)
-    ) {
-      throw challengeStateError(observed);
-    }
-    reserved = observed;
-    reservationTime =
-      observed.updatedAt instanceof Date
-        ? observed.updatedAt
-        : new Date(clock.now());
-  }
-
-  const grant = buildGrant({
-    challenge,
-    completionId,
-    tokenHash,
-    now: reservationTime,
-  });
-  await prepareLeaseGrant({
-    challenge,
-    challengeTokenHash,
-    eligibleStatus,
-    completionId,
-    tokenHash,
-    grant,
-    preReservationGrant,
-    challengeStore,
-    grants,
-    clock,
-  });
-
-  let completed;
-  const finalizeNow = new Date(clock.now());
-  try {
-    completed = await challengeStore.finalizeCompletionLease({
-      challengeId: challenge._id,
-      challengeTokenHash,
-      completionId,
-      bookingGrantTokenHash: tokenHash,
-      now: finalizeNow,
-    });
-  } catch {
-    let observed;
-    try {
-      observed = await readChallenge(challengeStore, challengeTokenHash);
-    } catch {
-      // The prepared grant remains fail-closed until lease reconciliation.
-    }
-    if (completedMatches(observed, completionId)) return grant;
-    throw grantError("OTP_COMPLETION_IN_PROGRESS");
-  }
-
-  if (completed) return grant;
-
-  const observed = await readChallenge(challengeStore, challengeTokenHash);
-  if (completedMatches(observed, completionId)) return grant;
-
-  let compensated;
-  try {
-    compensated = await compensateLease({
-      challenge,
-      challengeTokenHash,
-      eligibleStatus,
-      completionId,
-      tokenHash,
-      challengeStore,
-      grants,
-      now: new Date(clock.now()),
-    });
-  } catch (compensationError) {
-    throw new AggregateError(
-      [grantError("OTP_VERIFICATION_INVALID"), compensationError],
-      "OTP completion failed and compensation was incomplete.",
-    );
-  }
-
-  if (!compensated) {
-    const finalState = await readChallenge(challengeStore, challengeTokenHash);
-    if (completedMatches(finalState, completionId)) return grant;
-    throw grantError("OTP_COMPLETION_IN_PROGRESS");
-  }
-  throw grantError("OTP_VERIFICATION_INVALID");
-}
-
-export async function issueBookingGrant(
-  { challenge, challengeTokenHash },
-  deps = {},
-) {
-  const eligibleStatus = eligibleStatusFor(challenge);
-  if (!challengeTokenHash) throw grantError("OTP_VERIFICATION_INVALID");
-
-  const tokenFactory = deps.tokenFactory ?? createBearerToken;
-  const hashToken = deps.hashToken ?? hashBearerToken;
-  const completionIdFactory = deps.completionIdFactory ?? (() => new ObjectId());
-  const clock = deps.clock ?? systemClock;
-  const verificationToken = tokenFactory();
-  const tokenHash = hashToken(verificationToken);
-  const completionId = completionIdFactory();
-
-  const { challengeStore, grants, client } =
-    await resolveIssueDependencies(deps);
-  await ensureGrantIndexes(grants);
-
-  const transaction = await completeInTransaction({
-    challenge,
-    challengeTokenHash,
-    eligibleStatus,
-    completionId,
-    tokenHash,
-    challengeStore,
-    grants,
-    client,
-    clock,
-  });
-  if (transaction.commitConfirmed) {
-    return { verificationToken };
-  }
-
-  if (transaction.error) {
-    if (transaction.writeSucceeded) {
-      let durability = { status: "mismatch" };
-      try {
-        durability = await inspectTransactionDurability({
-          challenge,
-          challengeTokenHash,
-          completionId,
-          tokenHash,
-          expectedGrant: transaction.grant,
-          challengeStore,
-          grants,
-          clock,
-        });
-      } catch {
-        durability = { status: "mismatch" };
-      }
-      if (durability.status === "durable") return { verificationToken };
-      if (durability.status === "expired") {
-        return reissueExpiredGrant({
-          challenge,
-          challengeTokenHash,
-          completionId,
-          expiredGrant: durability.grant,
-          challengeStore,
-          grants,
-          client,
-          clock,
-          tokenFactory,
-          hashToken,
-        });
-      }
-    }
-
-    if (
-      !isTransactionUnsupportedError(transaction.error) ||
-      transaction.writeSucceeded
-    ) {
-      throw transaction.error;
-    }
-
-    await completeWithLease({
-      challenge,
-      challengeTokenHash,
-      eligibleStatus,
-      completionId,
-      tokenHash,
-      challengeStore,
-      grants,
-      clock,
-    });
-  }
-
-  return { verificationToken };
-}
-
-async function getGrantFailureCode({ grants, phone, tokenHash, now, session }) {
-  const grant = await grants.findOne({ tokenHash }, sessionOptions(session));
-  if (!grant || grant.phone !== phone || grant.status !== "prepared") {
-    return "OTP_VERIFICATION_INVALID";
-  }
-  if (grant.used) return "OTP_VERIFICATION_ALREADY_USED";
-  if (!(grant.expiresAt instanceof Date) || grant.expiresAt <= now) {
-    return "OTP_VERIFICATION_EXPIRED";
-  }
-  return "OTP_VERIFICATION_INVALID";
-}
-
-async function readLinkedChallenge({ challenges, grant, session }) {
-  if (!grant.challengeId || !grant.completionId) return null;
-  return challenges.findOne(
-    {
-      _id: grant.challengeId,
-      status: "completed",
-      completionId: grant.completionId,
-    },
-    sessionOptions(session),
-  );
-}
-
 export async function consumeBookingGrant(
-  { phone, verificationToken, appointmentId, session },
-  deps = {},
+  { phone, verificationToken, appointmentId, session }, deps = {},
 ) {
-  if (!verificationToken) {
-    throw grantError("OTP_VERIFICATION_REQUIRED");
-  }
-
-  const hashToken = deps.hashToken ?? hashBearerToken;
+  if (!verificationToken) throw grantError("OTP_VERIFICATION_REQUIRED");
+  if (!nonemptyString(verificationToken)) throw grantError("OTP_VERIFICATION_INVALID");
+  const tokenHash = (deps.hashToken ?? hashBearerToken)(verificationToken);
   const clock = deps.clock ?? systemClock;
-  const tokenHash = hashToken(verificationToken);
-  const now = new Date(clock.now());
   const { challenges, grants } = await resolveGrantDependencies(deps);
-  await ensureGrantIndexes(grants);
-
-  const candidate = await grants.findOne(
-    { tokenHash },
-    sessionOptions(session),
-  );
-  if (!candidate || candidate.phone !== phone || candidate.status !== "prepared") {
-    throw grantError("OTP_VERIFICATION_INVALID");
-  }
-  if (candidate.used) throw grantError("OTP_VERIFICATION_ALREADY_USED");
-  if (!(candidate.expiresAt instanceof Date) || candidate.expiresAt <= now) {
-    throw grantError("OTP_VERIFICATION_EXPIRED");
-  }
+  const candidate = await grants.findOne({ tokenHash }, issueReadOptions(session));
+  assertUnusedGrant(candidate, phone, nowFrom(clock));
   if (!(await readLinkedChallenge({ challenges, grant: candidate, session }))) {
     throw grantError("OTP_VERIFICATION_INVALID");
   }
-
-  const consumed = await grants.findOneAndUpdate(
-    {
-      _id: candidate._id,
-      challengeId: candidate.challengeId,
-      completionId: candidate.completionId,
-      phone,
-      tokenHash,
-      status: "prepared",
-      used: false,
-      expiresAt: { $gt: now },
-    },
-    {
-      $set: {
-        used: true,
-        usedAt: now,
-        appointmentId,
-      },
-    },
-    {
-      ...sessionOptions(session),
-      returnDocument: "after",
-    },
-  );
+  const now = nowFrom(clock);
+  assertUnusedGrant(candidate, phone, now);
+  const consumed = await grants.findOneAndUpdate(grantUpdateFilter(candidate, now), {
+    $set: { used: true, usedAt: now, appointmentId },
+  }, { ...issueWriteOptions(session), returnDocument: "after" });
   if (!consumed) {
-    throw grantError(
-      await getGrantFailureCode({
-        grants,
-        phone,
-        tokenHash,
-        now,
-        session,
-      }),
-    );
+    const current = await grants.findOne({ tokenHash }, issueReadOptions(session));
+    assertUnusedGrant(current, phone, nowFrom(clock));
+    throw grantError("OTP_VERIFICATION_INVALID");
   }
   return consumed;
 }
 
 export async function releaseBookingGrant(
-  { phone, verificationToken, appointmentId, session },
-  deps = {},
+  { phone, verificationToken, appointmentId, session }, deps = {},
 ) {
-  if (!verificationToken) return;
-
-  const hashToken = deps.hashToken ?? hashBearerToken;
+  if (!nonemptyString(verificationToken)) return;
+  const tokenHash = (deps.hashToken ?? hashBearerToken)(verificationToken);
   const clock = deps.clock ?? systemClock;
-  const tokenHash = hashToken(verificationToken);
-  const now = new Date(clock.now());
   const { challenges, grants } = await resolveGrantDependencies(deps);
-  await ensureGrantIndexes(grants);
-
-  const candidate = await grants.findOne(
-    {
-      phone,
-      tokenHash,
-      status: "prepared",
-      used: true,
-      appointmentId,
-      expiresAt: { $gt: now },
-    },
-    sessionOptions(session),
-  );
-  if (!candidate) return;
-  if (!(await readLinkedChallenge({ challenges, grant: candidate, session }))) {
-    return;
-  }
-
-  await grants.updateOne(
-    {
-      _id: candidate._id,
-      challengeId: candidate.challengeId,
-      completionId: candidate.completionId,
-      phone,
-      tokenHash,
-      status: "prepared",
-      used: true,
-      appointmentId,
-      expiresAt: { $gt: now },
-    },
-    {
-      $set: {
-        used: false,
-        usedAt: null,
-        appointmentId: null,
-      },
-    },
-    sessionOptions(session),
-  );
+  const candidate = await grants.findOne({
+    phone, tokenHash, purpose: "booking", status: "prepared", used: true,
+    appointmentId, expiresAt: { $gt: nowFrom(clock) },
+  }, issueReadOptions(session));
+  if (!candidate || !(await readLinkedChallenge({ challenges, grant: candidate, session }))) return;
+  await grants.updateOne(grantUpdateFilter(candidate, nowFrom(clock)), {
+    $set: { used: false, usedAt: null, appointmentId: null },
+  }, issueWriteOptions(session));
 }

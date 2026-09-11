@@ -1,7 +1,7 @@
 import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
-import { getStorage } from "firebase-admin/storage";
+import { getStorageBucket } from "@/lib/cloudStorage";
 
 /* ================= GET ALL ================= */
 export async function GET() {
@@ -9,8 +9,8 @@ export async function GET() {
     const collection = await getCollection("perfumeCategories");
     const categories = await collection.find({}).toArray();
     return NextResponse.json(categories);
-  } catch (err) {
-    console.error(err);
+  } catch {
+    console.error("Failed to fetch perfume categories");
     return NextResponse.json({ message: "Failed" }, { status: 500 });
   }
 }
@@ -35,8 +35,8 @@ export async function POST(req) {
     });
 
     return NextResponse.json({ id: result.insertedId }, { status: 201 });
-  } catch (err) {
-    console.error(err);
+  } catch {
+    console.error("Failed to create perfume category");
     return NextResponse.json({ message: "Failed" }, { status: 500 });
   }
 }
@@ -57,8 +57,8 @@ export async function PUT(req) {
     );
 
     return NextResponse.json({ message: "Updated" });
-  } catch (err) {
-    console.error(err);
+  } catch {
+    console.error("Failed to update perfume category");
     return NextResponse.json({ message: "Failed" }, { status: 500 });
   }
 }
@@ -73,7 +73,7 @@ export async function DELETE(req) {
       _id: new ObjectId(id),
     });
 
-    const bucket = getStorage().bucket();
+    const bucket = await getStorageBucket();
 
     for (const perfume of category.perfumes || []) {
       if (perfume.imagePath) {
@@ -86,8 +86,8 @@ export async function DELETE(req) {
     await collection.deleteOne({ _id: new ObjectId(id) });
 
     return NextResponse.json({ message: "Deleted" });
-  } catch (err) {
-    console.error(err);
+  } catch {
+    console.error("Failed to delete perfume category");
     return NextResponse.json({ message: "Failed" }, { status: 500 });
   }
 }

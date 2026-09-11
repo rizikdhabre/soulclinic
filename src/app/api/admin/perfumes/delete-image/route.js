@@ -1,7 +1,7 @@
 import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
-import { bucket } from "@/lib/firebaseAdmin";
+import { getStorageBucket } from "@/lib/cloudStorage";
 
 export async function POST(req) {
   try {
@@ -18,6 +18,7 @@ export async function POST(req) {
     );
 
     if (perfume?.imagePath) {
+      const bucket = await getStorageBucket();
       await bucket.file(perfume.imagePath).delete();
     }
 
@@ -36,8 +37,8 @@ export async function POST(req) {
     );
 
     return NextResponse.json({ message: "Image deleted" });
-  } catch (err) {
-    console.error(err);
+  } catch {
+    console.error("Failed to delete perfume image");
     return NextResponse.json(
       { message: "Failed" },
       { status: 500 }

@@ -1,6 +1,5 @@
 import { getTwilioClient, getTwilioVerifyConfig } from "./twilio";
 
-const PERMANENT_HTTP_STATUSES = new Set([400, 401, 403, 404, 429]);
 const RETRYABLE_NETWORK_CODES = new Set([
   "ENOTFOUND",
   "EAI_AGAIN",
@@ -11,21 +10,37 @@ const RETRYABLE_NETWORK_CODES = new Set([
 const UNKNOWN_NETWORK_CODES = new Set([
   "ETIMEDOUT",
   "ESOCKETTIMEDOUT",
+  "ECONNABORTED",
   "ECONNRESET",
   "EPIPE",
+  "ABORT_ERR",
+  "ERR_CANCELED",
   "UND_ERR_SOCKET",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
 ]);
 
 function getErrorStatus(error) {
-  return Number(error?.status || error?.statusCode || error?.response?.status);
+  for (const layer of getErrorLayers(error)) {
+    for (const value of [layer.status, layer.statusCode]) {
+      const status = typeof value === "number" ? value :
+        typeof value === "string" && /^\d{3}$/.test(value) ? Number(value) : NaN;
+      if (Number.isInteger(status) && status >= 100 && status <= 599) return status;
+    }
+  }
+  return null;
 }
 
 function getErrorCode(error) {
-  return error?.code || error?.cause?.code || error?.response?.code;
-}
-
-function getErrorMessage(error) {
-  return String(error?.message || error?.response?.message || "");
+  for (const layer of getErrorLayers(error)) {
+    const code = layer.code;
+    // Do not project arbitrary provider payloads or source identifiers.
+    if (
+      RETRYABLE_NETWORK_CODES.has(code) || UNKNOWN_NETWORK_CODES.has(code) ||
+      (typeof code === "number" && Number.isInteger(code) && code >= 10000 && code <= 99999) ||
+      (typeof code === "string" && /^\d{5}$/.test(code))
+    ) return code;
+  }
 }
 
 function isServerErrorStatus(status) {
@@ -70,7 +85,7 @@ function getAmbiguousDelivery(error) {
         message.includes(code.toLowerCase()),
       );
     }
-    if (message.includes("timeout") || message.includes("socket")) {
+    if (message.includes("timeout") || message.includes("timed out") || message.includes("socket")) {
       ambiguousMessage = true;
     }
   }
@@ -96,7 +111,7 @@ export function classifyTwilioSendError(error) {
   const providerErrorCode = getErrorCode(error);
   const ambiguousDelivery = getAmbiguousDelivery(error);
 
-  if (ambiguousDelivery) {
+  if (ambiguousDelivery || isServerErrorStatus(status) || status === 408 || status === 499) {
     return {
       errorCode: "OTP_SEND_PENDING",
       errorCategory: "UNKNOWN_PROVIDER_RESULT",
@@ -104,7 +119,7 @@ export function classifyTwilioSendError(error) {
       unknown: true,
       providerHttpStatus: status || null,
       providerErrorCode:
-        ambiguousDelivery.providerErrorCode ?? providerErrorCode,
+        ambiguousDelivery?.providerErrorCode ?? providerErrorCode,
     };
   }
 
@@ -141,22 +156,9 @@ export function classifyTwilioSendError(error) {
     };
   }
 
-  if (isServerErrorStatus(status)) {
+  if (status >= 400 && status <= 499) {
     return {
-      // SMS POSTs are not idempotent: a 5xx does not prove non-acceptance.
-      // https://www.twilio.com/docs/api/errors/20500
-      errorCode: "OTP_SEND_PENDING",
-      errorCategory: "UNKNOWN_PROVIDER_RESULT",
-      retryable: false,
-      unknown: true,
-      providerHttpStatus: status,
-      providerErrorCode,
-    };
-  }
-
-  if (PERMANENT_HTTP_STATUSES.has(status)) {
-    return {
-      errorCode: "TWILIO_REQUEST_FAILED",
+      errorCode: "OTP_SEND_FAILED",
       errorCategory: "PROVIDER_PERMANENT",
       retryable: false,
       unknown: false,
@@ -165,7 +167,7 @@ export function classifyTwilioSendError(error) {
     };
   }
 
-  if (RETRYABLE_NETWORK_CODES.has(providerErrorCode)) {
+  if (!status && RETRYABLE_NETWORK_CODES.has(providerErrorCode)) {
     return {
       errorCode: "TWILIO_REQUEST_FAILED",
       errorCategory: "NETWORK_BEFORE_REQUEST",
@@ -177,16 +179,27 @@ export function classifyTwilioSendError(error) {
   }
 
   return {
-    errorCode: "OTP_SEND_FAILED",
-    errorCategory: "PROVIDER_UNKNOWN_FAILURE",
+    errorCode: "OTP_SEND_PENDING",
+    errorCategory: "UNKNOWN_PROVIDER_RESULT",
     retryable: false,
-    unknown: false,
+    unknown: true,
     providerHttpStatus: status || null,
     providerErrorCode,
   };
 }
 
 export function classifyTwilioVerifyError(error) {
+  if (error?.code === "TWILIO_VERIFICATION_SID_INVALID") {
+    return {
+      errorCode: "INVALID_OTP",
+      errorCategory: "PROVIDER_VALIDATION",
+      retryable: false,
+      unknown: false,
+      providerHttpStatus: null,
+      providerErrorCode: error.code,
+    };
+  }
+
   if (error?.code === "TWILIO_VERIFY_NOT_CONFIGURED") {
     return {
       errorCode: "OTP_SERVICE_NOT_CONFIGURED",
@@ -200,7 +213,30 @@ export function classifyTwilioVerifyError(error) {
 
   const status = getErrorStatus(error);
   const providerErrorCode = getErrorCode(error);
-  const message = getErrorMessage(error).toLowerCase();
+  const ambiguousDelivery = getAmbiguousDelivery(error);
+
+  // A check may consume approval before its response is lost. Never repeat it.
+  if (ambiguousDelivery || isServerErrorStatus(status) || status === 408 || status === 499) {
+    return {
+      errorCode: "OTP_VERIFY_TEMPORARY_FAILURE",
+      errorCategory: "UNKNOWN_PROVIDER_RESULT",
+      retryable: false,
+      unknown: true,
+      providerHttpStatus: status || null,
+      providerErrorCode: ambiguousDelivery?.providerErrorCode ?? providerErrorCode,
+    };
+  }
+
+  if (status === 401 || status === 403) {
+    return {
+      errorCode: "OTP_VERIFY_FAILED",
+      errorCategory: "AUTH",
+      retryable: false,
+      unknown: false,
+      providerHttpStatus: status,
+      providerErrorCode,
+    };
+  }
 
   if (status === 400 || status === 404) {
     return {
@@ -224,16 +260,10 @@ export function classifyTwilioVerifyError(error) {
     };
   }
 
-  if (
-    isServerErrorStatus(status) ||
-    RETRYABLE_NETWORK_CODES.has(providerErrorCode) ||
-    UNKNOWN_NETWORK_CODES.has(providerErrorCode) ||
-    message.includes("timeout") ||
-    message.includes("socket hang up")
-  ) {
+  if (!status && RETRYABLE_NETWORK_CODES.has(providerErrorCode)) {
     return {
       errorCode: "OTP_VERIFY_TEMPORARY_FAILURE",
-      errorCategory: "PROVIDER_TEMPORARY",
+      errorCategory: "NETWORK_BEFORE_REQUEST",
       retryable: true,
       unknown: false,
       providerHttpStatus: status || null,
@@ -241,12 +271,22 @@ export function classifyTwilioVerifyError(error) {
     };
   }
 
+  if (status >= 400 && status <= 499) {
+    return {
+      errorCode: "OTP_VERIFY_FAILED",
+      errorCategory: "PROVIDER_PERMANENT",
+      retryable: false,
+      unknown: false,
+      providerHttpStatus: status,
+      providerErrorCode,
+    };
+  }
+
   return {
-    errorCode: "OTP_VERIFY_FAILED",
-    errorCategory:
-      status === 401 || status === 403 ? "AUTH" : "PROVIDER_PERMANENT",
+    errorCode: "OTP_VERIFY_TEMPORARY_FAILURE",
+    errorCategory: "UNKNOWN_PROVIDER_RESULT",
     retryable: false,
-    unknown: false,
+    unknown: true,
     providerHttpStatus: status || null,
     providerErrorCode,
   };
@@ -263,13 +303,22 @@ export async function sendTwilioVerification(phone) {
     });
 }
 
-export async function verifyTwilioCode(phone, code) {
+export async function verifyTwilioCode(phone, code, verificationSid) {
+  if (
+    typeof verificationSid !== "string" || verificationSid.length !== 34 ||
+    !/^VE[0-9a-fA-F]{32}$/.test(verificationSid)
+  ) {
+    const error = new Error("A valid Twilio verification SID is required.");
+    error.code = "TWILIO_VERIFICATION_SID_INVALID";
+    throw error;
+  }
+
   const client = getTwilioClient();
   const { serviceSid } = getTwilioVerifyConfig();
   return client.verify.v2
     .services(serviceSid)
     .verificationChecks.create({
-      to: phone,
+      verificationSid,
       code,
     });
 }

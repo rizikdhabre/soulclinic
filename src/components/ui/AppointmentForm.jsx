@@ -10,49 +10,48 @@ import { normalizeIsraeliPhone } from "@/lib/phone";
 function getOtpErrorMessage(error) {
   switch (error?.code) {
     case "INVALID_PHONE":
-      return "رقم الهاتف غير صالح.";
+      return "رقم الهاتف غير صحيح. أدخل رقمًا إسرائيليًا صالحًا.";
     case "OTP_RATE_LIMITED":
       return "يرجى الانتظار قبل طلب رمز جديد لهذا الرقم.";
     case "OTP_SOURCE_RATE_LIMITED":
-    case "OTP_FALLBACK_SOURCE_RATE_LIMITED":
+    case "OTP_SEND_SOURCE_RATE_LIMITED":
       return "تم تجاوز عدد طلبات التحقق من هذه الشبكة مؤقتًا. يرجى الانتظار ثم المحاولة مجددًا.";
-    case "auth/too-many-requests":
-      return "تم تقييد طلب التحقق مؤقتًا. يرجى الانتظار والمحاولة لاحقًا.";
-    case "OTP_REQUEST_IN_PROGRESS":
-    case "OTP_STATE_BUSY":
-      return "يوجد طلب تحقق قيد المعالجة حاليًا.";
+    case "OTP_SEND_BUDGET_EXCEEDED":
+      return "تم بلوغ الحد اليومي للرسائل. يرجى المحاولة بعد انتهاء مدة الانتظار.";
+    case "OTP_VERIFY_RATE_LIMITED":
+      return "تم إدخال رمز خاطئ عدة مرات. انتظر قبل المحاولة مرة أخرى.";
+    case "OTP_SEND_PENDING":
+      return "لم نتمكن من تأكيد إرسال الرمز. إذا وصلك رمز فأدخله، أو أعد محاولة الإرسال بعد الانتظار.";
     case "OTP_SERVICE_NOT_CONFIGURED":
     case "OTP_RATE_LIMIT_CONFIG_INVALID":
     case "OTP_SOURCE_UNAVAILABLE":
-    case "auth/app-not-authorized":
-    case "auth/unauthorized-domain":
-    case "auth/operation-not-allowed":
-    case "auth/invalid-api-key":
-      return "خدمة التحقق غير متاحة حاليًا.";
+    case "OTP_PROVIDER_UNSUPPORTED":
+      return "خدمة التحقق غير متاحة حاليًا. يرجى المحاولة لاحقًا.";
     case "OTP_SEND_FAILED":
+    case "OTP_SEND_TEMPORARY_FAILURE":
     case "OTP_PROVIDER_REJECTED":
-    case "OTP_FALLBACK_FAILED":
     case "OTP_SEND_RETRIES_EXHAUSTED":
-      return "تعذر إرسال رمز التحقق عبر خدمة الرسائل. حاول مجددًا بعد انتهاء الانتظار.";
-    case "OTP_SEND_PENDING":
-      return "لم نتمكن من تأكيد إرسال الرمز. يرجى الانتظار قبل طلب رمز آخر.";
+      return "تعذر تأكيد إرسال رمز التحقق عبر خدمة الرسائل. أعد محاولة الإرسال بعد انتهاء الانتظار.";
+    case "OTP_PERSISTENCE_FAILED":
+      return "تعذر حفظ حالة التحقق. أعد المحاولة بنفس الطلب.";
     case "OTP_CHALLENGE_FAILED":
     case "OTP_CHALLENGE_EXPIRED":
-    case "OTP_FALLBACK_ALREADY_USED":
-    case "OTP_FALLBACK_NOT_ALLOWED":
       return "طلب التحقق غير متاح أو انتهت صلاحيته. اطلب رمزًا جديدًا بعد انتهاء الانتظار.";
-    case "OTP_PERSISTENCE_FAILED":
-      return "تعذر حفظ حالة التحقق. يرجى المحاولة لاحقًا.";
-    case "OTP_VERIFY_RATE_LIMITED":
-      return "تم إدخال رمز خاطئ عدة مرات. يرجى الانتظار قبل المحاولة مرة أخرى.";
-    case "OTP_VERIFICATION_EXPIRED":
-    case "auth/code-expired":
-      return "انتهت صلاحية رمز التحقق. أعد إرسال الرمز وحاول مرة أخرى.";
+    case "OTP_COMPLETION_IN_PROGRESS":
+      return "يجري إكمال التحقق حاليًا. أعد تأكيد الرمز بعد قليل.";
+    case "OTP_VERIFY_FAILED":
+    case "OTP_VERIFY_TEMPORARY_FAILURE":
+    case "OTP_REQUEST_IN_PROGRESS":
+    case "OTP_STATE_BUSY":
+      return "حدث عطل مؤقت في التحقق. أعد تأكيد الرمز نفسه.";
     case "INVALID_OTP":
     case "OTP_VERIFICATION_INVALID":
-    case "auth/invalid-verification-code":
-    case "auth/missing-verification-code":
       return "رمز التحقق غير صحيح. حاول مرة أخرى.";
+    case "OTP_VERIFICATION_REQUIRED":
+      return "أدخل رمز التحقق المرسل إلى هاتفك.";
+    case "OTP_VERIFICATION_EXPIRED":
+    case "OTP_FLOW_NOT_STARTED":
+      return "انتهت صلاحية رمز التحقق. أعد إرسال الرمز وحاول مرة أخرى.";
     default:
       return "تعذر إكمال التحقق. يرجى المحاولة مرة أخرى.";
   }
@@ -70,7 +69,7 @@ export function AppointmentForm({
     phone: "",
     note: "",
   });
-  const [step, setStep] = useState("phone");
+  const [bookingStep, setStep] = useState("phone");
   const [otp, setOtp] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
@@ -85,17 +84,20 @@ export function AppointmentForm({
   );
   const otpFlow = usePhoneOtp({
     purpose: "booking",
-    recaptchaContainerId: "appointment-recaptcha-container",
   });
 
+  const step = bookingStep === "phone" || bookingStep === "otp"
+    ? (otpFlow.phase === "code" || otpFlow.phase === "complete" ? "otp" : "phone")
+    : bookingStep;
+
   const normalizedPhone = normalizeIsraeliPhone(data.phone);
-  const isOtpCoolingDown = otpFlow.cooldownSeconds > 0;
+  const isSendCooldownBlocking = otpFlow.cooldownSeconds > 0 && !otpFlow.canRetrySend;
   const canStartFlow = Boolean(
     selectedDate &&
       selectedTime &&
       data.phone.trim() &&
       !otpFlow.loading &&
-      !isOtpCoolingDown,
+      !isSendCooldownBlocking,
   );
   const canSubmitDetails = Boolean(
     selectedDate &&
@@ -154,7 +156,7 @@ export function AppointmentForm({
 
   const handlePhoneSubmit = async (event) => {
     event.preventDefault();
-    if (otpFlow.loading || submitting || isOtpCoolingDown) return;
+    if (otpFlow.loading || submitting || isSendCooldownBlocking) return;
 
     if (!selectedDate || !selectedTime) {
       showMessage("error", "اختر التاريخ والساعة قبل تأكيد الموعد.");
@@ -186,15 +188,14 @@ export function AppointmentForm({
   };
 
   const handleResendOtp = async () => {
-    if (otpFlow.loading || submitting || isOtpCoolingDown) return;
+    if (otpFlow.loading || submitting || isSendCooldownBlocking) return;
 
     setOtp("");
     setMessage("");
     try {
       await otpFlow.resend();
     } catch {
-      setStep("phone");
-      // Keep the hook's error and deadline while allowing a fresh attempt later.
+      // Keep the prepared challenge and projected error available for manual retry.
     }
   };
 
@@ -294,8 +295,6 @@ export function AppointmentForm({
 
   return (
     <>
-      <div id="appointment-recaptcha-container" />
-
       {step === "phone" && otpFlow.loading && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -384,7 +383,7 @@ export function AppointmentForm({
               >
                 {otpFlow.loading
                   ? "جارٍ إرسال الرمز..."
-                  : isOtpCoolingDown
+                  : isSendCooldownBlocking
                     ? `انتظر ${otpFlow.cooldownSeconds} ثانية`
                     : "تأكيد الموعد"}
               </button>
@@ -402,7 +401,9 @@ export function AppointmentForm({
               <div className="rounded-xl bg-primary/10 px-4 py-3 text-sm text-primary">
                 <div>{data.phone}</div>
                 <div className="mt-1 text-muted-foreground">
-                  أدخل رمز التحقق الذي تم إرساله إلى رقمك.
+                  {otpFlow.smsSent
+                    ? "أدخل رمز التحقق الذي تم إرساله إلى رقمك."
+                    : "إذا وصلك رمز فأدخله للمتابعة."}
                 </div>
               </div>
 
@@ -476,13 +477,15 @@ export function AppointmentForm({
                     type="button"
                     onClick={handleResendOtp}
                     disabled={
-                      otpFlow.loading || submitting || isOtpCoolingDown
+                      otpFlow.loading || submitting || isSendCooldownBlocking
                     }
                     className="w-full rounded-xl py-3 border border-border text-foreground disabled:opacity-50"
                   >
-                    {isOtpCoolingDown
+                    {isSendCooldownBlocking
                       ? `إعادة الإرسال خلال ${otpFlow.cooldownSeconds} ثانية`
-                      : "إعادة إرسال الرمز"}
+                      : otpFlow.smsSent
+                        ? "إعادة إرسال الرمز"
+                        : "إعادة محاولة الإرسال"}
                   </button>
 
                   <button

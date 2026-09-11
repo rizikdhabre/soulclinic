@@ -16,10 +16,10 @@ export function otpErrorMetadata(error = {}) {
   for (const key of ["retryAt", "serverTime", "phoneRetryAt"]) {
     if (isOtpIsoTime(error[key])) metadata[key] = error[key];
   }
-  if (Number.isInteger(error.retryAfterSeconds) && error.retryAfterSeconds > 0 && error.retryAfterSeconds <= 3600) {
+  if (Number.isInteger(error.retryAfterSeconds) && error.retryAfterSeconds > 0 && error.retryAfterSeconds <= 86400) {
     metadata.retryAfterSeconds = error.retryAfterSeconds;
   }
-  if (error.restrictionScope === "phone" || error.restrictionScope === "source") {
+  if (["phone", "source", "global"].includes(error.restrictionScope)) {
     metadata.restrictionScope = error.restrictionScope;
   }
   return metadata;
@@ -41,7 +41,7 @@ export function attachOtpAttemptMetadata(error, { correlationId, phoneRetryAt, n
   if (isOtpCorrelationId(correlationId)) error.correlationId = correlationId;
   error.serverTime = now.toISOString();
   const phone = otpRetryMetadata(phoneRetryAt, now);
-  if (error.restrictionScope === "source") {
+  if (error.restrictionScope === "source" || error.restrictionScope === "global") {
     // Preserve the aggregate-source deadline separately from this phone's reservation.
     if (phone.retryAt) error.phoneRetryAt = phone.retryAt;
   } else if (phone.retryAt && (!error.retryAt || Date.parse(error.retryAt) < Date.parse(phone.retryAt))) {

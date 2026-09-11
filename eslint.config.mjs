@@ -1,17 +1,7 @@
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "firebasestorage.googleapis.com",
-      },
-      {
-        protocol: "https",
-        hostname: "storage.googleapis.com",
-      },
-    ],
-  },
-};
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
 
-export default nextConfig;
+export default defineConfig([
+  ...nextVitals,
+  globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts"]),
+]);
