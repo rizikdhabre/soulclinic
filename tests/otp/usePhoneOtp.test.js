@@ -166,6 +166,7 @@ describe("createPhoneOtpController", () => {
 
     expect(flowRef.current).toBeNull();
     expect(controller.getSnapshot()).toEqual({
+      statusMessage: "",
       phase: "idle",
       smsSent: false,
       canRetrySend: false,
@@ -201,6 +202,7 @@ describe("createPhoneOtpController", () => {
       expect.objectContaining({ challengeToken: "fresh-challenge" }),
     );
     expect(controller.getSnapshot()).toEqual({
+      statusMessage: "",
       phase: "code",
       smsSent: true,
       canRetrySend: false,
@@ -230,9 +232,11 @@ describe("createPhoneOtpController", () => {
       }),
       code: "654321",
       api: dependencies.api,
+      getFirebaseClient: expect.any(Function),
       isCurrentAttempt: expect.any(Function),
     });
     expect(controller.getSnapshot()).toEqual({
+      statusMessage: "",
       phase: "complete",
       smsSent: true,
       canRetrySend: false,
@@ -281,6 +285,7 @@ describe("createPhoneOtpController", () => {
       message: "OTP flow was cancelled.",
     });
     expect(controller.getSnapshot()).toEqual({
+      statusMessage: "",
       phase: "idle",
       smsSent: false,
       canRetrySend: false,
@@ -332,6 +337,7 @@ describe("createPhoneOtpController", () => {
     await pendingStart;
 
     expect(controller.getSnapshot()).toEqual({
+      statusMessage: "",
       phase: "idle",
       smsSent: false,
       canRetrySend: false,

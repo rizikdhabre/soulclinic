@@ -10,6 +10,17 @@ describe("privacy-safe OTP diagnostics", () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
+  it("logs bounded fallback reasons, deployment metadata and elapsed time without payloads", () => {
+    const safe = { correlationId, stage: "fallback_decision", provider: "firebase", decision: "reserved", reason: "sdk_send_rejected_ambiguous", environment: "preview", deploymentSha: "a".repeat(40), elapsedMs: 1200 };
+    logOtpEvent({ ...safe, idToken: "private", captchaToken: "private", error: { rawPayload: "private" } });
+    expect(info).toHaveBeenCalledExactlyOnceWith("OTP flow", safe);
+  });
+
+  it("drops unbounded reasons and deployment fields", () => {
+    logOtpEvent({ stage: "firebase_send_rejected", reason: "private-phone", environment: "private-env", deploymentSha: "private-sha", elapsedMs: Infinity });
+    expect(info).toHaveBeenCalledExactlyOnceWith("OTP flow", { stage: "firebase_send_rejected" });
+  });
+
   it("logs only the explicit bounded contract, never identity, provider payloads or encrypted receipts", () => {
     const recoveryReceipt = sealOtpReceipt({ phone: "+972521234567", operation: "verify", purpose: "booking" }, {
       CUSTOMER_SESSION_SECRET: "s".repeat(48),

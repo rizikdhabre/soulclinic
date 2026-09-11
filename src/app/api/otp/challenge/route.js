@@ -60,7 +60,10 @@ export async function POST(request) {
     });
     return NextResponse.json({
       challengeToken: result.challengeToken,
-      provider: "twilio",
+      provider: result.provider,
+      providerPolicy: result.providerPolicy,
+      phone: result.phone,
+      purpose: result.purpose,
       expiresAt: result.expiresAt,
       ...otpErrorMetadata(result),
     }, { headers: { "Cache-Control": "no-store" } });

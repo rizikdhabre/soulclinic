@@ -24,10 +24,10 @@ beforeEach(() => vi.spyOn(console, "info").mockImplementation(() => {}));
 afterEach(() => vi.restoreAllMocks());
 
 describe("Twilio client contract", () => {
-  it("uses only the three Axios endpoints and their response bodies", async () => {
+  it("preserves the original Axios endpoints and adds the Firebase coordination endpoints", async () => {
     const http = { post: vi.fn().mockResolvedValue({ data: { ok: true } }) };
     const api = createOtpApiClient(http);
-    expect(Object.keys(api).sort()).toEqual(["challenge", "complete", "send"]);
+    expect(Object.keys(api).sort()).toEqual(["challenge", "complete", "fallback", "firebaseSend", "send"]);
     for (const [method, payload] of [
       ["challenge", { phone: "+972521234567", purpose: "login" }],
       ["send", { challengeToken: "private-challenge" }],

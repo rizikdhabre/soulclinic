@@ -76,6 +76,9 @@ export default function UserAppointmentsClient() {
     try {
       await axios.post("/api/customer/logout");
       router.replace("/login");
+      void import("@/lib/otp/firebaseClient")
+        .then(({ clearFirebaseBrowserSession }) => clearFirebaseBrowserSession())
+        .catch(() => {});
     } catch {
       setError("تعذر تسجيل الخروج. يرجى المحاولة مرة أخرى.");
     } finally {

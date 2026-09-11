@@ -37,7 +37,7 @@ describe("POST /api/otp/complete", () => {
 
   it.each([undefined, "opaque-recovery", "r".repeat(2048)])("forwards purpose, code and optional receipt %j only", async (recoveryReceipt) => {
     const payload = { ...valid, ...(recoveryReceipt === undefined ? {} : { recoveryReceipt }) };
-    const response = await POST(request({ ...payload, phone: "ignored-phone", provider: "ignored", idToken: "ignored", request: "ignored" }));
+    const response = await POST(request({ ...payload, phone: "ignored-phone", provider: "ignored", success: true, request: "ignored" }));
     expect(completeOtpChallenge).toHaveBeenCalledExactlyOnceWith(payload);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({

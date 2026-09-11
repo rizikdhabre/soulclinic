@@ -121,7 +121,7 @@ function validateChallenge(challenge, challengeTokenHash, now) {
     !(challenge?._id instanceof ObjectId) ||
     !nonemptyString(challengeTokenHash) ||
     challenge.challengeTokenHash !== challengeTokenHash ||
-    challenge.provider !== "twilio" || challenge.purpose !== "booking" ||
+    !["twilio", "firebase"].includes(challenge.provider) || challenge.purpose !== "booking" ||
     !["approved", "completed"].includes(challenge.status) ||
     !nonemptyString(challenge.phone) || normalizeIsraeliPhone(challenge.phone) !== challenge.phone ||
     !validDate(challenge.approvedAt) || challenge.approvedAt > now ||
@@ -137,7 +137,7 @@ function challengeIdentity(challenge) {
   return {
     _id: challenge._id,
     challengeTokenHash: challenge.challengeTokenHash,
-    provider: "twilio",
+    provider: challenge.provider,
     purpose: "booking",
     phone: challenge.phone,
     approvedAt: challenge.approvedAt,
@@ -150,7 +150,7 @@ function assertCurrentChallenge(current, context) {
   const { challenge, challengeTokenHash, expectedGrant, clock } = context;
   validateChallenge(current, challengeTokenHash, nowFrom(clock));
   if (
-    !idsEqual(current._id, challenge._id) || current.phone !== challenge.phone ||
+    !idsEqual(current._id, challenge._id) || current.phone !== challenge.phone || current.provider !== challenge.provider ||
     !datesEqual(current.approvedAt, challenge.approvedAt) ||
     !datesEqual(current.completionExpiresAt, challenge.completionExpiresAt) ||
     !datesEqual(current.expiresAt, challenge.expiresAt) ||
@@ -254,6 +254,7 @@ async function prepareAndPublish(context, session) {
   validateChallenge(challenge, challengeTokenHash, now);
   const completed = await challengeStore.transition({
     challengeTokenHash,
+    provider: challenge.provider,
     from: "approved",
     now,
     match: {
@@ -332,7 +333,7 @@ async function readLinkedChallenge({ challenges, grant, session }) {
   ) return null;
   return challenges.findOne({
     _id: grant.challengeId,
-    provider: "twilio",
+    provider: { $in: ["twilio", "firebase"] },
     purpose: "booking",
     phone: grant.phone,
     status: "completed",

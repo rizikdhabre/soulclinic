@@ -36,8 +36,13 @@ export async function completeOtpChallenge(payload, deps = {}) {
     const challengeTokenHash = hashBearerToken(payload.challengeToken);
     const store = deps.challengeStore ?? await otpPersistence(() => getOtpChallengeStore());
     challenge = await otpPersistence(() => store.findByTokenHash(challengeTokenHash));
-    if (!challenge?._id || challenge.provider !== "twilio" || !["login", "booking"].includes(challenge.purpose) || typeof challenge.phone !== "string" || normalizeIsraeliPhone(challenge.phone) !== challenge.phone || !validDate(challenge.expiresAt)) throw failure("OTP_VERIFICATION_INVALID", 401);
+    if (!challenge?._id || !["twilio", "firebase"].includes(challenge.provider) || !["login", "booking"].includes(challenge.purpose) || typeof challenge.phone !== "string" || normalizeIsraeliPhone(challenge.phone) !== challenge.phone || !validDate(challenge.expiresAt)) throw failure("OTP_VERIFICATION_INVALID", 401);
     if (payload.purpose !== challenge.purpose) throw failure("OTP_PURPOSE_MISMATCH", 400);
+    if (challenge.provider === "twilio" && payload.idToken !== undefined) throw failure("OTP_PROVIDER_REJECTED", 400);
+    if (challenge.provider === "firebase") {
+      const { approveFirebaseChallenge } = await import("./firebaseCompletion");
+      ({ challenge, receipt } = await approveFirebaseChallenge(payload, challenge, store, deps));
+    }
 
     async function saveApproval(result) {
       return persistObservedResult(store, {
@@ -47,7 +52,7 @@ export async function completeOtpChallenge(payload, deps = {}) {
       }, (value) => approved(value) && value.verifyAttemptId === result.attemptId && value.verificationSid === result.verificationSid);
     }
 
-    if (payload.recoveryReceipt) {
+    if (challenge.provider === "twilio" && payload.recoveryReceipt) {
       const observed = openOtpReceipt(payload.recoveryReceipt, { challenge, operation: "verify", now: now(), env });
       receipt = payload.recoveryReceipt;
       challenge = await saveApproval(observed);
@@ -122,7 +127,7 @@ export async function completeOtpChallenge(payload, deps = {}) {
       if (!Number.isSafeInteger(ttl) || ttl <= 0 || remaining <= 0) throw failure("OTP_VERIFICATION_EXPIRED", 401);
       const sessionToken = await (deps.signCustomerSession ?? signCustomerSession)(challenge.phone, { env, now: challenge.approvedAt, ttlSeconds: ttl });
       if (typeof sessionToken !== "string" || !sessionToken) throw failure();
-      challenge = await persistObservedResult(store, { challengeTokenHash, from: "approved", now: now(),
+      challenge = await persistObservedResult(store, { challengeTokenHash, provider: challenge.provider, from: "approved", now: now(),
         match: { completionExpiresAt: { $gt: now() } }, patch: { status: "completed", completedAt: challenge.approvedAt, completionId: challenge._id },
       }, (value) => value.status === "completed" && +value.approvedAt === +challenge.approvedAt);
       result = { purpose: "login", sessionToken, sessionTtlSeconds: remaining };
@@ -134,12 +139,12 @@ export async function completeOtpChallenge(payload, deps = {}) {
       result = { success: true, purpose: "booking", verificationToken: grant.verificationToken,
         expiresInSeconds: Math.max(0, Math.floor((+challenge.completionExpiresAt - +now()) / 1000)), profile };
     }
-    logOtpEvent({ correlationId: challenge.correlationId, stage: "complete", provider: "twilio", decision: "success" });
+    logOtpEvent({ correlationId: challenge.correlationId, purpose: challenge.purpose, stage: challenge.purpose === "login" ? "application_session_issued" : "booking_grant_issued", provider: challenge.provider, decision: "success" });
     return result;
   } catch (error) {
     const safe = attachOtpAttemptMetadata(error instanceof OtpError ? error : error instanceof OtpVerificationGrantError ? failure(error.code, error.status) : failure(), { correlationId: challenge?.correlationId, now: now() });
     if (receipt) safe.recoveryReceipt = receipt;
-    logOtpEvent({ ...safe, errorCode: safe.code, stage: "complete", provider: "twilio", decision: safe.status === 429 ? "blocked" : "failed" });
+    logOtpEvent({ ...safe, errorCode: safe.code, stage: "complete", provider: challenge?.provider, decision: safe.status === 429 ? "blocked" : "failed" });
     throw safe;
   }
 }

@@ -315,9 +315,10 @@ describe("createOtpRateLimitStore", () => {
     expect(phoneCollection.documents).toHaveLength(1);
     expect(phoneCollection.documents[0]).toMatchObject({
       verifyFailureCount: 5,
-      verifyReservationIds: reservationIds.slice(0, 5),
       version: 5,
     });
+    const acceptedIds = reservationIds.filter((_, index) => results[index].status === "fulfilled");
+    expect(phoneCollection.documents[0].verifyReservationIds.slice().sort()).toEqual(acceptedIds.sort());
   });
 
   it("reserves idempotently and releases only the exact owned attempt", async () => {

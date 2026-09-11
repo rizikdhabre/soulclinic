@@ -18,11 +18,11 @@ export function createOtpChallengeStore({ collection }) {
 
   return {
     ensureIndexes,
-    async create({ phone, purpose, challengeTokenHash, sourceHash, now, expiresAt, correlationId, retryAt }) {
+    async create({ phone, purpose, challengeTokenHash, sourceHash, now, expiresAt, correlationId, retryAt, providerPolicy = "twilio_only" }) {
       await ensureIndexes();
       const challenge = {
         _id: new ObjectId(), phone, purpose, challengeTokenHash, sourceHash,
-        provider: "twilio", status: "prepared", correlationId, retryAt,
+        provider: providerPolicy === "firebase_first" ? "firebase" : "twilio", providerPolicy, status: "prepared", correlationId, retryAt,
         createdAt: now, updatedAt: now, expiresAt,
         purgeAt: new Date(now.getTime() + OTP_STATE_RETENTION_MS),
       };
@@ -35,10 +35,10 @@ export function createOtpChallengeStore({ collection }) {
         readPreference: "primary", readConcern: { level: "majority" }, ...options,
       });
     },
-    async transition({ challengeTokenHash, from, now, patch, match = {} }, options = {}) {
+    async transition({ challengeTokenHash, from, now, patch, match = {}, provider = "twilio" }, options = {}) {
       await ensureIndexes();
       return collection.findOneAndUpdate(
-        { ...match, challengeTokenHash, provider: "twilio", status: Array.isArray(from) ? { $in: from } : from },
+        { ...match, challengeTokenHash, provider, status: Array.isArray(from) ? { $in: from } : from },
         { $set: { ...patch, updatedAt: now } },
         { ...(options.session ? {} : { writeConcern: { w: "majority" } }), ...options, returnDocument: "after" },
       );

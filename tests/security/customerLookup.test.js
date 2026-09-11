@@ -364,12 +364,12 @@ describe("customer identity lookup boundary", () => {
     expect(remainingPublicLookupCallers).toEqual([]);
   });
 
-  it("uses the shared booking OTP flow without CAPTCHA or direct OTP transport", () => {
+  it("uses the shared booking OTP flow without direct SDK or OTP transport", () => {
     const source = readFileSync(APPOINTMENT_FORM, "utf8");
 
     expect(source).toContain("usePhoneOtp({");
     expect(source).toContain('purpose: "booking"');
-    expect(source).not.toMatch(/recaptcha/i);
+    expect(source).not.toMatch(/RecaptchaVerifier|signInWithPhoneNumber|firebase\/auth/);
     expect(source).not.toMatch(/\/api\/otp\/(?:start|verify)/);
     expect(source).not.toContain("createBackendOtpConfirmation");
     expect(source).not.toContain("handleLookupUser");
@@ -421,6 +421,7 @@ describe("customer identity lookup boundary", () => {
     expect(result).toEqual({
       challengeToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
       provider: "twilio",
+      providerPolicy: "twilio_only", phone: "+972521234567", purpose: "booking",
       expiresAt: new Date("2026-08-23T12:10:00.000Z"),
       retryAfterSeconds: 60,
       retryAt: "2026-08-23T12:01:00.000Z",

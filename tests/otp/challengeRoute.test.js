@@ -26,7 +26,7 @@ describe("POST /api/otp/challenge", () => {
     createOtpChallenge.mockReset();
     createOtpChallenge.mockResolvedValue({
       challengeToken: token, provider: "twilio", expiresAt: new Date("2026-08-23T12:10:00.000Z"),
-      ...timing, phone: "private-phone", sourceHash: "private-source", verificationSid: "private-sid",
+      ...timing, phone: "+972521234567", providerPolicy: "twilio_only", sourceHash: "private-source", verificationSid: "private-sid",
       recoveryReceipt: "private-receipt", profile: { firstName: "private-name" },
     });
   });
@@ -36,7 +36,7 @@ describe("POST /api/otp/challenge", () => {
     const response = await POST(input);
     expect(createOtpChallenge).toHaveBeenCalledExactlyOnceWith({ request: input, phone: valid.phone, purpose });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ challengeToken: token, provider: "twilio", expiresAt: "2026-08-23T12:10:00.000Z", ...timing });
+    expect(await response.json()).toEqual({ challengeToken: token, provider: "twilio", providerPolicy: "twilio_only", phone: "+972521234567", expiresAt: "2026-08-23T12:10:00.000Z", ...timing });
     privateResponse(response);
   });
 

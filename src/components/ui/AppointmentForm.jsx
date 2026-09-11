@@ -18,6 +18,8 @@ function getOtpErrorMessage(error) {
       return "تم تجاوز عدد طلبات التحقق من هذه الشبكة مؤقتًا. يرجى الانتظار ثم المحاولة مجددًا.";
     case "OTP_SEND_BUDGET_EXCEEDED":
       return "تم بلوغ الحد اليومي للرسائل. يرجى المحاولة بعد انتهاء مدة الانتظار.";
+    case "OTP_PROVIDER_RATE_LIMITED":
+      return "خدمة الرسائل تقيّد الطلبات مؤقتًا. يرجى الانتظار ثم المحاولة مجددًا.";
     case "OTP_VERIFY_RATE_LIMITED":
       return "تم إدخال رمز خاطئ عدة مرات. انتظر قبل المحاولة مرة أخرى.";
     case "OTP_SEND_PENDING":
@@ -295,6 +297,7 @@ export function AppointmentForm({
 
   return (
     <>
+      <div id={otpFlow.recaptchaContainerId} />
       {step === "phone" && otpFlow.loading && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -320,6 +323,11 @@ export function AppointmentForm({
 
       <div className="w-full md:w-auto min-h-[70vh] md:min-h-0 flex items-center justify-center md:block px-4 md:px-0">
         <div className="w-full max-w-md md:max-w-none">
+          {otpFlow.statusMessage && (
+            <p role="status" aria-live="polite" className="mb-3 text-sm text-muted-foreground" dir="rtl">
+              {otpFlow.statusMessage}
+            </p>
+          )}
           {step === "phone" && (
             <form
               onSubmit={handlePhoneSubmit}

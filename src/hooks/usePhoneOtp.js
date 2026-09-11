@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useId, useMemo, useSyncExternalStore } from "react";
 import { normalizeIsraeliPhone } from "@/lib/phone";
 import { getRetryDeadline, getRestrictionScope } from "@/lib/otp/retry";
 import {
@@ -18,6 +18,7 @@ const INITIAL_STATE = {
   loading: false,
   error: null,
   cooldownSeconds: 0,
+  statusMessage: "",
 };
 
 const PUBLIC_OTP_ERROR_CODES = new Set([
@@ -34,6 +35,7 @@ const PUBLIC_OTP_ERROR_CODES = new Set([
   "OTP_PROVIDER_MISMATCH",
   "OTP_PROVIDER_UNSUPPORTED",
   "OTP_PROVIDER_REJECTED",
+  "OTP_PROVIDER_RATE_LIMITED",
   "OTP_PURPOSE_MISMATCH",
   "OTP_PERSISTENCE_FAILED",
   "OTP_RATE_LIMIT_CONFIG_INVALID",
@@ -79,9 +81,30 @@ function projectError(error, operation) {
     typeof response?.error === "string"
       ? response.error
       : response?.error?.code;
+  const firebaseCode = error?.firebaseFailure?.code || error?.code;
+  const firebasePublicCode = {
+    "auth/invalid-phone-number": "INVALID_PHONE",
+    "auth/missing-phone-number": "INVALID_PHONE",
+    "auth/invalid-verification-code": "INVALID_OTP",
+    "auth/missing-verification-code": "OTP_VERIFICATION_REQUIRED",
+    "auth/code-expired": "OTP_VERIFICATION_EXPIRED",
+    "auth/session-expired": "OTP_VERIFICATION_EXPIRED",
+    "auth/too-many-requests": operation === "verify" ? "OTP_VERIFY_RATE_LIMITED" : "OTP_PROVIDER_RATE_LIMITED",
+    "auth/quota-exceeded": "OTP_PROVIDER_RATE_LIMITED",
+    "auth/network-request-failed": operation === "verify" ? "OTP_VERIFY_TEMPORARY_FAILURE" : "OTP_SEND_TEMPORARY_FAILURE",
+    "auth/timeout": operation === "verify" ? "OTP_VERIFY_TEMPORARY_FAILURE" : "OTP_SEND_TEMPORARY_FAILURE",
+    "auth/internal-error": operation === "verify" ? "OTP_VERIFY_TEMPORARY_FAILURE" : "OTP_SEND_TEMPORARY_FAILURE",
+    "auth/unauthorized-domain": "OTP_SERVICE_NOT_CONFIGURED",
+    "auth/operation-not-allowed": "OTP_SERVICE_NOT_CONFIGURED",
+    "auth/invalid-api-key": "OTP_SERVICE_NOT_CONFIGURED",
+    "auth/captcha-check-failed": "OTP_SEND_TEMPORARY_FAILURE",
+    "client/configuration": "OTP_SERVICE_NOT_CONFIGURED",
+    "client/container-unavailable": "OTP_SEND_TEMPORARY_FAILURE",
+  }[firebaseCode];
   const code =
     safeErrorCode(responseCode) ||
     safeErrorCode(error?.code) ||
+    safeErrorCode(firebasePublicCode) ||
     "OTP_REQUEST_FAILED";
   const retryAfterSeconds = normalizeCooldown(
     error?.retryAfterSeconds ?? response?.retryAfterSeconds,
@@ -121,6 +144,9 @@ export function createPhoneOtpController({
   now = () => Date.now(),
   flowRef = { current: null },
   inFlightRef = { current: false },
+  containerId,
+  firebaseClient,
+  loadFirebaseClient = () => import("@/lib/otp/firebaseClient"),
 }) {
   let state = { ...INITIAL_STATE };
   let currentPhone = null;
@@ -130,7 +156,41 @@ export function createPhoneOtpController({
   let disposed = false;
   let activeOperation = null;
   let cooldownTimer = null;
+  let sendWatchdog = null;
+  let browserClient = null;
+  let browserClientPromise = null;
   const listeners = new Set();
+
+  async function getFirebaseClient() {
+    if (browserClient) return browserClient;
+    if (firebaseClient) {
+      browserClient = firebaseClient;
+      return browserClient;
+    }
+    if (!browserClientPromise) {
+      const clientVersion = version;
+      browserClientPromise = loadFirebaseClient().then((module) => {
+        if (disposed || clientVersion !== version) throw createFlowCancelledError();
+        browserClient = module.createFirebasePhoneClient({ containerId });
+        return browserClient;
+      }).finally(() => { browserClientPromise = null; });
+    }
+    return browserClientPromise;
+  }
+
+  function discardFlow() {
+    const flow = flowRef.current;
+    if (flow) {
+      flow.clearProof?.();
+      for (const key of ["idToken", "confirmationResult", "recoveryReceipt", "fallbackFailure", "rejectedFailure", "rejectionError"]) delete flow[key];
+    }
+    flowRef.current = null;
+  }
+
+  function stopSendWatchdog() {
+    if (sendWatchdog !== null) cancel(sendWatchdog);
+    sendWatchdog = null;
+  }
 
   function getSnapshot() {
     return state;
@@ -202,7 +262,8 @@ export function createPhoneOtpController({
     if (phone === currentPhone) return false;
     currentPhone = phone;
     version += 1;
-    flowRef.current = null;
+    discardFlow();
+    stopSendWatchdog();
     updateState({ ...INITIAL_STATE, loading: inFlightRef.current, error: sourceRestriction?.error || null });
     refreshCooldown();
     return true;
@@ -230,22 +291,43 @@ export function createPhoneOtpController({
     const operationVersion = ++version;
     const isCurrentAttempt = () => !disposed && operationVersion === version;
     let reservationObserved = Boolean(preparedFlow);
-    if (!preparedFlow) flowRef.current = null;
+    if (!preparedFlow) discardFlow();
     updateState({
       phase: preparedFlow ? "code" : "idle",
       provider: preparedFlow?.provider || null,
       smsSent: false,
       loading: true,
       error: null,
+      statusMessage: "",
     });
+    const onStage = (stage) => {
+      if (!isCurrentAttempt()) return;
+      if (stage === "fallback") {
+        stopSendWatchdog();
+        updateState({ provider: "twilio", statusMessage: "جارٍ محاولة إرسال الرمز عبر الخدمة البديلة…", error: null });
+      } else if (stage?.status === "pending") {
+        updateState({ statusMessage: "لا يزال إرسال الرمز قيد الانتظار. يرجى الانتظار…" });
+      }
+    };
+    const watchFirebase = (flow) => {
+      if (flow.provider !== "firebase") return;
+      stopSendWatchdog();
+      sendWatchdog = schedule(() => {
+        sendWatchdog = null;
+        if (isCurrentAttempt()) onStage({ status: "pending" });
+      }, 20_000);
+    };
+    if (preparedFlow) watchFirebase(preparedFlow);
 
     try {
       const nextFlow = preparedFlow
-        ? await sendFlow({ flow: preparedFlow, api, isCurrentAttempt })
+        ? await sendFlow({ flow: preparedFlow, api, getFirebaseClient, onStage, isCurrentAttempt })
         : await startFlow({
           phone,
           purpose,
           api,
+          getFirebaseClient,
+          onStage,
           isCurrentAttempt,
           onChallenge: (reservation) => {
             reservationObserved = true;
@@ -254,6 +336,7 @@ export function createPhoneOtpController({
           onPrepared: (flow) => {
             if (isCurrentAttempt()) {
               flowRef.current = flow;
+              watchFirebase(flow);
               updateState({ phase: "code", provider: flow.provider, smsSent: false });
             }
           },
@@ -271,6 +354,7 @@ export function createPhoneOtpController({
         smsSent: true,
         loading: false,
         error: null,
+        statusMessage: "",
       });
       return { started: true, provider: nextFlow.provider };
     } catch (error) {
@@ -288,10 +372,12 @@ export function createPhoneOtpController({
         smsSent: false,
         loading: false,
         error: publicError,
+        statusMessage: "",
       });
       throw error;
     } finally {
       if (activeOperation === operation) {
+        stopSendWatchdog();
         activeOperation = null;
         inFlightRef.current = false;
         updateState({ loading: false });
@@ -323,7 +409,7 @@ export function createPhoneOtpController({
     updateState({ loading: true, error: null });
 
     try {
-      const result = await completeFlow({ flow: activeFlow, code, api, isCurrentAttempt: () => !disposed && operationVersion === version });
+      const result = await completeFlow({ flow: activeFlow, code, api, getFirebaseClient, isCurrentAttempt: () => !disposed && operationVersion === version });
       if (disposed || operationVersion !== version) {
         throw createFlowCancelledError();
       }
@@ -358,7 +444,8 @@ export function createPhoneOtpController({
 
   function reset() {
     version += 1;
-    flowRef.current = null;
+    discardFlow();
+    stopSendWatchdog();
     stopCooldown();
     updateState({ ...INITIAL_STATE, loading: inFlightRef.current, error: sourceRestriction?.error || null });
     refreshCooldown();
@@ -370,7 +457,12 @@ export function createPhoneOtpController({
     version += 1;
     activeOperation = null;
     inFlightRef.current = false;
-    flowRef.current = null;
+    discardFlow();
+    stopSendWatchdog();
+    if (browserClient) {
+      try { Promise.resolve(browserClient.dispose()).catch(() => {}); } catch { /* Cleanup cannot keep the application flow active. */ }
+      browserClient = null;
+    }
     currentPhone = null;
     stopCooldown();
     listeners.clear();
@@ -395,9 +487,11 @@ export function createPhoneOtpController({
 }
 
 export function usePhoneOtp({ purpose }) {
+  const instanceId = useId();
+  const recaptchaContainerId = `otp-${purpose}-${instanceId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const controller = useMemo(
-    () => createPhoneOtpController({ purpose }),
-    [purpose],
+    () => createPhoneOtpController({ purpose, containerId: recaptchaContainerId }),
+    [purpose, recaptchaContainerId],
   );
   const state = useSyncExternalStore(
     controller.subscribe,
@@ -417,6 +511,7 @@ export function usePhoneOtp({ purpose }) {
 
   return {
     ...state,
+    recaptchaContainerId,
     start: controller.start,
     verify: controller.verify,
     resend: controller.resend,

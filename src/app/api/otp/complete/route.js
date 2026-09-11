@@ -10,6 +10,7 @@ const SAFE_ERRORS = {
   OTP_PURPOSE_MISMATCH: [400, "OTP purpose mismatch."],
   OTP_RECOVERY_INVALID: [400, "Invalid verification recovery receipt."],
   OTP_EVIDENCE_REQUIRED: [400, "OTP evidence is required."],
+  OTP_PROVIDER_REJECTED: [400, "OTP provider does not own this challenge."],
   OTP_VERIFICATION_REQUIRED: [401, "OTP verification is required."],
   OTP_VERIFICATION_INVALID: [401, "OTP verification is invalid."],
   OTP_VERIFICATION_EXPIRED: [401, "OTP verification has expired."],
@@ -69,6 +70,7 @@ function selectPayload(body) {
     typeof body.challengeToken !== "string" || !/^[\w-]{43}$/.test(body.challengeToken) ||
     (body.purpose !== "booking" && body.purpose !== "login") ||
     (body.recoveryReceipt !== undefined && !boundedString(body.recoveryReceipt, 2048)) ||
+    (body.idToken !== undefined && !boundedString(body.idToken, 16384)) ||
     (body.code !== undefined && body.code !== "" &&
       (typeof body.code !== "string" || !/^\d{4,10}$/.test(body.code)))) {
     return null;
@@ -77,6 +79,7 @@ function selectPayload(body) {
     challengeToken: body.challengeToken,
     purpose: body.purpose,
     code: body.code,
+    ...(body.idToken === undefined ? {} : { idToken: body.idToken }),
     ...(body.recoveryReceipt === undefined ? {} : { recoveryReceipt: body.recoveryReceipt }),
   };
 }

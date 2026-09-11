@@ -47,7 +47,7 @@ describe("immutable Twilio challenge storage", () => {
     expect(created).toEqual({
       _id: expect.any(ObjectId), phone: input.phone, purpose: input.purpose,
       challengeTokenHash: input.challengeTokenHash, sourceHash: input.sourceHash,
-      provider: "twilio", status: "prepared", correlationId: input.correlationId,
+      provider: "twilio", providerPolicy: "twilio_only", status: "prepared", correlationId: input.correlationId,
       retryAt: input.retryAt, createdAt: input.now, updatedAt: input.now,
       expiresAt: input.expiresAt, purgeAt: new Date(+input.now + 7_200_000),
     });

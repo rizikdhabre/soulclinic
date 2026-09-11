@@ -36,6 +36,7 @@ describe("Twilio challenge preparation", () => {
     const result = await service.create({ phone: "052-123-4567", purpose });
     expect(result).toEqual({
       challengeToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/), provider: "twilio",
+      phone: PHONE, purpose, providerPolicy: "twilio_only",
       expiresAt: new Date("2026-08-23T12:10:00.000Z"), correlationId: expect.stringMatching(UUID),
       retryAt: "2026-08-23T12:01:00.000Z", serverTime: "2026-08-23T12:00:00.000Z", retryAfterSeconds: 60,
     });

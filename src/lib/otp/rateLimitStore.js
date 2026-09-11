@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import {
   OTP_GLOBAL_SEND_DAY_WINDOW_MS,
   OTP_GLOBAL_SEND_HOUR_WINDOW_MS,
@@ -387,6 +388,9 @@ function evaluateClearVerifyFailures(current, now) {
 
 async function mutateWithCas(collection, key, now, evaluate) {
   for (let attempt = 0; attempt < OTP_STATE_CAS_MAX_ATTEMPTS; attempt += 1) {
+    // Competing requests otherwise retry in lockstep on the shared source row.
+    // Jitter changes only contention timing, never budgets or the eight-attempt cap.
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, randomInt(8, Math.min(160, 16 * 2 ** attempt))));
     const current = await collection.findOne(key, DURABLE_READ_OPTIONS);
     const decision = evaluate(current, now);
     if (decision.skip) return decision.publicResult;

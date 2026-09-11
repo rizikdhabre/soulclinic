@@ -13,7 +13,11 @@ export async function createOtpChallenge(input, deps = {}) {
   const now = () => new Date(deps.clock?.now() ?? Date.now());
   const correlationId = randomUUID();
   let phoneRetryAt;
+  let provider = "twilio";
   try {
+    const providerPolicy = env.OTP_PROVIDER_MODE ?? "twilio_only";
+    if (!["twilio_only", "firebase_first"].includes(providerPolicy)) throw new OtpError("OTP_SERVICE_NOT_CONFIGURED", 503, "Invalid OTP provider mode.");
+    provider = providerPolicy === "firebase_first" ? "firebase" : "twilio";
     otpSecretKey("receipt", env);
     const sourceHash = await (deps.deriveSourceHash ?? deriveOtpSourceHash)(input?.request, { env });
     const rateStore = await otpPersistence(() => getOtpRateStore(deps));
@@ -28,14 +32,14 @@ export async function createOtpChallenge(input, deps = {}) {
     const createdAt = now();
     const expiresAt = new Date(+createdAt + OTP_CHALLENGE_TTL_MS);
     const store = deps.challengeStore ?? await otpPersistence(() => getOtpChallengeStore());
-    await otpPersistence(() => store.create({ phone, purpose, sourceHash, challengeTokenHash, now: createdAt, expiresAt, correlationId, retryAt: new Date(phoneRetryAt) }));
+    await otpPersistence(() => store.create({ phone, purpose, sourceHash, challengeTokenHash, now: createdAt, expiresAt, correlationId, retryAt: new Date(phoneRetryAt), providerPolicy }));
     const serverTime = now();
-    logOtpEvent({ correlationId, stage: "challenge", provider: "twilio", decision: "success" });
-    return { challengeToken, provider: "twilio", expiresAt, correlationId, retryAt: phoneRetryAt,
+    logOtpEvent({ correlationId, stage: "challenge_admission", provider, purpose, decision: "success" });
+    return { challengeToken, provider, providerPolicy, phone, purpose, expiresAt, correlationId, retryAt: phoneRetryAt,
       serverTime: serverTime.toISOString(), retryAfterSeconds: otpRetryMetadata(phoneRetryAt, serverTime).retryAfterSeconds ?? 0 };
   } catch (error) {
     const failure = attachOtpAttemptMetadata(error instanceof OtpError ? error : new OtpError("OTP_CHALLENGE_FAILED", 503, "Could not prepare verification."), { correlationId, phoneRetryAt, now: now() });
-    logOtpEvent({ ...failure, stage: "challenge", provider: "twilio", errorCode: failure.code, decision: failure.status === 429 ? "blocked" : "failed" });
+    logOtpEvent({ ...failure, stage: "challenge_admission", provider, errorCode: failure.code, decision: failure.status === 429 ? "blocked" : "failed" });
     throw failure;
   }
 }

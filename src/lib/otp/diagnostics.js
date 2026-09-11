@@ -1,7 +1,8 @@
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ISO_UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-const STAGES = new Set(["challenge", "send", "verify", "complete", "configuration"]);
+const STAGES = new Set(["challenge", "send", "verify", "complete", "configuration", "challenge_admission", "firebase_init", "firebase_sdk_load", "firebase_auth_init", "recaptcha_init", "recaptcha_render", "recaptcha_token", "firebase_recaptcha_init", "firebase_recaptcha_token", "firebase_send_started", "firebase_send_accepted", "firebase_send_rejected", "firebase_send_unknown", "fallback_decision", "twilio_fallback_reserved", "twilio_send_accepted", "twilio_send_rejected", "twilio_send_unknown", "firebase_code_confirm", "firebase_id_token_ready", "firebase_server_evidence_checked", "twilio_code_check", "provider_approved", "application_session_issued", "booking_grant_issued", "completion_response"]);
 const DECISIONS = new Set(["started", "reserved", "success", "failed", "blocked", "reject", "recovered"]);
+const REASONS = new Set(["invalid_report", "operation_pending", "sdk_send_rejected_ambiguous", "recaptcha_technical_failure", "not_eligible"]);
 const ERROR_CODES = new Set([
   "INVALID_PHONE", "INVALID_OTP_PURPOSE", "INVALID_OTP", "OTP_RATE_LIMITED",
   "OTP_SOURCE_RATE_LIMITED", "OTP_SEND_SOURCE_RATE_LIMITED", "OTP_SEND_BUDGET_EXCEEDED",
@@ -12,6 +13,12 @@ const ERROR_CODES = new Set([
   "OTP_VERIFY_TEMPORARY_FAILURE", "OTP_COMPLETION_FAILED", "OTP_COMPLETION_IN_PROGRESS",
   "OTP_FLOW_CANCELLED", "OTP_RECOVERY_INVALID", "OTP_PURPOSE_MISMATCH",
   "OTP_VERIFICATION_INVALID", "OTP_VERIFICATION_EXPIRED", "OTP_VERIFICATION_ALREADY_USED",
+  "auth/internal-error", "auth/captcha-check-failed", "auth/invalid-app-credential", "auth/missing-app-credential",
+  "auth/recaptcha-not-enabled", "auth/missing-recaptcha-token", "auth/invalid-recaptcha-token", "auth/invalid-recaptcha-action",
+  "auth/missing-client-type", "auth/missing-recaptcha-version", "auth/invalid-recaptcha-version", "auth/invalid-req-type",
+  "auth/network-request-failed", "auth/unknown", "auth/too-many-requests", "auth/invalid-phone-number", "auth/missing-phone-number",
+  "auth/invalid-verification-code", "auth/code-expired", "auth/session-expired", "auth/unauthorized-domain", "auth/invalid-api-key",
+  "auth/operation-not-allowed", "auth/quota-exceeded", "auth/user-disabled", "OTP_EVIDENCE_REQUIRED",
 ]);
 
 export function isOtpCorrelationId(value) {
@@ -25,9 +32,16 @@ export function isOtpIsoTime(value) {
 // Never project phone numbers, provider payloads, tokens, receipts, or raw errors.
 export function logOtpEvent(input = {}) {
   const event = {};
+  const environment = input.environment ?? (typeof window === "undefined" ? process.env.VERCEL_ENV : undefined);
+  const deploymentSha = input.deploymentSha ?? (typeof window === "undefined" ? process.env.VERCEL_GIT_COMMIT_SHA : undefined);
   if (isOtpCorrelationId(input.correlationId)) event.correlationId = input.correlationId;
   if (STAGES.has(input.stage)) event.stage = input.stage;
-  if (input.provider === "twilio") event.provider = "twilio";
+  if (["twilio", "firebase"].includes(input.provider)) event.provider = input.provider;
+  if (["login", "booking"].includes(input.purpose)) event.purpose = input.purpose;
+  if (["production", "preview", "development", "test"].includes(environment)) event.environment = environment;
+  if (typeof deploymentSha === "string" && /^[0-9a-f]{40}$/.test(deploymentSha)) event.deploymentSha = deploymentSha;
+  if (REASONS.has(input.reason)) event.reason = input.reason;
+  if (Number.isSafeInteger(input.elapsedMs) && input.elapsedMs >= 0 && input.elapsedMs <= 3600000) event.elapsedMs = input.elapsedMs;
   if (ERROR_CODES.has(input.errorCode)) event.errorCode = input.errorCode;
   if (DECISIONS.has(input.decision)) event.decision = input.decision;
   if (["phone", "source", "global"].includes(input.restrictionScope)) event.restrictionScope = input.restrictionScope;

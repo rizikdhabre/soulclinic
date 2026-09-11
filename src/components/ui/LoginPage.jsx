@@ -18,6 +18,8 @@ function getLoginErrorMessage(error) {
       return "تم تجاوز عدد طلبات التحقق من هذه الشبكة مؤقتًا. يرجى الانتظار ثم المحاولة مجددًا.";
     case "OTP_SEND_BUDGET_EXCEEDED":
       return "تم بلوغ الحد اليومي للرسائل. يرجى المحاولة بعد انتهاء مدة الانتظار.";
+    case "OTP_PROVIDER_RATE_LIMITED":
+      return "خدمة الرسائل تقيّد الطلبات مؤقتًا. يرجى الانتظار ثم المحاولة مجددًا.";
     case "OTP_VERIFY_RATE_LIMITED":
       return "تم إدخال رمز خاطئ عدة مرات. انتظر قبل المحاولة مرة أخرى.";
     case "OTP_SEND_PENDING":
@@ -139,6 +141,7 @@ export default function LoginPage() {
 
   return (
     <div dir="rtl" className="w-full">
+      <div id={otpFlow.recaptchaContainerId} />
       <div className="text-center mb-8">
         <h2 className="heading-section text-foreground mb-2">
           استخراج مواعيدك
@@ -149,6 +152,11 @@ export default function LoginPage() {
       </div>
 
       <div className="glass-card p-7 space-y-6">
+        {otpFlow.statusMessage && (
+          <p role="status" aria-live="polite" className="text-sm text-foreground/70">
+            {otpFlow.statusMessage}
+          </p>
+        )}
         {step === "phone" && (
           <>
             <div>
