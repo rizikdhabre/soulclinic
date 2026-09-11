@@ -314,6 +314,28 @@ The tests are tracked despite the unchanged ignore rules. Push/redeployment is s
 `codex/firebase-first-otp-v2` only. A new immutable Preview hostname must be checked against
 Authorized Domains before a real-provider retry; the old immutable URL keeps its old code.
 
+## Temporary Preview Cooldown Exception (2026-09-12)
+
+At the user's request, `rateLimitStore.js` skips phone request cooldown/hourly admission
+and shared-source challenge/send throttling only when both server deployment values match:
+`VERCEL_ENV=preview` and `VERCEL_GIT_COMMIT_REF=codex/firebase-first-otp-v2`.
+It returns a zero-delay server deadline, so both OTP forms permit immediate explicit resend.
+This applies to requests on that Preview, not just one phone number. Existing phone/source
+security records are neither reset nor changed by the exception. Other branches, local
+development, missing deployment metadata and Production retain their original limits.
+
+Wrong-code limits, provider security/throttling, finite global Twilio SMS budgets, source
+binding, challenge validity, one-dispatch concurrency controls, sessions and booking grants
+are unchanged. No bypass verifies an OTP or approves an appointment. The separate Firebase
+Admin completion `503` remains unresolved; this exception is not a fix for that error.
+Remove this temporary exception after manual testing and before proposing a main merge.
+
+Verification: the pre-edit focused baseline passed 161/161 tests. The new regression suite
+failed 3 cases before the change (phone/source exemption and both forms' zero cooldown),
+then the focused suite passed 170/170 across 6 files. Focused ESLint and the production
+build passed (16.5-second compilation, TypeScript phase and all 56 pages). Automated
+checks used isolated in-memory stores and mocked providers, with no real SMS/appointments.
+
 ## References
 
 - [Firebase modular web phone authentication](https://firebase.google.com/docs/auth/web/phone-auth)

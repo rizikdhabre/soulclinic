@@ -427,6 +427,10 @@ export function createOtpRateLimitStore({
 }) {
   const policies = sourcePolicies(env);
   const globalLimits = configuredLimits(env, OTP_GLOBAL_SEND_LIMIT_CONFIG);
+  // Temporary manual-test exception, never active in Production or other branches.
+  // Keep verification limits, paid SMS budgets and stored security state intact.
+  const requestCooldownsDisabled = env?.VERCEL_ENV === "preview" &&
+    env?.VERCEL_GIT_COMMIT_REF === "codex/firebase-first-otp-v2";
   let indexesReady;
 
   function ensureIndexes() {
@@ -465,6 +469,10 @@ export function createOtpRateLimitStore({
     ensureIndexes,
 
     claimPhoneStart(phone) {
+      if (requestCooldownsDisabled) {
+        const now = new Date(clock.now()).toISOString();
+        return Promise.resolve({ retryAt: now, serverTime: now, retryAfterSeconds: 0, restrictionScope: "phone" });
+      }
       return withIndexes((now) =>
         mutateWithCas(phoneCollection, { phone }, now, (current) =>
           evaluatePhoneStart(current, now, phone),
@@ -475,6 +483,7 @@ export function createOtpRateLimitStore({
     claimSourceAction(sourceHash, action) {
       if (!Object.hasOwn(policies, action)) throw new TypeError("Unknown OTP source action.");
       if (sourceHash === GLOBAL_SEND_SOURCE_HASH) throw new TypeError("Reserved OTP source key.");
+      if (requestCooldownsDisabled) return Promise.resolve();
       const policy = policies[action];
 
       return withIndexes((now) =>
