@@ -226,9 +226,28 @@ not evidence of carrier delivery. Avoid treating sent-versus-verified totals as 
 
 ## Preview Procedure and Approvals
 
-At the implementation commit, Preview creation is pending the isolated-branch push. The
-first attempt to add its branch-scoped mode was rejected because the branch did not yet
-exist on GitHub; no setting was applied. Deployment evidence will be appended after push.
+Implementation commit `627099936edd7f31f7cc9c3785ef97fa8e0dd449` was pushed only to
+`origin/codex/firebase-first-otp-v2`. Vercel independently showed **Ready / Preview** for
+deployment `D6WYLYeCsJxxHbqGLKqZzTKNKGvM`, a 53-second build, source commit `6270999`.
+
+- Branch Preview: https://soulclinic-git-codex-firebase-fir-4de5c3-rizik-dhabres-projects.vercel.app/
+- Initial immutable Preview: https://soulclinic-k6dkbul68-rizik-dhabres-projects.vercel.app/
+- `OTP_PROVIDER_MODE=firebase_first` was then saved successfully for **Preview /
+  codex/firebase-first-otp-v2 only**. Production and other environments were not selected.
+  This reporting commit triggers a fresh branch Preview after that setting was saved.
+- Read-only Firebase Authorized Domains reinspection confirms neither new hostname is
+  authorized. **Stop before adding a hostname or requesting real SMS.** Authorize the
+  stable branch hostname above, with user approval, before the actual login smoke test.
+- The first Preview served the existing logo and hero images successfully. Full Next login
+  and appointment pages rendered at 1440x1000 and 390x844 with one stable OTP container per
+  form and no horizontal overflow (document widths 1425 and 375). Login had no reCAPTCHA
+  frame before a send, consistent with lazy initialization. No phone was entered, no OTP
+  request was made, and no appointment was submitted. Native GCS uploads remain covered
+  by mocked tests; no cloud upload/delete was performed.
+- Remote `main` was independently verified unchanged at
+  `214cfec9cc68ce76f006c0c48dc69b8880a9c1b9`. The Vercel production card still referenced
+  that same baseline. Actual Firebase SMS delivery/Admin credentials and controlled real
+  Twilio fallback remain unverified until the approved smoke test.
 
 1. Push only `codex/firebase-first-otp-v2`, never main. Create/observe its Vercel Preview.
 2. Scope `OTP_PROVIDER_MODE=firebase_first` to that branch only and build a fresh Preview.

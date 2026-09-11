@@ -55,7 +55,7 @@
 - [x] Run focused OTP, complete suite, ephemeral Mongo, browser tests, build, available type checks, focused lint, and dependency audit. Verify storage suites and Twilio-only rollback mode.
 - [x] Full diff/security review; verify ignored tests are force-added, unchanged ignore/environment hashes, no secrets in tracked source or browser bundles.
 - [x] Write `FIREBASE_FIRST_OTP_IMPLEMENTATION.md` with exact decisions, evidence, results, limits and outstanding approvals.
-- [ ] Commit only the isolated branch, create branch Preview, inspect exact hostname and Firebase Authorized Domains read-only. Stop before modifying domains or sending real SMS; report exact deployment readiness without assuming it.
+- [x] Commit only the isolated branch, create branch Preview, inspect exact hostname and Firebase Authorized Domains read-only. Stop before modifying domains or sending real SMS; report exact deployment readiness without assuming it.
 
 ## Execution Record
 
