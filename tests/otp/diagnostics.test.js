@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { isOtpCorrelationId, isOtpIsoTime, logOtpEvent } from "@/lib/otp/diagnostics";
+import { isOtpCorrelationId, isOtpIsoTime, logOtpEvent, logFirebaseAdminEvent } from "@/lib/otp/diagnostics";
 import { sealOtpReceipt } from "@/lib/otp/recovery";
 
 const correlationId = "061a1297-e394-40a2-9e22-fc63b2c186a1";
@@ -8,6 +8,23 @@ describe("privacy-safe OTP diagnostics", () => {
   let info;
   beforeEach(() => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
+  });
+
+  it.each([
+    [Object.assign(new Error("private-phone-token-key"), { code: "private-phone-token-key" }), "admin/unclassified"],
+    [new TypeError("private-phone-token-key"), "admin/type-error"],
+    [Object.assign(new Error("private-phone-token-key"), { code: "app/invalid-credential" }), "app/invalid-credential"],
+  ])("bounds Admin diagnostics without propagating raw errors (%#)", (error, errorCode) => {
+    logFirebaseAdminEvent({ correlationId, stage: "firebase_admin_verify", decision: "failed", error });
+    expect(info).toHaveBeenCalledExactlyOnceWith("OTP flow", { correlationId, stage: "firebase_admin_verify", decision: "failed", provider: "firebase", errorCode });
+    expect(JSON.stringify(info.mock.calls)).not.toContain("private-phone-token-key");
+  });
+
+  it("does not create uncorrelated Admin events or let a failed sink change verification", () => {
+    logFirebaseAdminEvent({ correlationId: "private-phone", stage: "firebase_admin_verify", decision: "failed", error: new Error("private") });
+    expect(info).not.toHaveBeenCalled();
+    info.mockImplementation(() => { throw new Error("offline logging"); });
+    expect(() => logFirebaseAdminEvent({ correlationId, stage: "firebase_admin_init", decision: "failed", error: new Error("private") })).not.toThrow();
   });
 
   it("logs bounded fallback reasons, deployment metadata and elapsed time without payloads", () => {

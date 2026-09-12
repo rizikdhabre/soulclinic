@@ -61,7 +61,8 @@ export async function requestFirebaseSend(input, deps = {}) {
     const updated = await otpPersistence(() => store.transition({ challengeTokenHash, provider: "firebase", from: "firebase_sending", now: now(),
       match: { firebaseSendId: input.firebaseSendId, expiresAt: { $gt: now() } }, patch }));
     if (!updated) throw fail();
-    logOtpEvent({ correlationId: challenge.correlationId, stage: input.operation === "accepted" ? "firebase_send_accepted" : "firebase_send_rejected", provider: "firebase", decision: input.operation === "accepted" ? "success" : "failed" });
+    logOtpEvent({ correlationId: challenge.correlationId, stage: input.operation === "accepted" ? "firebase_send_accepted" : "firebase_send_rejected", provider: "firebase", decision: input.operation === "accepted" ? "success" : "failed",
+      ...(input.operation === "rejected" ? { errorCode: input.failure?.code, reason: "client_reported" } : {}) });
     return snapshot(updated);
   } catch (error) {
     const safe = attachOtpAttemptMetadata(error instanceof OtpError ? error : fail("OTP_SEND_FAILED", 503), { correlationId: challenge?.correlationId, phoneRetryAt: challenge?.retryAt, now: new Date(deps.clock?.now() ?? Date.now()) });

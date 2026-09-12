@@ -211,6 +211,17 @@ describe("Firebase authentication freshness", () => {
 });
 
 describe("Firebase verification failure classification", () => {
+  it("logs the bounded Admin cause at the failed verification boundary and remains fail closed", async () => {
+    const correlationId = "061a1297-e394-40a2-9e22-fc63b2c186a1";
+    verifyIdToken.mockRejectedValue(Object.assign(new Error("Error fetching public keys for Google certs: private-provider-payload"), { code: "auth/argument-error" }));
+    await expectError((await load()).verifyFirebaseEvidence(TOKEN, { ...challenge(), correlationId }, { env: ENV, now: NOW, verifyIdToken }), "OTP_VERIFY_TEMPORARY_FAILURE", 503);
+    expect(console.info).toHaveBeenCalledWith("OTP flow", expect.objectContaining({
+      correlationId, stage: "firebase_admin_verify", provider: "firebase", decision: "failed",
+      errorCode: "auth/argument-error", reason: "certificate_fetch_failure",
+    }));
+    expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-provider-payload|test-only-opaque-id-token|\+972500000001/);
+  });
+
   it.each(["auth/invalid-id-token", "auth/id-token-revoked", "auth/user-disabled", "auth/user-not-found", "auth/tenant-id-mismatch"])(
     "classifies %s as invalid evidence, not an infrastructure failure", async (code) => {
       verifyIdToken.mockRejectedValue(Object.assign(new Error("test-only-private-provider-body"), { code }));

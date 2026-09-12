@@ -3,6 +3,7 @@ import { normalizeIsraeliPhone } from "@/lib/phone";
 import { OTP_CHALLENGE_TTL_MS } from "./constants";
 import { OtpError } from "./errors";
 import { getFirebaseAdminAuth, getFirebaseProjectId } from "./firebaseAdminAuth";
+import { logFirebaseAdminEvent } from "./diagnostics";
 
 const MAX_TOKEN_LENGTH = 16_384;
 const MAX_CLOCK_SKEW_SECONDS = 30;
@@ -95,17 +96,21 @@ export async function verifyFirebaseEvidence(idToken, challenge, { env = process
   if (+challenge.expiresAt <= nowMs) throw expiredEvidence();
 
   let decoded;
+  const diagnostic = (decision, error) => logFirebaseAdminEvent({ correlationId: challenge.correlationId, stage: "firebase_admin_verify", decision, error });
   try {
+    diagnostic("started");
     if (verifyIdToken !== undefined) {
       decoded = await verifyIdToken(idToken, true);
     } else {
-      const auth = await getFirebaseAdminAuth({ env });
+      const auth = await getFirebaseAdminAuth({ env, correlationId: challenge.correlationId });
       // Revocation checking includes a user lookup; lookup outages must remain retryable.
       decoded = await auth.verifyIdToken(idToken, true);
     }
   } catch (error) {
+    diagnostic("failed", error);
     throw verificationError(error);
   }
+  diagnostic("success");
 
   if (!decoded || typeof decoded !== "object" || Array.isArray(decoded) ||
       typeof decoded.uid !== "string" || !decoded.uid || decoded.uid.length > 128 || decoded.sub !== decoded.uid ||

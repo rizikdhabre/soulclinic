@@ -1,5 +1,6 @@
 import "server-only";
 import { OtpError } from "./errors";
+import { logFirebaseAdminEvent } from "./diagnostics";
 
 const APP_NAME = "soulclinic-otp-auth";
 let authPromise;
@@ -26,21 +27,34 @@ export function getFirebaseProjectId(env = process.env) {
   return projectId;
 }
 
-async function initializeAuth({ projectId, clientEmail, privateKey }) {
-  const { getApps, initializeApp, cert, applicationDefault } = await import("firebase-admin/app");
-  const { getAuth } = await import("firebase-admin/auth");
-  let app = getApps().find((candidate) => candidate.name === APP_NAME);
-  if (app && app.options.projectId !== projectId) throw configurationError();
-  if (!app) {
-    const credential = clientEmail
-      ? cert({ projectId, clientEmail, privateKey: privateKey.replace(/\\n/g, "\n") })
-      : applicationDefault();
-    app = initializeApp({ projectId, credential }, APP_NAME);
+async function initializeAuth({ projectId, clientEmail, privateKey }, correlationId) {
+  let stage = "firebase_admin_sdk_load";
+  const log = (decision, error) => logFirebaseAdminEvent({ correlationId, stage, decision, error });
+  try {
+    log("started");
+    const { getApps, initializeApp, cert, applicationDefault } = await import("firebase-admin/app");
+    const { getAuth } = await import("firebase-admin/auth");
+    log("success");
+    stage = "firebase_admin_init";
+    log("started");
+    let app = getApps().find((candidate) => candidate.name === APP_NAME);
+    if (app && app.options.projectId !== projectId) throw configurationError();
+    if (!app) {
+      const credential = clientEmail
+        ? cert({ projectId, clientEmail, privateKey: privateKey.replace(/\\n/g, "\n") })
+        : applicationDefault();
+      app = initializeApp({ projectId, credential }, APP_NAME);
+    }
+    const auth = getAuth(app);
+    log("success");
+    return auth;
+  } catch (error) {
+    log("failed", error);
+    throw error;
   }
-  return getAuth(app);
 }
 
-export function getFirebaseAdminAuth({ env = process.env } = {}) {
+export function getFirebaseAdminAuth({ env = process.env, correlationId } = {}) {
   let config;
   try {
     const projectId = getFirebaseProjectId(env);
@@ -51,13 +65,14 @@ export function getFirebaseAdminAuth({ env = process.env } = {}) {
     }
     config = { projectId, clientEmail, privateKey };
   } catch {
+    logFirebaseAdminEvent({ correlationId, stage: "firebase_admin_init", decision: "failed", error: configurationError() });
     return Promise.reject(configurationError());
   }
 
   if (!authPromise) {
     authProjectId = config.projectId;
     // A failed attempt must not poison future requests; a created named app can be reused.
-    authPromise = initializeAuth(config).catch((error) => {
+    authPromise = initializeAuth(config, correlationId).catch((error) => {
       authPromise = undefined;
       authProjectId = undefined;
       if (["OTP_SERVICE_NOT_CONFIGURED", "app/invalid-credential", "app/invalid-app-options",

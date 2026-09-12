@@ -336,6 +336,31 @@ then the focused suite passed 170/170 across 6 files. Focused ESLint and the pro
 build passed (16.5-second compilation, TypeScript phase and all 56 pages). Automated
 checks used isolated in-memory stores and mocked providers, with no real SMS/appointments.
 
+## Completion Failure Investigation (2026-09-12, In Progress)
+
+The c5a949d Preview logged two accepted Firebase sends followed by a booking
+completion 503 (`OTP_VERIFY_TEMPORARY_FAILURE`) for correlation
+`1e815aa0-fb60-4aca-b007-a8cb97f7006b`. No provider-approved or booking-grant event
+was recorded. A later send rejection omitted its reported Firebase error code.
+This evidence identifies the failing boundary, not the underlying Admin cause.
+
+Added correlated, allowlisted Admin SDK-load/init/verify events before error
+sanitization and a bounded client-reported send rejection reason. Public error
+classification, verification, grants, provider selection and limits are unchanged.
+No raw exception, phone, OTP, token, credentials or provider payload is logged.
+Three regressions failed before this change. The focused suite now passes 260/260
+tests across five files; focused lint and the production build pass (42-second
+compilation, TypeScript phase, all 56 pages).
+
+Prior investigation ran 24 desktop/mobile Playwright resend/completion checks with
+mocked provider/API boundaries, all passing, plus a locally built Next server and
+ephemeral MongoDB with the real Admin SDK: malformed tokens and invalid signatures
+both returned 401, with no grants or appointments. These do not prove successful
+verification on Vercel. Its Node runtime is 24.x and Firebase variable names are
+present for all environments. No existing Firebase fictional numbers are configured.
+A new instrumented Preview and authorized manual verification are required to
+identify and fix the actual failure; the full goal is not yet complete.
+
 ## References
 
 - [Firebase modular web phone authentication](https://firebase.google.com/docs/auth/web/phone-auth)

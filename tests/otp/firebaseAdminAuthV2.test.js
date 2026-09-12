@@ -45,6 +45,18 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("Firebase Admin Auth initialization", () => {
+  it("records a correlated initialization failure without exposing the underlying payload", async () => {
+    const correlationId = "061a1297-e394-40a2-9e22-fc63b2c186a1";
+    sdk.getAuth.mockImplementationOnce(() => { throw Object.assign(new Error("private-key-and-request-payload"), { code: "MODULE_NOT_FOUND" }); });
+    const { getFirebaseAdminAuth } = await load();
+    await expect(getFirebaseAdminAuth({ env: ENV, correlationId })).rejects.toMatchObject({ code: "OTP_VERIFY_TEMPORARY_FAILURE" });
+    expect(console.info).toHaveBeenCalledWith("OTP flow", expect.objectContaining({
+      correlationId, stage: "firebase_admin_init", provider: "firebase", decision: "failed", errorCode: "MODULE_NOT_FOUND",
+    }));
+    expect(JSON.stringify(console.info.mock.calls)).not.toContain("private-key-and-request-payload");
+    expect(await getFirebaseAdminAuth({ env: ENV, correlationId })).toBe(sdk.auth);
+  });
+
   it("imports lazily without credentials, SDK initialization, or storage access", async () => {
     const authModule = await load();
     expect(authModule.getFirebaseAdminAuth).toBeTypeOf("function");

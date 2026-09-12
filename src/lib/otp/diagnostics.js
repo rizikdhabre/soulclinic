@@ -2,7 +2,8 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const ISO_UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const STAGES = new Set(["challenge", "send", "verify", "complete", "configuration", "challenge_admission", "firebase_init", "firebase_sdk_load", "firebase_auth_init", "recaptcha_init", "recaptcha_render", "recaptcha_token", "firebase_recaptcha_init", "firebase_recaptcha_token", "firebase_send_started", "firebase_send_accepted", "firebase_send_rejected", "firebase_send_unknown", "fallback_decision", "twilio_fallback_reserved", "twilio_send_accepted", "twilio_send_rejected", "twilio_send_unknown", "firebase_code_confirm", "firebase_id_token_ready", "firebase_server_evidence_checked", "twilio_code_check", "provider_approved", "application_session_issued", "booking_grant_issued", "completion_response"]);
 const DECISIONS = new Set(["started", "reserved", "success", "failed", "blocked", "reject", "recovered"]);
-const REASONS = new Set(["invalid_report", "operation_pending", "sdk_send_rejected_ambiguous", "recaptcha_technical_failure", "not_eligible"]);
+const REASONS = new Set(["invalid_report", "operation_pending", "sdk_send_rejected_ambiguous", "recaptcha_technical_failure", "not_eligible", "client_reported", "certificate_fetch_failure"]);
+for (const stage of ["firebase_admin_sdk_load", "firebase_admin_init", "firebase_admin_verify"]) STAGES.add(stage);
 const ERROR_CODES = new Set([
   "INVALID_PHONE", "INVALID_OTP_PURPOSE", "INVALID_OTP", "OTP_RATE_LIMITED",
   "OTP_SOURCE_RATE_LIMITED", "OTP_SEND_SOURCE_RATE_LIMITED", "OTP_SEND_BUDGET_EXCEEDED",
@@ -19,6 +20,13 @@ const ERROR_CODES = new Set([
   "auth/network-request-failed", "auth/unknown", "auth/too-many-requests", "auth/invalid-phone-number", "auth/missing-phone-number",
   "auth/invalid-verification-code", "auth/code-expired", "auth/session-expired", "auth/unauthorized-domain", "auth/invalid-api-key",
   "auth/operation-not-allowed", "auth/quota-exceeded", "auth/user-disabled", "OTP_EVIDENCE_REQUIRED",
+  "auth/argument-error", "auth/invalid-argument", "auth/invalid-id-token", "auth/id-token-expired", "auth/id-token-revoked",
+  "auth/user-not-found", "auth/tenant-id-mismatch", "auth/invalid-credential", "auth/insufficient-permission",
+  "auth/project-not-found", "auth/invalid-config", "app/invalid-credential", "app/invalid-app-options",
+  "app/network-error", "app/network-timeout", "ERR_MODULE_NOT_FOUND", "MODULE_NOT_FOUND", "ERR_REQUIRE_ESM",
+  "ERR_INVALID_ARG_TYPE", "ERR_OSSL_UNSUPPORTED", "ENOTFOUND", "EAI_AGAIN", "ECONNRESET", "ECONNREFUSED",
+  "ETIMEDOUT", "ECONNABORTED", "EHOSTUNREACH", "ENETUNREACH", "EPIPE", "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_SOCKET", "admin/type-error", "admin/unclassified",
 ]);
 
 export function isOtpCorrelationId(value) {
@@ -27,6 +35,21 @@ export function isOtpCorrelationId(value) {
 export function isOtpIsoTime(value) {
   return typeof value === "string" && ISO_UTC_PATTERN.test(value) &&
     Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+}
+
+// Capture the failing Admin boundary before its public error is sanitized.
+export function logFirebaseAdminEvent({ correlationId, stage, decision, error } = {}) {
+  if (!isOtpCorrelationId(correlationId)) return;
+  const event = { correlationId, stage, decision, provider: "firebase" };
+  if (error) {
+    event.errorCode = ERROR_CODES.has(error.code) ? error.code : error.name === "TypeError" ? "admin/type-error" : "admin/unclassified";
+    const message = typeof error.message === "string" ? error.message.slice(0, 300) : "";
+    if (["auth/argument-error", "auth/invalid-argument"].includes(error.code) &&
+        ["Error fetching public keys", "Error fetching Json Web Keys"].some(prefix => message.startsWith(prefix))) {
+      event.reason = "certificate_fetch_failure";
+    }
+  }
+  logOtpEvent(event);
 }
 
 // Never project phone numbers, provider payloads, tokens, receipts, or raw errors.

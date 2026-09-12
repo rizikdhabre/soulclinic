@@ -45,6 +45,22 @@ async function fixture(purpose = "login", mode = "firebase_first") {
 }
 
 describe("Firebase primary server ownership", () => {
+  it("retains only a bounded client-reported send rejection code in diagnostics", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      const f = await fixture();
+      const { firebaseSendId } = await f.reserve();
+      await requestFirebaseSend({ ...f.input, firebaseSendId, operation: "rejected",
+        failure: { code: "auth/too-many-requests", stage: "send", provenance: "firebase_sdk", message: "private-provider-payload" } }, f.deps);
+      expect(info).toHaveBeenCalledWith("OTP flow", expect.objectContaining({
+        correlationId: f.prepared.correlationId, stage: "firebase_send_rejected", errorCode: "auth/too-many-requests", reason: "client_reported",
+      }));
+      expect((await f.current()).status).toBe("failed");
+      expect(f.deps.sendVerification).not.toHaveBeenCalled();
+      expect(JSON.stringify(info.mock.calls)).not.toContain("private-provider-payload");
+    } finally { info.mockRestore(); }
+  });
+
   it("recovers a lost successful completion response even when the browser retains a consumed retry receipt", async () => {
     const f = await fixture();
     await f.reserve();
