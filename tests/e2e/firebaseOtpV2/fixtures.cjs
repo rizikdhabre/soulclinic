@@ -61,7 +61,7 @@ const test = base.extend({
       if (challenge.provider === 'twilio' && (body.code !== CODE || 'idToken' in body)) return reply({ error: 'INVALID_OTP' }, 400);
       if (config.completionFailures > 0) {
         config.completionFailures -= 1;
-        return reply({ error: 'OTP_PERSISTENCE_FAILED', recoveryReceipt: 'mock-complete-receipt' }, 503);
+        return reply({ error: config.completionError || 'OTP_PERSISTENCE_FAILED', recoveryReceipt: 'mock-complete-receipt' }, 503);
       }
       return reply({
         success: true, purpose: challenge.purpose,

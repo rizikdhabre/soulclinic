@@ -72,6 +72,40 @@ for (const purpose of ['login', 'booking']) {
       const { sdk } = await otp.snapshot(); expect(sdk.confirms).toEqual([CODE]); expect(sdk.tokens).toBe(1); expect(sdk.sends).toHaveLength(1);
     });
 
+    for (const action of ['recover', 'resend']) {
+      test(`second Firebase code server failure then ${action} preserves challenge ownership`, async ({ otp }, testInfo) => {
+        otp.config.cooldown = 0;
+        otp.config.completionFailures = 1;
+        otp.config.completionError = 'OTP_VERIFY_TEMPORARY_FAILURE';
+        await otp.open(purpose); const ui = await otp.start(purpose);
+        await expect(ui.resend).toBeEnabled(); await ui.resend.click(); await expect(ui.back).toBeEnabled();
+        expect((await otp.snapshot()).sdk.sends).toHaveLength(2);
+        await otp.verify(purpose); await expect(ui.verify).toBeEnabled();
+        await expect(ui.scope.getByText(/حدث عطل مؤقت في التحقق/)).toBeVisible();
+        await otp.screenshot(`${purpose}-second-code-temporary-error-${action}`, testInfo);
+        expect((await otp.snapshot()).submissions).toEqual([]);
+        expect((await otp.snapshot()).navigation).toEqual([]);
+        const firstCompletion = otp.count('/api/otp/complete')[0].body;
+        expect(firstCompletion.challengeToken).toBe('mock-challenge-2');
+        if (action === 'resend') {
+          await expect(ui.resend).toBeEnabled(); await ui.resend.click(); await expect(ui.back).toBeEnabled();
+        }
+        await otp.verify(purpose); await otp.success(purpose);
+        const lastCompletion = otp.count('/api/otp/complete')[1].body;
+        const { sdk } = await otp.snapshot();
+        expect(otp.count('/api/otp/fallback')).toHaveLength(0);
+        expect(otp.count('/api/otp/send')).toHaveLength(0);
+        expect(sdk.sends).toHaveLength(action === 'recover' ? 2 : 3);
+        expect(sdk.confirms).toHaveLength(action === 'recover' ? 1 : 2);
+        expect(sdk.tokens).toBe(action === 'recover' ? 1 : 2);
+        if (action === 'recover') expect(lastCompletion).toEqual({ ...firstCompletion, recoveryReceipt: 'mock-complete-receipt' });
+        else {
+          expect(lastCompletion.challengeToken).toBe('mock-challenge-3');
+          expect(lastCompletion).not.toHaveProperty('recoveryReceipt');
+        }
+      });
+    }
+
     test('token fetch recovery keeps credential and never sends fallback', async ({ otp }) => {
       await otp.open(purpose, { tokenFailures: 1 }); const ui = await otp.start(purpose);
       await otp.verify(purpose); await expect(ui.verify).toBeEnabled();

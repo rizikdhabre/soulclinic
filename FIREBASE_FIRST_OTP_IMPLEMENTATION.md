@@ -358,8 +358,36 @@ ephemeral MongoDB with the real Admin SDK: malformed tokens and invalid signatur
 both returned 401, with no grants or appointments. These do not prove successful
 verification on Vercel. Its Node runtime is 24.x and Firebase variable names are
 present for all environments. No existing Firebase fictional numbers are configured.
-A new instrumented Preview and authorized manual verification are required to
-identify and fix the actual failure; the full goal is not yet complete.
+The instrumented commit `a6dcebfed31dc151e0360cbf6aae5657ced5877c` was pushed only
+to the feature branch. Vercel independently reported its Preview Ready:
+`https://soulclinic-mmke8nco6-rizik-dhabres-projects.vercel.app/`.
+The exact new hostname is not in the last inspected Firebase Authorized Domains;
+approval has been requested before adding it and running one real verification.
+No Firebase configuration has been changed during this investigation.
+
+Additional verification during the investigation:
+
+- Full unit/integration suite: 1387/1387, 36 files, 26.34 seconds, exit 0.
+- Eight new Playwright cases reproduced the exact temporary-server-error UI after
+  the second send, then exercised cached-proof recovery or an explicit third send.
+  All 8 passed on desktop/mobile for login/booking (18.0 seconds). Recovery made
+  no extra SMS request or code confirmation; explicit resend used challenge 3
+  and discarded the old recovery receipt. Mocked completion then succeeded.
+- Full Playwright suite including these cases: 106/106, exit 0. Providers and API
+  boundaries were mocked; booking submissions remained in memory, not MongoDB.
+  Desktop/mobile error screenshots were visually inspected for wrapping/overflow.
+- Focused lint for both modified browser-test files: exit 0.
+- A read-only local Admin probe used existing local server credentials and looked
+  up only the previously authorized test phone. Initialization and the lookup
+  succeeded, the phone matched and the account was not disabled. It sent no SMS
+  and emitted no secrets or customer fields. This does not establish that Vercel
+  has the same credential values or can verify a valid token end to end.
+- Main remains `214cfec9cc68ce76f006c0c48dc69b8880a9c1b9`; original and feature
+  `.gitignore` hashes and the original `.env.local` hash are unchanged.
+
+Authorized manual verification on the diagnostic Preview is still required to
+identify and fix the actual failure. Passing mocks are not evidence that the live
+Firebase completion 503 is fixed; the full goal is not yet complete.
 
 ## References
 
