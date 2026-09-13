@@ -45,6 +45,72 @@ async function fixture(purpose = "login", mode = "firebase_first") {
 }
 
 describe("Firebase primary server ownership", () => {
+  it.each([
+    ["client/unclassified", "initialize", "client", "unclassified"],
+    ["auth/too-many-requests", "send", "firebase_sdk", "provider_throttle"],
+    ["auth/captcha-check-failed", "send", "firebase_sdk", "app_verification"],
+    ["auth/unauthorized-domain", "send", "firebase_sdk", "configuration"],
+  ])("retains %s with stage and blocked-fallback reason in the challenge and server logs", async (code, stage, provenance, category) => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const f = await fixture("booking");
+    const { firebaseSendId } = await f.reserve();
+    await requestFirebaseSend({ ...f.input, firebaseSendId, operation: "rejected", failure: { code, stage, provenance },
+      diagnostic: { boundary: "firebase_sdk_load", errorType: "TypeError", message: "private-raw-error" } }, f.deps);
+    const expected = { errorCode: code, failureStage: stage, failureProvenance: provenance, failureCategory: category,
+      fallbackDecision: "blocked", fallbackReason: "not_eligible", errorType: "TypeError" };
+    expect(await f.current()).toMatchObject({ status: "failed", firebaseSendFailure: expected });
+    expect(info).toHaveBeenCalledWith("OTP flow", expect.objectContaining({ ...expected, correlationId: f.prepared.correlationId, purpose: "booking", reason: "client_reported" }));
+    expect(JSON.stringify((await f.current()).firebaseSendFailure)).not.toContain("private");
+    expect(f.deps.sendVerification).not.toHaveBeenCalled();
+  });
+
+  it("logs rejection evidence even when saving the failed state is unavailable", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const f = await fixture();
+    const { firebaseSendId } = await f.reserve();
+    f.deps.challengeStore.transition = async () => { throw new Error("private database failure"); };
+    await expect(requestFirebaseSend({ ...f.input, firebaseSendId, operation: "rejected", failure: { code: "client/unclassified", stage: "recaptcha_token", provenance: "firebase_sdk" } }, f.deps)).rejects.toHaveProperty("code", "OTP_PERSISTENCE_FAILED");
+    expect(info).toHaveBeenCalledWith("OTP flow", expect.objectContaining({ stage: "firebase_send_rejected", errorCode: "client/unclassified", failureStage: "recaptcha_token" }));
+    expect(f.deps.sendVerification).not.toHaveBeenCalled();
+  });
+
+  it("records confirmation diagnostics with bounded deduplication without touching verification state or budgets", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const f = await fixture();
+    const { firebaseSendId } = await f.reserve();
+    await f.accepted(firebaseSendId);
+    const input = { ...f.input, firebaseSendId, operation: "diagnostic", failure: { code: "auth/invalid-verification-code", stage: "confirm", provenance: "firebase_sdk" } };
+    await Promise.all(Array.from({ length: 10 }, () => requestFirebaseSend(input, f.deps)));
+    const saved = await f.current();
+    expect(saved).toMatchObject({ provider: "firebase", status: "firebase_sent" });
+    expect(saved.firebaseClientFailures).toHaveLength(1);
+    expect(saved.firebaseClientFailures[0]).toMatchObject({ errorCode: "auth/invalid-verification-code", failureStage: "confirm", failureCategory: "invalid_code", fallbackDecision: "blocked" });
+    expect(info.mock.calls.filter(([, event]) => event.stage === "firebase_client_failure")).toHaveLength(1);
+    expect(f.deps.rateStore.reservePhoneVerifyAttempt).not.toHaveBeenCalled();
+    expect(f.deps.verifyFirebaseEvidence).not.toHaveBeenCalled();
+    expect(f.deps.sendVerification).not.toHaveBeenCalled();
+  });
+
+  it("caps client diagnostic records at six per challenge", async () => {
+    const f = await fixture();
+    const { firebaseSendId } = await f.reserve();
+    for (const code of ["auth/invalid-verification-code", "auth/code-expired", "auth/too-many-requests", "auth/network-request-failed", "auth/internal-error", "client/unclassified", "auth/unknown"]) {
+      await requestFirebaseSend({ ...f.input, firebaseSendId, operation: "diagnostic", failure: { code, stage: "confirm", provenance: "firebase_sdk" } }, f.deps);
+    }
+    expect((await f.current()).firebaseClientFailures).toHaveLength(6);
+    expect((await f.current()).status).toBe("firebase_sending");
+  });
+
+  it("diagnostic reports require source, challenge, reservation and active Firebase ownership", async () => {
+    const f = await fixture();
+    const { firebaseSendId } = await f.reserve();
+    const input = { ...f.input, firebaseSendId, operation: "diagnostic", failure: { code: "client/unclassified", stage: "initialize", provenance: "client" } };
+    await expect(requestFirebaseSend({ ...input, firebaseSendId: "forged" }, f.deps)).rejects.toHaveProperty("code");
+    await expect(requestFirebaseSend(input, { ...f.deps, deriveSourceHash: () => "forged" })).rejects.toHaveProperty("code");
+    await f.fallback(firebaseSendId);
+    await expect(requestFirebaseSend(input, f.deps)).rejects.toHaveProperty("code");
+    expect((await f.current()).firebaseClientFailures).toBeUndefined();
+  });
   it("retains only a bounded client-reported send rejection code in diagnostics", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     try {

@@ -102,6 +102,27 @@ beforeEach(async () => {
 describe("privacy-safe Firebase diagnostic events", () => {
   const events = () => diagnosticLog.mock.calls.filter(([label]) => label === "OTP flow").map(([, event]) => event);
 
+  it.each([
+    ["load", "initialize", "client", "firebase_sdk_load"],
+    ["auth", "initialize", "firebase_sdk", "firebase_auth_init"],
+    ["render", "recaptcha_render", "firebase_sdk", "recaptcha_render"],
+    ["verify", "recaptcha_token", "firebase_sdk", "recaptcha_token"],
+    ["send", "send", "firebase_sdk", "firebase_send"],
+  ])("preserves the original TypeError boundary at %s without a raw message", async (where, stage, provenance, boundary) => {
+    const original = new TypeError("private phone token URL");
+    if (where === "load") fixture.loadSdk.mockRejectedValue(original);
+    else if (where === "auth") fixture.sdk.initializeAuth.mockImplementation(() => { throw original; });
+    else if (where === "send") fixture.sdk.signInWithPhoneNumber.mockRejectedValue(original);
+    else fixture.hooks[where].mockRejectedValue(original);
+    const error = await client().send(PHONE, { correlationId: CORRELATION }).catch(value => value);
+    expect(error.firebaseFailure).toEqual({ code: "client/unclassified", stage, provenance });
+    expect(error.firebaseDiagnostic).toEqual({ boundary, errorType: "TypeError" });
+    expect(events()).toContainEqual(expect.objectContaining({ decision: "failed", errorCode: "client/unclassified", failureStage: stage, failureProvenance: provenance,
+      failureBoundary: boundary, errorType: "TypeError", fallbackDecision: "blocked" }));
+    expect(classifyFirebaseSendFailure(error.firebaseFailure).eligible).toBe(false);
+    expect(JSON.stringify(error)).not.toMatch(/private|972521234567/);
+  });
+
   it("logs SDK, Auth, verifier, send and proof milestones with the retained correlation ID", async () => {
     const value = client();
     const confirmation = await value.send(PHONE, { correlationId: CORRELATION });

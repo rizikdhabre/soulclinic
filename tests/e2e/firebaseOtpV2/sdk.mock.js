@@ -18,6 +18,7 @@ export class RecaptchaVerifier {
     state().sdk.construct += 1;
   }
   async render() {
+    if (state().scenario.renderTypeError) throw new TypeError('private synthetic provider data');
     if (this.rendered) return 1;
     // Clearing an invisible Firebase verifier does not unregister Google's host element.
     if (renderedHosts.has(this.host)) throw new Error('reCAPTCHA has already been rendered in this element');

@@ -1,6 +1,7 @@
 import axios from "axios";
 import { logOtpEvent } from "./diagnostics";
 import { classifyFirebaseSendFailure } from "./firebaseSendPolicy";
+import { firebaseErrorDiagnostic, firebaseFailureDetails, projectFirebaseDiagnostic } from "./firebaseDiagnostics";
 
 const PROOF_LIFETIME_MS = 300_000;
 const MAX_COMPLETION_ATTEMPTS = 3;
@@ -73,7 +74,7 @@ export function createOtpApiClient(http = axios) {
     send: async (payload) =>
       (await http.post("/api/otp/send", payload)).data,
     firebaseSend: async (payload) =>
-      (await http.post("/api/otp/firebase-send", payload)).data,
+      (await http.post("/api/otp/firebase-send", payload, ...(payload.operation === "diagnostic" ? [{ timeout: 5000 }] : []))).data,
     fallback: async (payload) =>
       (await http.post("/api/otp/fallback", payload)).data,
     complete: async (payload) =>
@@ -137,6 +138,30 @@ function rememberSendSuccess(flow, result) {
   clearRecovery(flow);
 }
 
+function diagnosticPayload(value) {
+  const diagnostic = projectFirebaseDiagnostic(value);
+  return Object.keys(diagnostic).length ? { diagnostic } : {};
+}
+
+function reportClientFailure(flow, api, error, stage, boundary) {
+  if (!flow.firebaseSendId || flow.provider !== "firebase") return;
+  const diagnostic = projectFirebaseDiagnostic(error?.firebaseDiagnostic ?? firebaseErrorDiagnostic(error, boundary));
+  const safe = firebaseFailureDetails(error?.firebaseFailure ?? { code: "client/unclassified", stage, provenance: "client" }, diagnostic);
+  const report = { code: safe.errorCode, stage: safe.failureStage, provenance: safe.failureProvenance };
+  // Diagnostics neither block the UI nor retry OTP operations. Server also caps and deduplicates.
+  const fingerprint = JSON.stringify([report.code, report.stage, report.provenance, diagnostic]);
+  flow.diagnosticReports ??= new Set();
+  if (flow.diagnosticReports.size >= 6 || flow.diagnosticReports.has(fingerprint)) return;
+  flow.diagnosticReports.add(fingerprint);
+  const pending = safe.failureCategory === "pending";
+  logOtpEvent({ correlationId: flow.correlationId, purpose: flow.purpose, provider: "firebase",
+    stage: pending ? "firebase_send_unknown" : "firebase_client_failure", decision: pending ? "blocked" : "failed", reason: "client_reported", ...safe });
+  try {
+    Promise.resolve(api.firebaseSend({ challengeToken: flow.challengeToken, firebaseSendId: flow.firebaseSendId,
+      operation: "diagnostic", failure: report, ...diagnosticPayload(diagnostic) })).catch(() => {});
+  } catch { /* Best effort: never replace the original failure. */ }
+}
+
 async function replayFallback({ flow, api, onStage, isCurrentAttempt }) {
   // Once transfer is requested, Firebase proof must never be used again.
   flow.provider = "twilio";
@@ -148,6 +173,7 @@ async function replayFallback({ flow, api, onStage, isCurrentAttempt }) {
       challengeToken: flow.challengeToken,
       firebaseSendId: flow.firebaseSendId,
       failure: flow.fallbackFailure,
+      ...diagnosticPayload(flow.failureDiagnostic),
       ...recoveryPayload(flow, "fallback"),
     });
     assertCurrent(isCurrentAttempt);
@@ -184,7 +210,7 @@ async function sendFirebase({ flow, api, firebaseClient, getFirebaseClient, onSt
       if (status.status !== "sending") throw flowError("OTP_SEND_PENDING");
     }
     flow.rejectionRequested = true;
-    const result = await api.firebaseSend({ ...payload("rejected"), failure: flow.rejectedFailure });
+    const result = await api.firebaseSend({ ...payload("rejected"), failure: flow.rejectedFailure, ...diagnosticPayload(flow.failureDiagnostic) });
     assertCurrent(isCurrentAttempt);
     if (result?.provider !== "firebase" || result.status !== "failed") throw flowError("OTP_SEND_PENDING");
     flow.providerState = result.providerState || result.status;
@@ -206,13 +232,21 @@ async function sendFirebase({ flow, api, firebaseClient, getFirebaseClient, onSt
       throw flowError(reservation.status === "failed" ? "OTP_SEND_FAILED" : "OTP_SEND_PENDING");
     }
     flow.sdkSendStarted = true;
+    let clientLoaded = false;
     try {
       const client = firebaseClient || await getFirebaseClient();
+      clientLoaded = true;
       assertCurrent(isCurrentAttempt);
       onStage("sending");
       const confirmationResult = await client.send(flow.phone, {
         correlationId: flow.correlationId,
-        onStage: (stage) => { if (isCurrentAttempt()) onStage(stage); },
+        onStage: (stage) => {
+          if (!isCurrentAttempt()) return;
+          if (stage?.status === "pending" && stage.firebaseFailure) {
+            reportClientFailure(flow, api, { firebaseFailure: stage.firebaseFailure }, stage.stage, stage.stage);
+          }
+          onStage(stage);
+        },
         isCurrentAttempt,
       });
       assertCurrent(isCurrentAttempt);
@@ -230,6 +264,7 @@ async function sendFirebase({ flow, api, firebaseClient, getFirebaseClient, onSt
     } catch (error) {
       assertCurrent(isCurrentAttempt);
       const failure = error?.firebaseFailure;
+      flow.failureDiagnostic = projectFirebaseDiagnostic(error?.firebaseDiagnostic);
       if (classifyFirebaseSendFailure(failure).eligible) {
         flow.fallbackFailure = { code: failure.code, stage: failure.stage, provenance: failure.provenance };
         flow.fallbackPending = true;
@@ -240,6 +275,7 @@ async function sendFirebase({ flow, api, firebaseClient, getFirebaseClient, onSt
         flow.rejectionError = error;
         return sendFirebase({ flow, api, onStage, isCurrentAttempt });
       }
+      reportClientFailure(flow, api, error, clientLoaded ? "send" : "initialize", clientLoaded ? "firebase_send" : "firebase_client_load");
       flow.sendStatus = "failed";
       throw error;
     }
@@ -378,6 +414,9 @@ async function runComplete({
     logOtpEvent({ correlationId: flow.correlationId, stage: "complete", provider: flow.provider, decision: "success" });
     return result;
   } catch (error) {
+    if (isCurrentAttempt() && !completionRequested && flow.provider === "firebase") {
+      reportClientFailure(flow, api, error, "confirm", "firebase_confirm");
+    }
     if (isCurrentAttempt() && completionRequested) rememberRecovery(flow, "complete", error);
     logFailure(flow, "complete", error);
     throw error;

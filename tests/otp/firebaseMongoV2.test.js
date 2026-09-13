@@ -188,6 +188,51 @@ describe.each(["standalone", "replica set"])("isolated Firebase-first real Mongo
     };
   }
 
+  it("atomically deduplicates concurrent diagnostics while preserving challenge and security state", async () => {
+    const f = await prepare();
+    const { firebaseSendId } = await f.reserve();
+    await f.accepted(firebaseSendId);
+    const before = await f.current();
+    const phoneBefore = await phoneCollection.find({}).toArray();
+    const sourceBefore = await sourceCollection.find({}).toArray();
+    const report = { ...f.input, firebaseSendId, operation: "diagnostic", failure: { code: "auth/network-request-failed", stage: "token", provenance: "firebase_sdk" } };
+    const results = await Promise.all(Array.from({ length: 10 }, () => requestFirebaseSend(report, deps)));
+    expect(results.filter(value => value.recorded)).toHaveLength(1);
+    const after = await f.current();
+    expect(after.firebaseClientFailures).toEqual([expect.objectContaining({ errorCode: "auth/network-request-failed", failureStage: "token", failureCategory: "verification_technical", fallbackDecision: "blocked", observedAt: expect.any(Date) })]);
+    expect(after).toMatchObject({ provider: before.provider, status: before.status, expiresAt: before.expiresAt, purgeAt: before.purgeAt });
+    expect(await phoneCollection.find({}).toArray()).toEqual(phoneBefore);
+    expect(await sourceCollection.find({}).toArray()).toEqual(sourceBefore);
+    expect(deps.verifyFirebaseEvidence).not.toHaveBeenCalled();
+    expect(deps.sendVerification).not.toHaveBeenCalled();
+    expect(await deps.grants.countDocuments()).toBe(0);
+  });
+
+  it.each(["completion", "fallback"])("diagnostics racing %s cannot change final provider or issue duplicate grants", async (action) => {
+    const f = await prepare();
+    const { firebaseSendId } = await f.reserve();
+    const input = { ...f.input, firebaseSendId, operation: "diagnostic", failure: { code: "client/operation-pending", stage: "send", provenance: "client" } };
+    const [result] = await Promise.all([
+      action === "completion" ? f.complete() : f.fallback(firebaseSendId),
+      ...Array.from({ length: 10 }, () => settle(requestFirebaseSend(input, deps))),
+    ]);
+    const saved = await f.current();
+    if (action === "completion") {
+      expect(result).toMatchObject({ success: true, purpose: "booking" });
+      expect(saved).toMatchObject({ provider: "firebase", status: "completed" });
+      expect(deps.verifyFirebaseEvidence).toHaveBeenCalledTimes(1);
+      expect(deps.sendVerification).not.toHaveBeenCalled();
+      expect(await deps.grants.countDocuments()).toBe(1);
+    } else {
+      expect(result).toMatchObject({ provider: "twilio", status: "pending" });
+      expect(saved).toMatchObject({ provider: "twilio", status: "sent" });
+      expect(deps.sendVerification).toHaveBeenCalledTimes(1);
+      expect(deps.verifyFirebaseEvidence).not.toHaveBeenCalled();
+      expect(await deps.grants.countDocuments()).toBe(0);
+    }
+    expect(saved.firebaseClientFailures?.length ?? 0).toBeLessThanOrEqual(1);
+  });
+
   async function firebaseReady(purpose = "booking", phone = PHONE) {
     const f = await prepare(purpose, phone);
     const { firebaseSendId } = await f.reserve();

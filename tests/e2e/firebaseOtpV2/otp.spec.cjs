@@ -2,6 +2,34 @@ const { test, expect, PHONE, NORMALIZED, OTHER_PHONE, OTHER_NORMALIZED, CODE } =
 
 for (const purpose of ['login', 'booking']) {
   test.describe(purpose, () => {
+    test('diagnostic setup error reaches the server without secrets or fallback', async ({ otp }) => {
+      await otp.open(purpose, { renderTypeError: true });
+      await otp.start(purpose);
+      await expect.poll(() => otp.count('/api/otp/firebase-send', 'rejected').length).toBe(1);
+      const body = otp.count('/api/otp/firebase-send', 'rejected')[0].body;
+      expect(body.failure).toEqual({ code: 'client/unclassified', stage: 'recaptcha_render', provenance: 'firebase_sdk' });
+      expect(body.diagnostic).toEqual({ boundary: 'recaptcha_render', errorType: 'TypeError' });
+      expect(JSON.stringify(body)).not.toContain('private synthetic');
+      expect(JSON.stringify(body)).not.toContain(NORMALIZED);
+      expect(otp.count('/api/otp/fallback')).toHaveLength(0);
+      expect((await otp.snapshot()).sdk.sends).toHaveLength(0);
+    });
+
+    test('diagnostic wrong code uploads metadata only and still allows verification retry', async ({ otp }) => {
+      await otp.open(purpose);
+      const ui = await otp.start(purpose);
+      await otp.verify(purpose, '000000');
+      await expect(ui.scope.getByText('رمز التحقق غير صحيح. حاول مرة أخرى.', { exact: true })).toBeVisible();
+      await expect.poll(() => otp.count('/api/otp/firebase-send', 'diagnostic').length).toBe(1);
+      const body = otp.count('/api/otp/firebase-send', 'diagnostic')[0].body;
+      expect(body.failure).toEqual({ code: 'auth/invalid-verification-code', stage: 'confirm', provenance: 'firebase_sdk' });
+      expect(body.diagnostic).toEqual({ boundary: 'firebase_confirm', errorType: 'Error' });
+      expect(Object.keys(body).sort()).toEqual(['challengeToken', 'diagnostic', 'failure', 'firebaseSendId', 'operation']);
+      expect(JSON.stringify(body)).not.toMatch(/000000|mock-id-token|test-only-captcha-token/);
+      await otp.verify(purpose);
+      await otp.success(purpose);
+      expect(otp.count('/api/otp/fallback')).toHaveLength(0);
+    });
     test('Firebase success uses real adapter proof and no appointment HTTP request', async ({ page, otp }, testInfo) => {
       await otp.open(purpose); await otp.start(purpose);
       await otp.screenshot(`${purpose}-code`, testInfo);

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isOtpCorrelationId, isOtpIsoTime, logOtpEvent, logFirebaseAdminEvent } from "@/lib/otp/diagnostics";
 import { sealOtpReceipt } from "@/lib/otp/recovery";
+import { FIREBASE_FAILURE_CODES } from "@/lib/otp/firebaseSendPolicy";
 
 const correlationId = "061a1297-e394-40a2-9e22-fc63b2c186a1";
 
@@ -8,6 +9,23 @@ describe("privacy-safe OTP diagnostics", () => {
   let info;
   beforeEach(() => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
+  });
+
+  it.each(FIREBASE_FAILURE_CODES)("retains the classified client failure %s instead of an empty error", (errorCode) => {
+    logOtpEvent({ correlationId, stage: "firebase_send_rejected", errorCode });
+    expect(info).toHaveBeenCalledExactlyOnceWith("OTP flow", { correlationId, stage: "firebase_send_rejected", errorCode });
+  });
+
+  it("retains bounded failure context and fallback decision without raw error data", () => {
+    const safe = { correlationId, stage: "firebase_send_rejected", errorCode: "client/unclassified",
+      failureStage: "initialize", failureProvenance: "client", failureCategory: "unclassified",
+      failureBoundary: "firebase_sdk_load", errorType: "TypeError", fallbackDecision: "blocked", fallbackReason: "not_eligible" };
+    logOtpEvent({ ...safe, message: "private", stack: "private", phone: "private", diagnostic: { token: "private" } });
+    expect(info).toHaveBeenCalledExactlyOnceWith("OTP flow", safe);
+    info.mockClear();
+    logOtpEvent({ stage: "firebase_send_rejected", failureStage: "private", failureProvenance: "private", failureCategory: "private",
+      failureBoundary: "private", errorType: "private", fallbackDecision: "private", fallbackReason: "private" });
+    expect(info).toHaveBeenCalledExactlyOnceWith("OTP flow", { stage: "firebase_send_rejected" });
   });
 
   it.each([

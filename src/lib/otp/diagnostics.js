@@ -1,7 +1,11 @@
+import { FIREBASE_FAILURE_CODES, FIREBASE_FAILURE_STAGES, FIREBASE_FAILURE_PROVENANCES } from "./firebaseSendPolicy";
+import { FIREBASE_DIAGNOSTIC_BOUNDARIES, FIREBASE_ERROR_TYPES, FIREBASE_FAILURE_CATEGORIES, FIREBASE_FALLBACK_REASONS } from "./firebaseDiagnostics";
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ISO_UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const STAGES = new Set(["challenge", "send", "verify", "complete", "configuration", "challenge_admission", "firebase_init", "firebase_sdk_load", "firebase_auth_init", "recaptcha_init", "recaptcha_render", "recaptcha_token", "firebase_recaptcha_init", "firebase_recaptcha_token", "firebase_send_started", "firebase_send_accepted", "firebase_send_rejected", "firebase_send_unknown", "fallback_decision", "twilio_fallback_reserved", "twilio_send_accepted", "twilio_send_rejected", "twilio_send_unknown", "firebase_code_confirm", "firebase_id_token_ready", "firebase_server_evidence_checked", "twilio_code_check", "provider_approved", "application_session_issued", "booking_grant_issued", "completion_response"]);
 const DECISIONS = new Set(["started", "reserved", "success", "failed", "blocked", "reject", "recovered"]);
+STAGES.add("firebase_client_failure");
 const REASONS = new Set(["invalid_report", "operation_pending", "sdk_send_rejected_ambiguous", "recaptcha_technical_failure", "not_eligible", "client_reported", "certificate_fetch_failure"]);
 for (const stage of ["firebase_admin_sdk_load", "firebase_admin_init", "firebase_admin_verify"]) STAGES.add(stage);
 const ERROR_CODES = new Set([
@@ -28,6 +32,18 @@ const ERROR_CODES = new Set([
   "ETIMEDOUT", "ECONNABORTED", "EHOSTUNREACH", "ENETUNREACH", "EPIPE", "UND_ERR_CONNECT_TIMEOUT",
   "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_SOCKET", "admin/type-error", "admin/unclassified",
 ]);
+
+for (const code of FIREBASE_FAILURE_CODES) ERROR_CODES.add(code);
+
+const FAILURE_FIELDS = {
+  failureStage: new Set([...FIREBASE_FAILURE_STAGES, "unknown"]),
+  failureProvenance: new Set([...FIREBASE_FAILURE_PROVENANCES, "unknown"]),
+  failureCategory: new Set(FIREBASE_FAILURE_CATEGORIES),
+  failureBoundary: new Set(FIREBASE_DIAGNOSTIC_BOUNDARIES),
+  errorType: new Set(FIREBASE_ERROR_TYPES),
+  fallbackDecision: new Set(["eligible", "blocked"]),
+  fallbackReason: new Set(FIREBASE_FALLBACK_REASONS),
+};
 
 export function isOtpCorrelationId(value) {
   return typeof value === "string" && UUID_PATTERN.test(value);
@@ -66,6 +82,9 @@ export function logOtpEvent(input = {}) {
   if (REASONS.has(input.reason)) event.reason = input.reason;
   if (Number.isSafeInteger(input.elapsedMs) && input.elapsedMs >= 0 && input.elapsedMs <= 3600000) event.elapsedMs = input.elapsedMs;
   if (ERROR_CODES.has(input.errorCode)) event.errorCode = input.errorCode;
+  for (const [field, allowed] of Object.entries(FAILURE_FIELDS)) {
+    if (allowed.has(input[field])) event[field] = input[field];
+  }
   if (DECISIONS.has(input.decision)) event.decision = input.decision;
   if (["phone", "source", "global"].includes(input.restrictionScope)) event.restrictionScope = input.restrictionScope;
   if (isOtpIsoTime(input.retryAt)) event.retryAt = input.retryAt;

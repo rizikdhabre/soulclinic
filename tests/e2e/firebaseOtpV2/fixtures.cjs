@@ -40,6 +40,7 @@ const test = base.extend({
       const challenge = challenges.get(body.challengeToken);
       if (!challenge) return reply({ error: 'OTP_CHALLENGE_FAILED' }, 400);
       if (endpoint === '/api/otp/firebase-send') {
+        if (body.operation === 'diagnostic') return reply({ recorded: true });
         if (body.operation === 'accepted' && config.acceptedFailures > 0) {
           config.acceptedFailures -= 1;
           return reply({ error: 'OTP_PERSISTENCE_FAILED' }, 503);

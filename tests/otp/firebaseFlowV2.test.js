@@ -31,6 +31,79 @@ beforeEach(() => { vi.spyOn(console, "info").mockImplementation(() => {}); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("Firebase-first frontend flow", () => {
+  it("drops unexpected payload fields even inside a client failure report", async () => {
+    const h = harness();
+    await h.start();
+    h.firebaseClient.confirm.mockRejectedValue(sdkFailure({ code: "auth/invalid-verification-code", stage: "confirm", provenance: "firebase_sdk", idToken: "private-provider-proof" }));
+    await h.complete().catch(() => {});
+    expect(h.api.firebaseSend).toHaveBeenLastCalledWith(expect.objectContaining({ failure: { code: "auth/invalid-verification-code", stage: "confirm", provenance: "firebase_sdk" } }));
+  });
+
+  it("reports a pending watchdog once while the live Firebase send keeps ownership", async () => {
+    const h = harness();
+    const pending = deferred();
+    h.firebaseClient.send.mockImplementation((_phone, options) => {
+      options.onStage({ status: "pending", stage: "recaptcha_token", firebaseFailure: { code: "client/operation-pending", stage: "recaptcha_token", provenance: "client" } });
+      return pending.promise;
+    });
+    const started = h.start();
+    await vi.waitFor(() => expect(h.api.firebaseSend).toHaveBeenCalledWith(expect.objectContaining({ operation: "diagnostic", failure: { code: "client/operation-pending", stage: "recaptcha_token", provenance: "client" } })));
+    expect(h.api.fallback).not.toHaveBeenCalled();
+    pending.resolve(confirmation);
+    expect((await started).provider).toBe("firebase");
+    expect(h.firebaseClient.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a bounded HTTP timeout for diagnostics only", async () => {
+    const http = { post: vi.fn().mockResolvedValue({ data: { recorded: true } }) };
+    await createOtpApiClient(http).firebaseSend({ operation: "diagnostic" });
+    expect(http.post).toHaveBeenCalledExactlyOnceWith("/api/otp/firebase-send", { operation: "diagnostic" }, { timeout: 5000 });
+  });
+  it("forwards safe setup diagnostics on rejection without changing fallback eligibility", async () => {
+    const h = harness();
+    const value = { code: "client/unclassified", stage: "initialize", provenance: "client" };
+    const error = sdkFailure(value);
+    error.firebaseDiagnostic = { boundary: "firebase_sdk_load", errorType: "TypeError", message: "private" };
+    h.firebaseClient.send.mockRejectedValue(error);
+    await expect(h.start()).rejects.toBe(error);
+    expect(h.api.firebaseSend).toHaveBeenLastCalledWith({ challengeToken: "private-challenge", firebaseSendId: "private-send-id", operation: "rejected",
+      failure: value, diagnostic: { boundary: "firebase_sdk_load", errorType: "TypeError" } });
+    expect(h.api.fallback).not.toHaveBeenCalled();
+  });
+
+  it("reports a lazy adapter import failure without reclassifying it as a Firebase network rejection", async () => {
+    const h = harness();
+    const error = Object.assign(new Error("private module URL"), { name: "ChunkLoadError" });
+    await expect(h.start({ firebaseClient: undefined, getFirebaseClient: async () => { throw error; } })).rejects.toBe(error);
+    expect(h.api.firebaseSend).toHaveBeenLastCalledWith(expect.objectContaining({ operation: "diagnostic",
+      failure: { code: "client/unclassified", stage: "initialize", provenance: "client" },
+      diagnostic: { boundary: "firebase_client_load", errorType: "ChunkLoadError" } }));
+    expect(h.api.fallback).not.toHaveBeenCalled();
+    expect(console.info).toHaveBeenCalledWith("OTP flow", expect.objectContaining({ stage: "firebase_client_failure", errorCode: "client/unclassified", failureStage: "initialize",
+      failureBoundary: "firebase_client_load", errorType: "ChunkLoadError", fallbackDecision: "blocked" }));
+  });
+
+  it.each(["confirm", "token"])("reports %s failure to the server without sending or verifying again", async (stage) => {
+    const h = harness();
+    await h.start();
+    const error = sdkFailure({ code: "auth/network-request-failed", stage, provenance: "firebase_sdk" });
+    h.firebaseClient.confirm.mockRejectedValue(error);
+    await expect(h.complete()).rejects.toBe(error);
+    expect(h.api.firebaseSend).toHaveBeenLastCalledWith(expect.objectContaining({ operation: "diagnostic", failure: error.firebaseFailure }));
+    expect(h.api.complete).not.toHaveBeenCalled();
+    expect(h.firebaseClient.confirm).toHaveBeenCalledTimes(1);
+    expect(h.api.fallback).not.toHaveBeenCalled();
+  });
+
+  it("a failed or hanging diagnostic upload never replaces or delays the original error", async () => {
+    const h = harness();
+    await h.start();
+    h.api.firebaseSend.mockImplementation(({ operation }) => operation === "diagnostic" ? new Promise(() => {}) : Promise.reject(new Error("private")));
+    const error = sdkFailure({ code: "auth/invalid-verification-code", stage: "confirm", provenance: "firebase_sdk" });
+    h.firebaseClient.confirm.mockRejectedValue(error);
+    await expect(h.complete()).rejects.toBe(error);
+    expect(h.api.firebaseSend).toHaveBeenLastCalledWith(expect.objectContaining({ operation: "diagnostic" }));
+  });
   it("adds only the firebase-send and fallback endpoints to the existing API", async () => {
     const http = { post: vi.fn().mockResolvedValue({ data: { ok: true } }) };
     const api = createOtpApiClient(http);

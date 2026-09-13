@@ -1,5 +1,6 @@
 import { isOtpCorrelationId, logOtpEvent } from "./diagnostics";
 import { FIREBASE_FAILURE_CODES } from "./firebaseSendPolicy";
+import { firebaseErrorDiagnostic, firebaseFailureDetails } from "./firebaseDiagnostics";
 
 const APP_NAME = "soulclinic-phone-otp-v2";
 const CONFIRMATION_RETENTION_MS = 300000;
@@ -37,14 +38,18 @@ function failure(code, stage, provenance = "client") {
   return error;
 }
 
-function sdkFailure(error, stage, provenance = "firebase_sdk") {
+function sdkFailure(error, stage, provenance = "firebase_sdk", boundary = stage) {
   if (brandedErrors.has(error)) return error;
   // Positive evidence from a specific public verifier method, never error-message matching.
   if (provenance === "firebase_sdk" && stage.startsWith("recaptcha_") &&
       (error?.code === "auth/network-request-failed" || error?.code === "auth/timeout")) {
-    return failure(error.code === "auth/timeout" ? "recaptcha/timeout" : "recaptcha/network-request-failed", stage, "recaptcha_sdk");
+    const safe = failure(error.code === "auth/timeout" ? "recaptcha/timeout" : "recaptcha/network-request-failed", stage, "recaptcha_sdk");
+    safe.firebaseDiagnostic = firebaseErrorDiagnostic(error, boundary);
+    return safe;
   }
-  return failure(error?.code, stage, provenance);
+  const safe = failure(error?.code, stage, provenance);
+  safe.firebaseDiagnostic = firebaseErrorDiagnostic(error, boundary);
+  return safe;
 }
 
 function requireBrowser() {
@@ -56,14 +61,14 @@ function requireBrowser() {
 function createDiagnosticLogger(correlationId) {
   const safeCorrelationId = isOtpCorrelationId(correlationId) ? correlationId : undefined;
   const startedAt = Date.now();
-  return (stage, decision, errorCode) => {
+  return (stage, decision, outcome) => {
     try {
       logOtpEvent({
         correlationId: safeCorrelationId,
         provider: "firebase",
         stage,
         decision,
-        errorCode,
+        ...(outcome?.firebaseFailure ? firebaseFailureDetails(outcome.firebaseFailure, outcome.firebaseDiagnostic) : { errorCode: outcome }),
         elapsedMs: Math.min(3600000, Math.max(0, Date.now() - startedAt)),
       });
     } catch { /* Diagnostics cannot change a provider outcome. */ }
@@ -85,8 +90,8 @@ function initialize(loadSdk, config, diagnostic) {
       let sdk;
       diagnostic("firebase_sdk_load", "started");
       try { sdk = await loadSdk(); } catch (error) {
-        const safeError = sdkFailure(error, "initialize", "client");
-        diagnostic("firebase_sdk_load", "failed", safeError.code);
+        const safeError = sdkFailure(error, "initialize", "client", "firebase_sdk_load");
+        diagnostic("firebase_sdk_load", "failed", safeError);
         throw safeError;
       }
       diagnostic("firebase_sdk_load", "success");
@@ -97,8 +102,8 @@ function initialize(loadSdk, config, diagnostic) {
         diagnostic("firebase_auth_init", "success");
         return { sdk, auth };
       } catch (error) {
-        const safeError = sdkFailure(error, "initialize");
-        diagnostic("firebase_auth_init", "failed", safeError.code);
+        const safeError = sdkFailure(error, "initialize", "firebase_sdk", "firebase_auth_init");
+        diagnostic("firebase_auth_init", "failed", safeError);
         throw safeError;
       }
     })().catch((error) => {
@@ -238,7 +243,7 @@ export function createFirebasePhoneClient({
           let token;
           try { token = await super.verify(); } catch (error) {
             const safeError = sdkFailure(error, "recaptcha_token");
-            diagnostic("firebase_recaptcha_token", "failed", safeError.code);
+            diagnostic("firebase_recaptcha_token", "failed", safeError);
             throw safeError;
           }
           diagnostic("firebase_recaptcha_token", "success");
@@ -261,8 +266,8 @@ export function createFirebasePhoneClient({
         confirmation = await sdk.signInWithPhoneNumber(auth, phone, verifier);
       } catch (error) {
         // Only this settled rejection boundary may report an ambiguous SEND failure.
-        const safeError = sdkFailure(error, "send");
-        diagnostic("firebase_send_rejected", "failed", safeError.code);
+        const safeError = sdkFailure(error, "send", "firebase_sdk", "firebase_send");
+        diagnostic("firebase_send_rejected", "failed", safeError);
         throw safeError;
       }
       if (!confirmation || typeof confirmation.confirm !== "function") {
@@ -282,7 +287,7 @@ export function createFirebasePhoneClient({
       const safeError = sdkFailure(error, stage);
       stage = safeError.firebaseFailure.stage;
       if (stage === "recaptcha_init" || stage === "recaptcha_render") {
-        diagnostic("firebase_recaptcha_init", "failed", safeError.code);
+        diagnostic("firebase_recaptcha_init", "failed", safeError);
       }
       notify("failed", safeError.firebaseFailure);
       throw safeError;
@@ -314,8 +319,8 @@ export function createFirebasePhoneClient({
         state.diagnostic("firebase_code_confirm", "started");
         let credential;
         try { credential = await confirmation.confirm(code); } catch (error) {
-          const safeError = sdkFailure(error, "confirm");
-          state.diagnostic("firebase_code_confirm", "failed", safeError.code);
+          const safeError = sdkFailure(error, "confirm", "firebase_sdk", "firebase_confirm");
+          state.diagnostic("firebase_code_confirm", "failed", safeError);
           throw safeError;
         }
         state.diagnostic("firebase_code_confirm", "success");
@@ -338,8 +343,8 @@ export function createFirebasePhoneClient({
         state.diagnostic("firebase_id_token_ready", "success");
         return state.proof;
       } catch (error) {
-        const safeError = sdkFailure(error, "token");
-        state.diagnostic("firebase_id_token_ready", "failed", safeError.code);
+        const safeError = sdkFailure(error, "token", "firebase_sdk", "firebase_token");
+        state.diagnostic("firebase_id_token_ready", "failed", safeError);
         assertRetained();
         if (state.tokenAttempts >= MAX_TOKEN_ATTEMPTS) {
           expireConfirmation(confirmation, state);

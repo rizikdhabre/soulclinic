@@ -13,6 +13,16 @@ const request = (body) => new Request("https://preview.example/api/otp/fallback"
 
 describe("Firebase endpoint boundaries", () => {
   beforeEach(() => { Object.values(services).forEach((mock) => mock.mockReset()); });
+  it("projects diagnostic enums only and never forwards phone, tokens or arbitrary exception content", async () => {
+    services.requestFirebaseSend.mockResolvedValue({ recorded: true });
+    const req = request({ challengeToken: token, firebaseSendId, operation: "diagnostic", failure: report,
+      diagnostic: { boundary: "firebase_sdk_load", errorType: "TypeError", message: "private", stack: "private", idToken: "private" } });
+    const response = await send(req);
+    expect(response.status).toBe(200);
+    expect(services.requestFirebaseSend).toHaveBeenCalledExactlyOnceWith({ request: req, challengeToken: token, firebaseSendId, operation: "diagnostic", failure: report,
+      diagnostic: { boundary: "firebase_sdk_load", errorType: "TypeError" } });
+    expect(await response.json()).toEqual({ recorded: true });
+  });
   it("allows only server-owned fields into send reservation", async () => {
     services.requestFirebaseSend.mockResolvedValue({ provider: "firebase", status: "reserved", firebaseSendId, phone: "+972500000001" });
     const req = request({ challengeToken: token, operation: "reserve", provider: "twilio", phone: "untrusted", purpose: "untrusted", success: true });
