@@ -389,6 +389,78 @@ Authorized manual verification on the diagnostic Preview is still required to
 identify and fix the actual failure. Passing mocks are not evidence that the live
 Firebase completion 503 is fixed; the full goal is not yet complete.
 
+## Admin Runtime Compatibility Repair (2026-09-13)
+
+The user authorized five real booking/resend/cancellation scenarios. Testing stopped
+at scenario 1's first completion failure. On the mmke8nco6 Preview, Firebase accepted
+the initial send and the in-place resend, both received by the user. Completion at
+08:45:30 UTC returned 503 for correlation `dd335696-370d-4d67-b992-870a785ab044`.
+The correlated events show `firebase_admin_sdk_load` failed before `firebase_admin_init`.
+No provider approval, booking grant or appointment was created by that attempt.
+The remaining scenarios and profile cancellation are not yet verified.
+
+The installed chain is Firebase Admin 14.4.0 -> jwks-rsa 4.1.0 -> jose 6.1.3.
+jwks-rsa's CommonJS `src/utils.js` calls `require('jose')`, but jose 6 is ESM-only.
+Importing real `firebase-admin/auth` with Node's `--no-experimental-require-module`
+reproduces `ERR_REQUIRE_ESM`; the app module alone loads. AWS documents that flag
+as a Lambda runtime default, including Node 24. The same incompatibility is reported
+upstream for Firebase Admin and jwks-rsa. This is a demonstrated runtime defect
+matching the live SDK-load boundary, not a captured raw exception from Vercel:
+the live event was `admin/unclassified` after the external loader wrapped the error.
+Successful real completion on the new Preview remains necessary to close the diagnosis.
+
+The repair is a narrow npm override: only `firebase-admin -> jwks-rsa -> jose` uses
+the dual CommonJS/ESM version 5.10.0. The application's direct jose remains 6.1.3,
+Firebase Admin remains 14.4.0, and Firebase client remains 12.19.0. No SDK internals
+are patched, no experimental runtime flag is enabled, and no OTP/session/grant,
+storage, provider-selection or rate-limit code changes. Revisit this compatibility
+override when the upstream CommonJS loading fix is released; it is intentionally
+scoped, not a recommendation to downgrade the application's token library.
+
+Changed files for this repair: `package.json`, `package-lock.json`, this report,
+`tests/otp/firebaseAdminRuntimeV2.test.js`, and `tests/otp/checkFirebaseAdminTrace.cjs`.
+The latter copies only Next's completion-route trace into an isolated temporary
+directory and relocates external-package links, so full checkout dependencies cannot
+hide missing deployment files. Run it after building with
+`node tests/otp/checkFirebaseAdminTrace.cjs`. Both new tests/scripts are explicitly
+tracked despite the unchanged ignore rules.
+
+Actual checks:
+
+- Regression RED: both real-SDK tests failed with `ERR_REQUIRE_ESM` before the override.
+- Focused GREEN: 149/149 tests across Admin runtime, Admin initialization and evidence.
+  A malformed JWKS fixture shape was corrected during the green run; real signing-key
+  conversion and acceptance/rejection of valid/invalid RSA signatures are asserted.
+- Full unit/integration suite: 1389/1389, 37 files, 25.18 seconds, exit 0.
+- Full Playwright suite: 106/106 desktop/mobile cases, 2.2 minutes, exit 0,
+  with mocked SDK/API boundaries and no real SMS or appointment writes.
+- Focused ESLint for both new test files: exit 0.
+- Production build: exit 0, 14.8-second compilation, TypeScript phase and all 56 pages.
+  The first invocation lacked MONGO_URI and failed page-data collection; the successful
+  invocation used process-only unreachable loopback MongoDB and synthetic public
+  Firebase settings. No env file was copied, read for the build or overwritten.
+- Traced artifact: 666 files and 2 relocated links; app/auth imports both succeed
+  with Lambda-style module restrictions, without a real account or SMS.
+- Compiled Next endpoint with ephemeral MongoDB and real Admin under those flags:
+  malformed proof and a deliberately invalid signature both return 401
+  `OTP_VERIFICATION_INVALID`, not 503; zero grants and appointments. The signature
+  probe fetched only Google's public certificates, not customer data.
+- npm audit remains 21 reported packages (2 low, 7 moderate, 11 high, 1 critical),
+  matching the previously recorded totals. No advisory is reported for jose,
+  jwks-rsa or firebase-admin. Existing unrelated advisories were not auto-upgraded.
+- Original `.env.local` and both original/feature `.gitignore` hashes are unchanged.
+
+No further real SMS was sent while diagnosing this failure. Do not count the local
+compatibility fix as completed real booking coverage. A new immutable Preview hostname
+must be checked/authorized before restarting the user-supervised scenarios; never
+reuse an expired code or claim the failed attempt created an appointment.
+
+Supporting sources:
+- [AWS Lambda Node.js runtime flags](https://docs.aws.amazon.com/lambda/latest/dg/lambda-nodejs.html)
+- [Firebase Admin upstream interoperability issue](https://github.com/firebase/firebase-admin-node/issues/3181)
+- [jwks-rsa CommonJS interoperability issue](https://github.com/auth0/node-jwks-rsa/issues/507)
+- [Unreleased upstream lazy-import fix](https://github.com/auth0/node-jwks-rsa/pull/508)
+
 ## References
 
 - [Firebase modular web phone authentication](https://firebase.google.com/docs/auth/web/phone-auth)
