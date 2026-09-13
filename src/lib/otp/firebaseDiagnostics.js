@@ -2,6 +2,7 @@ import {
   FIREBASE_FAILURE_CODES, FIREBASE_FAILURE_STAGES, FIREBASE_FAILURE_PROVENANCES,
   classifyFirebaseSendFailure,
 } from "./firebaseSendPolicy";
+import { FIREBASE_SDK_ERROR_CODES, FIREBASE_SDK_ERROR_CODE_STATES } from "./firebaseSdkErrorCodes";
 
 export const FIREBASE_DIAGNOSTIC_BOUNDARIES = Object.freeze([
   "firebase_client_load", "firebase_sdk_load", "firebase_auth_init", "recaptcha_init",
@@ -21,6 +22,7 @@ export const FIREBASE_FALLBACK_REASONS = Object.freeze([
 ]);
 
 const codes = new Set(FIREBASE_FAILURE_CODES);
+const sdkCodes = new Set(FIREBASE_SDK_ERROR_CODES);
 const inCodes = (code, values) => values.includes(code);
 
 // Diagnostic hints are independent of the three-field fallback authorization report.
@@ -28,11 +30,19 @@ export function projectFirebaseDiagnostic(value) {
   const result = {};
   if (FIREBASE_DIAGNOSTIC_BOUNDARIES.includes(value?.boundary)) result.boundary = value.boundary;
   if (FIREBASE_ERROR_TYPES.includes(value?.errorType)) result.errorType = value.errorType;
+  if (sdkCodes.has(value?.sdkErrorCode)) result.sdkErrorCode = value.sdkErrorCode;
+  else if (FIREBASE_SDK_ERROR_CODE_STATES.includes(value?.sdkErrorCodeState)) result.sdkErrorCodeState = value.sdkErrorCodeState;
   return result;
 }
 
 export function firebaseErrorDiagnostic(error, boundary) {
-  return projectFirebaseDiagnostic({ boundary, errorType: FIREBASE_ERROR_TYPES.includes(error?.name) ? error.name : "unknown" });
+  const code = error?.code;
+  const sdkErrorCodeState = code == null ? "missing" : "redacted";
+  return projectFirebaseDiagnostic({
+    boundary, errorType: FIREBASE_ERROR_TYPES.includes(error?.name) ? error.name : "unknown",
+    sdkErrorCode: code,
+    ...(error?.name === "FirebaseError" || code != null ? { sdkErrorCodeState } : {}),
+  });
 }
 
 function category(code, stage, decision) {
@@ -70,5 +80,7 @@ export function firebaseFailureDetails(report, diagnostic) {
     fallbackDecision: decision.eligible ? "eligible" : "blocked", fallbackReason: decision.reason,
     ...(hint.boundary ? { failureBoundary: hint.boundary } : {}),
     ...(hint.errorType ? { errorType: hint.errorType } : {}),
+    ...(hint.sdkErrorCode ? { sdkErrorCode: hint.sdkErrorCode } : {}),
+    ...(hint.sdkErrorCodeState ? { sdkErrorCodeState: hint.sdkErrorCodeState } : {}),
   };
 }

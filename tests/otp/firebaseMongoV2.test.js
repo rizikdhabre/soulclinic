@@ -195,15 +195,38 @@ describe.each(["standalone", "replica set"])("isolated Firebase-first real Mongo
     const before = await f.current();
     const phoneBefore = await phoneCollection.find({}).toArray();
     const sourceBefore = await sourceCollection.find({}).toArray();
-    const report = { ...f.input, firebaseSendId, operation: "diagnostic", failure: { code: "auth/network-request-failed", stage: "token", provenance: "firebase_sdk" } };
+    const report = { ...f.input, firebaseSendId, operation: "diagnostic", failure: { code: "auth/network-request-failed", stage: "token", provenance: "firebase_sdk" },
+      diagnostic: { sdkErrorCode: "auth/network-request-failed", message: "private-token" } };
     const results = await Promise.all(Array.from({ length: 10 }, () => requestFirebaseSend(report, deps)));
     expect(results.filter(value => value.recorded)).toHaveLength(1);
     const after = await f.current();
-    expect(after.firebaseClientFailures).toEqual([expect.objectContaining({ errorCode: "auth/network-request-failed", failureStage: "token", failureCategory: "verification_technical", fallbackDecision: "blocked", observedAt: expect.any(Date) })]);
+    expect(after.firebaseClientFailures).toEqual([expect.objectContaining({ errorCode: "auth/network-request-failed", sdkErrorCode: "auth/network-request-failed", failureStage: "token", failureCategory: "verification_technical", fallbackDecision: "blocked", observedAt: expect.any(Date) })]);
+    expect(JSON.stringify(after.firebaseClientFailures)).not.toContain("private-token");
     expect(after).toMatchObject({ provider: before.provider, status: before.status, expiresAt: before.expiresAt, purgeAt: before.purgeAt });
     expect(await phoneCollection.find({}).toArray()).toEqual(phoneBefore);
     expect(await sourceCollection.find({}).toArray()).toEqual(sourceBefore);
     expect(deps.verifyFirebaseEvidence).not.toHaveBeenCalled();
+    expect(deps.sendVerification).not.toHaveBeenCalled();
+    expect(await deps.grants.countDocuments()).toBe(0);
+  });
+
+  it("retains diagnostic-only send identity in Mongo without permitting fallback or spending", async () => {
+    const f = await prepare();
+    const { firebaseSendId } = await f.reserve();
+    const phoneBefore = await phoneCollection.find({}).toArray();
+    const sourceBefore = await sourceCollection.find({}).toArray();
+    const failure = { code: "client/unclassified", stage: "send", provenance: "firebase_sdk" };
+    await expect(f.fallback(firebaseSendId, { failure, diagnostic: { sdkErrorCode: "auth/internal-error" } }))
+      .rejects.toHaveProperty("code", "OTP_PROVIDER_REJECTED");
+    await requestFirebaseSend({ ...f.input, firebaseSendId, operation: "rejected", failure,
+      diagnostic: { sdkErrorCode: "auth/invalid-credential", token: "private-token" } }, deps);
+    const saved = await f.current();
+    expect(saved).toMatchObject({ provider: "firebase", status: "failed", firebaseSendFailure: {
+      errorCode: "client/unclassified", sdkErrorCode: "auth/invalid-credential", fallbackDecision: "blocked",
+    } });
+    expect(JSON.stringify(saved.firebaseSendFailure)).not.toContain("private-token");
+    expect(await phoneCollection.find({}).toArray()).toEqual(phoneBefore);
+    expect(await sourceCollection.find({}).toArray()).toEqual(sourceBefore);
     expect(deps.sendVerification).not.toHaveBeenCalled();
     expect(await deps.grants.countDocuments()).toBe(0);
   });

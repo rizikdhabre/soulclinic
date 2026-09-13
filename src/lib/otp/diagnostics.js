@@ -1,5 +1,6 @@
 import { FIREBASE_FAILURE_CODES, FIREBASE_FAILURE_STAGES, FIREBASE_FAILURE_PROVENANCES } from "./firebaseSendPolicy";
 import { FIREBASE_DIAGNOSTIC_BOUNDARIES, FIREBASE_ERROR_TYPES, FIREBASE_FAILURE_CATEGORIES, FIREBASE_FALLBACK_REASONS } from "./firebaseDiagnostics";
+import { FIREBASE_SDK_ERROR_CODES, FIREBASE_SDK_ERROR_CODE_STATES } from "./firebaseSdkErrorCodes";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ISO_UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -36,6 +37,8 @@ const ERROR_CODES = new Set([
 for (const code of FIREBASE_FAILURE_CODES) ERROR_CODES.add(code);
 
 const FAILURE_FIELDS = {
+  sdkErrorCode: new Set(FIREBASE_SDK_ERROR_CODES),
+  sdkErrorCodeState: new Set(FIREBASE_SDK_ERROR_CODE_STATES),
   failureStage: new Set([...FIREBASE_FAILURE_STAGES, "unknown"]),
   failureProvenance: new Set([...FIREBASE_FAILURE_PROVENANCES, "unknown"]),
   failureCategory: new Set(FIREBASE_FAILURE_CATEGORIES),

@@ -158,3 +158,43 @@ provider-mode variable is scoped to the old feature branch, so the new branch ne
 own Preview-only setting before manual Firebase testing. No real SMS or appointment
 was used during implementation. User approved pushing/deploying this branch to Preview
 only; merging, pushing main, and Production deployment remain unapproved.
+
+## Separate SDK Error Identifiers
+
+Follow-up to Preview `e1f897f`: Firebase errors outside the OTP policy were being
+collapsed to `client/unclassified`, including their diagnostic identity. Diagnostics
+now retain `sdkErrorCode` separately, before policy normalization, using the complete
+installed Firebase Auth public error catalog plus the existing `auth/unknown` backend
+passthrough. The catalog is SDK-free production code, so Auth remains lazy-loaded.
+Tests compare diagnostic coverage to the installed SDK's public `AuthErrorCodes`.
+
+The existing three-field failure report remains unchanged. Diagnostic identity does
+not affect fallback eligibility, user-facing messages, ownership, verification, limits,
+or provider dispatch. A forged diagnostic `auth/internal-error` cannot make an
+unclassified or ineligible failure fall back. Browser transport, API projection,
+server persistence, and the log sink each preserve only approved diagnostic fields.
+
+Native Firebase errors without a code record `sdkErrorCodeState: missing`. Values
+outside the public catalog record `redacted`; arbitrary `auth/...` strings are not
+trusted merely because they resemble error identifiers. No message, stack, custom
+payload, phone, OTP, or token is retained. This deliberately means an unknown future
+backend identifier cannot be reconstructed from telemetry until independently checked
+and added to the diagnostic catalog. The previous incident's discarded code cannot be
+recovered by this change. It improves future diagnosis, not historical evidence.
+
+Source changes: `firebaseSdkErrorCodes.js` (new), `firebaseDiagnostics.js`, and
+`diagnostics.js`. Existing fallback/send/completion services, UI components, dependencies,
+environment files and `.gitignore` are unchanged. Regression coverage includes the
+adapter, client transport, API projection, log sink, saved challenges, standalone and
+replica-set MongoDB, and desktop/mobile login and booking forms. No real SMS or
+appointments are used. Read-only review found no actionable issue.
+
+Verification for this follow-up: the unchanged baseline passed 1,500 tests. The first
+regression run failed 124 new assertions for the missing diagnostic fields; after the
+fix the focused five-file run passed all 394 tests. The full suite then passed 1,627
+tests in 38 files (29.34s). Focused lint and the Next.js production build/type-check
+stage passed, including all 56 static pages, with a synthetic loopback Mongo URI.
+The final Playwright harness passed all 146 desktop/mobile tests, zero retries (2.8m),
+including eight new cases for diagnostic-only identifiers and payload redaction.
+External providers/API writes were mocked; this does not prove real iPhone or SMS
+delivery. Production was not changed, and the original checkout remains clean.

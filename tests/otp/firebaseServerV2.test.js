@@ -45,6 +45,25 @@ async function fixture(purpose = "login", mode = "firebase_first") {
 }
 
 describe("Firebase primary server ownership", () => {
+  it("saves the separate SDK identifier but cannot use diagnostic hints to authorize fallback", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const f = await fixture("booking");
+    const { firebaseSendId } = await f.reserve();
+    const report = { code: "client/unclassified", stage: "send", provenance: "firebase_sdk" };
+    await expect(f.fallback(firebaseSendId, { failure: report, diagnostic: { sdkErrorCode: "auth/internal-error" } }))
+      .rejects.toHaveProperty("code", "OTP_PROVIDER_REJECTED");
+    expect(await f.current()).toMatchObject({ provider: "firebase", status: "firebase_sending" });
+    await requestFirebaseSend({ ...f.input, firebaseSendId, operation: "rejected", failure: report,
+      diagnostic: { sdkErrorCode: "auth/invalid-credential", message: "private-token" } }, f.deps);
+    const expected = { errorCode: "client/unclassified", sdkErrorCode: "auth/invalid-credential",
+      failureStage: "send", fallbackDecision: "blocked" };
+    expect(await f.current()).toMatchObject({ provider: "firebase", status: "failed", firebaseSendFailure: expected });
+    expect(info).toHaveBeenCalledWith("OTP flow", expect.objectContaining({ ...expected, correlationId: f.prepared.correlationId }));
+    expect(f.deps.sendVerification).not.toHaveBeenCalled();
+    expect(f.deps.verifyFirebaseEvidence).not.toHaveBeenCalled();
+    expect(f.deps.rateStore.claimGlobalSend).not.toHaveBeenCalled();
+    expect(JSON.stringify((await f.current()).firebaseSendFailure)).not.toContain("private-token");
+  });
   it.each([
     ["client/unclassified", "initialize", "client", "unclassified"],
     ["auth/too-many-requests", "send", "firebase_sdk", "provider_throttle"],

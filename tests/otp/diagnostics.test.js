@@ -11,6 +11,18 @@ describe("privacy-safe OTP diagnostics", () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
+  it("keeps a diagnostic-only SDK code without replacing the policy error or exposing payloads", () => {
+    const safe = { correlationId, stage: "firebase_send_rejected", errorCode: "client/unclassified",
+      sdkErrorCode: "auth/invalid-credential", fallbackDecision: "blocked" };
+    logOtpEvent({ ...safe, message: "private-token", customData: { token: "private-token" } });
+    expect(info).toHaveBeenCalledExactlyOnceWith("OTP flow", safe);
+  });
+
+  it("revalidates SDK diagnostics at the log sink", () => {
+    logOtpEvent({ stage: "firebase_send_rejected", sdkErrorCode: "auth/private-token", sdkErrorCodeState: "redacted" });
+    expect(info).toHaveBeenCalledExactlyOnceWith("OTP flow", { stage: "firebase_send_rejected", sdkErrorCodeState: "redacted" });
+  });
+
   it.each(FIREBASE_FAILURE_CODES)("retains the classified client failure %s instead of an empty error", (errorCode) => {
     logOtpEvent({ correlationId, stage: "firebase_send_rejected", errorCode });
     expect(info).toHaveBeenCalledExactlyOnceWith("OTP flow", { correlationId, stage: "firebase_send_rejected", errorCode });

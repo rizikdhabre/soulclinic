@@ -31,6 +31,18 @@ beforeEach(() => { vi.spyOn(console, "info").mockImplementation(() => {}); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("Firebase-first frontend flow", () => {
+  it("forwards diagnostic-only SDK identity through send rejection without selecting Twilio", async () => {
+    const h = harness();
+    const value = { code: "client/unclassified", stage: "send", provenance: "firebase_sdk" };
+    const error = sdkFailure(value);
+    error.firebaseDiagnostic = { boundary: "firebase_send", errorType: "FirebaseError", sdkErrorCode: "auth/invalid-credential", token: "private-token" };
+    h.firebaseClient.send.mockRejectedValue(error);
+    await expect(h.start()).rejects.toBe(error);
+    expect(h.api.firebaseSend).toHaveBeenLastCalledWith({ challengeToken: "private-challenge", firebaseSendId: "private-send-id", operation: "rejected",
+      failure: value, diagnostic: { boundary: "firebase_send", errorType: "FirebaseError", sdkErrorCode: "auth/invalid-credential" } });
+    expect(h.api.fallback).not.toHaveBeenCalled();
+    expect(h.api.complete).not.toHaveBeenCalled();
+  });
   it("drops unexpected payload fields even inside a client failure report", async () => {
     const h = harness();
     await h.start();

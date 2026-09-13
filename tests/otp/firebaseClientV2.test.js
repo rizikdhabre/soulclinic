@@ -102,6 +102,19 @@ beforeEach(async () => {
 describe("privacy-safe Firebase diagnostic events", () => {
   const events = () => diagnosticLog.mock.calls.filter(([label]) => label === "OTP flow").map(([, event]) => event);
 
+  it.each(["auth/invalid-credential", "auth/user-not-found", "auth/missing-or-invalid-nonce"])(
+    "retains diagnostic-only SDK send code %s while fallback remains blocked", async (code) => {
+      fixture.sdk.signInWithPhoneNumber.mockRejectedValue(Object.assign(sdkError(code), { name: "FirebaseError" }));
+      const error = await client().send(PHONE, { correlationId: CORRELATION }).catch(value => value);
+      expect(error.firebaseFailure).toEqual({ code: "client/unclassified", stage: "send", provenance: "firebase_sdk" });
+      expect(error.firebaseDiagnostic).toEqual({ boundary: "firebase_send", errorType: "FirebaseError", sdkErrorCode: code });
+      expect(classifyFirebaseSendFailure(error.firebaseFailure).eligible).toBe(false);
+      expect(events()).toContainEqual(expect.objectContaining({ correlationId: CORRELATION, stage: "firebase_send_rejected",
+        errorCode: "client/unclassified", sdkErrorCode: code, failureStage: "send", fallbackDecision: "blocked" }));
+      expect(JSON.stringify(events())).not.toMatch(/private|secret|972521234567/);
+    },
+  );
+
   it.each([
     ["load", "initialize", "client", "firebase_sdk_load"],
     ["auth", "initialize", "firebase_sdk", "firebase_auth_init"],

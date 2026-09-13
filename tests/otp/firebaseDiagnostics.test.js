@@ -1,7 +1,32 @@
 import { describe, expect, it } from "vitest";
+import { AuthErrorCodes } from "firebase/auth";
 import { firebaseFailureDetails, firebaseErrorDiagnostic, projectFirebaseDiagnostic } from "@/lib/otp/firebaseDiagnostics";
 
 describe("Firebase diagnostic classification, separate from fallback authorization", () => {
+  it.each([...new Set(Object.values(AuthErrorCodes))])("retains the public SDK identifier %s independently of fallback policy", (code) => {
+    const diagnostic = firebaseErrorDiagnostic({ name: "FirebaseError", code, message: "private-token" }, "firebase_send");
+    expect(diagnostic).toEqual({ boundary: "firebase_send", errorType: "FirebaseError", sdkErrorCode: code });
+    expect(projectFirebaseDiagnostic(diagnostic)).toEqual(diagnostic);
+    expect(firebaseFailureDetails({ code: "client/unclassified", stage: "send", provenance: "firebase_sdk" }, diagnostic))
+      .toMatchObject({ errorCode: "client/unclassified", sdkErrorCode: code, fallbackDecision: "blocked", fallbackReason: "not_eligible" });
+  });
+
+  it.each(["654321", "+972521234567", "auth/private-token", "auth/" + "a".repeat(43),
+    "auth/eyJhbGciOiJSUzI1NiJ9.payload.signature", "auth/internal-error\nprivate", "auth/internal-error?token=private",
+    " auth/internal-error", "AUTH/INTERNAL-ERROR", { code: "auth/internal-error" }, ["auth/internal-error"]])(
+    "redacts arbitrary values rather than treating namespaced data as SDK identifiers (%#)", (sdkErrorCode) => {
+      expect(projectFirebaseDiagnostic({ sdkErrorCode })).toEqual({});
+      expect(firebaseErrorDiagnostic({ name: "FirebaseError", code: sdkErrorCode }, "firebase_send"))
+        .toEqual({ boundary: "firebase_send", errorType: "FirebaseError", sdkErrorCodeState: "redacted" });
+    },
+  );
+
+  it("distinguishes a native Firebase error missing its code from a redacted identifier", () => {
+    expect(firebaseErrorDiagnostic({ name: "FirebaseError" }, "firebase_send"))
+      .toEqual({ boundary: "firebase_send", errorType: "FirebaseError", sdkErrorCodeState: "missing" });
+    expect(projectFirebaseDiagnostic({ sdkErrorCodeState: "private-token" })).toEqual({});
+  });
+
   it.each([
     ["auth/invalid-phone-number", "send", "firebase_sdk", "invalid_phone", "blocked"],
     ["auth/invalid-verification-code", "confirm", "firebase_sdk", "invalid_code", "blocked"],

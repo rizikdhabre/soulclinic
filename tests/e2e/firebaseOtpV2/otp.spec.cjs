@@ -2,6 +2,33 @@ const { test, expect, PHONE, NORMALIZED, OTHER_PHONE, OTHER_NORMALIZED, CODE } =
 
 for (const purpose of ['login', 'booking']) {
   test.describe(purpose, () => {
+    test('SDK identifier outside the fallback policy reaches diagnostics without sending Twilio', async ({ otp }) => {
+      await otp.open(purpose, { sendError: 'auth/invalid-credential' });
+      const ui = otp.ui(purpose);
+      await ui.phone.fill(PHONE); await ui.send.click();
+      await expect.poll(() => otp.count('/api/otp/firebase-send', 'rejected').length).toBe(1);
+      const body = otp.count('/api/otp/firebase-send', 'rejected')[0].body;
+      expect(body.failure).toEqual({ code: 'client/unclassified', stage: 'send', provenance: 'firebase_sdk' });
+      expect(body.diagnostic).toEqual({ boundary: 'firebase_send', errorType: 'Error', sdkErrorCode: 'auth/invalid-credential' });
+      expect(JSON.stringify(body)).not.toMatch(/Synthetic SDK error|test-only-captcha-token|mock-id-token/);
+      expect(JSON.stringify(body)).not.toContain(NORMALIZED);
+      expect(otp.count('/api/otp/fallback')).toHaveLength(0);
+      expect(otp.count('/api/otp/complete')).toHaveLength(0);
+      await expect(ui.code).toHaveCount(0);
+      await expect(ui.phone).toBeVisible();
+    });
+
+    test('noncatalog SDK error data is redacted on the wire and stays blocked', async ({ otp }) => {
+      await otp.open(purpose, { sendError: 'auth/private-provider-token' });
+      const ui = otp.ui(purpose);
+      await ui.phone.fill(PHONE); await ui.send.click();
+      await expect.poll(() => otp.count('/api/otp/firebase-send', 'rejected').length).toBe(1);
+      const body = otp.count('/api/otp/firebase-send', 'rejected')[0].body;
+      expect(body.diagnostic).toEqual({ boundary: 'firebase_send', errorType: 'Error', sdkErrorCodeState: 'redacted' });
+      expect(JSON.stringify(body)).not.toContain('private-provider-token');
+      expect(otp.count('/api/otp/fallback')).toHaveLength(0);
+      await expect(ui.code).toHaveCount(0);
+    });
     test('Firebase accepted SMS remains verifiable through an acknowledgement outage', async ({ otp }) => {
       otp.config.acceptedFailures = 10;
       await otp.open(purpose); const ui = otp.ui(purpose);
@@ -115,7 +142,7 @@ for (const purpose of ['login', 'booking']) {
       await expect.poll(() => otp.count('/api/otp/firebase-send', 'diagnostic').length).toBe(1);
       const body = otp.count('/api/otp/firebase-send', 'diagnostic')[0].body;
       expect(body.failure).toEqual({ code: 'auth/invalid-verification-code', stage: 'confirm', provenance: 'firebase_sdk' });
-      expect(body.diagnostic).toEqual({ boundary: 'firebase_confirm', errorType: 'Error' });
+      expect(body.diagnostic).toEqual({ boundary: 'firebase_confirm', errorType: 'Error', sdkErrorCode: 'auth/invalid-verification-code' });
       expect(Object.keys(body).sort()).toEqual(['challengeToken', 'diagnostic', 'failure', 'firebaseSendId', 'operation']);
       expect(JSON.stringify(body)).not.toMatch(/000000|mock-id-token|test-only-captcha-token/);
       await otp.verify(purpose);

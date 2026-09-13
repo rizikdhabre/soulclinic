@@ -13,6 +13,15 @@ const request = (body) => new Request("https://preview.example/api/otp/fallback"
 
 describe("Firebase endpoint boundaries", () => {
   beforeEach(() => { Object.values(services).forEach((mock) => mock.mockReset()); });
+  it("forwards validated diagnostic SDK codes separately from the failure report", async () => {
+    services.requestFirebaseSend.mockResolvedValue({ status: "failed" });
+    const failure = { code: "client/unclassified", stage: "send", provenance: "firebase_sdk" };
+    const req = request({ challengeToken: token, firebaseSendId, operation: "rejected", failure,
+      diagnostic: { sdkErrorCode: "auth/invalid-credential", token: "private-token", message: "private-token" } });
+    expect((await send(req)).status).toBe(200);
+    expect(services.requestFirebaseSend).toHaveBeenCalledExactlyOnceWith({ request: req, challengeToken: token,
+      firebaseSendId, operation: "rejected", failure, diagnostic: { sdkErrorCode: "auth/invalid-credential" } });
+  });
   it("projects diagnostic enums only and never forwards phone, tokens or arbitrary exception content", async () => {
     services.requestFirebaseSend.mockResolvedValue({ recorded: true });
     const req = request({ challengeToken: token, firebaseSendId, operation: "diagnostic", failure: report,
