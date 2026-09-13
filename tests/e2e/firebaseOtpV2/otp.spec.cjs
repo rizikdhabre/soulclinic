@@ -2,9 +2,100 @@ const { test, expect, PHONE, NORMALIZED, OTHER_PHONE, OTHER_NORMALIZED, CODE } =
 
 for (const purpose of ['login', 'booking']) {
   test.describe(purpose, () => {
+    test('Firebase accepted SMS remains verifiable through an acknowledgement outage', async ({ otp }) => {
+      otp.config.acceptedFailures = 10;
+      await otp.open(purpose); const ui = otp.ui(purpose);
+      await ui.phone.fill(PHONE); await ui.send.click();
+      await expect(ui.code).toBeVisible(); await expect(ui.back).toBeEnabled();
+      await expect(ui.recover).toBeEnabled();
+      await otp.verify(purpose); await otp.success(purpose);
+      expect(otp.count('/api/otp/firebase-send', 'accepted')).toHaveLength(1);
+      expect((await otp.snapshot()).sdk.sends).toHaveLength(1);
+      expect((await otp.snapshot()).sdk.confirms).toHaveLength(1);
+      expect(otp.count('/api/otp/fallback')).toHaveLength(0);
+    });
+
+    test('failed explicit resend hides the old code entry', async ({ page, otp }, testInfo) => {
+      otp.config.cooldown = 0;
+      await otp.open(purpose); const ui = await otp.start(purpose);
+      await ui.code.fill(CODE);
+      await page.evaluate(() => { window.__otpTest.scenario.sendError = 'auth/too-many-requests'; });
+      await ui.resend.click();
+      await expect(ui.scope.getByText(/خدمة الرسائل تقيّد الطلبات/)).toBeVisible();
+      await expect(ui.code).toHaveCount(0); await expect(ui.phone).toBeVisible();
+      expect(otp.count('/api/otp/complete')).toHaveLength(0);
+      expect(otp.count('/api/otp/fallback')).toHaveLength(0);
+      expect((await otp.snapshot()).sdk.sends).toHaveLength(2);
+      await otp.screenshot(`${purpose}-resend-rejected`, testInfo);
+    });
+
+    test('Twilio-only send waits for acceptance before code entry', async ({ otp }) => {
+      otp.config.provider = 'twilio'; otp.hold('send');
+      await otp.open(purpose); const ui = otp.ui(purpose);
+      await ui.phone.fill(PHONE); await ui.send.click();
+      await expect.poll(() => otp.count('/api/otp/send').length).toBe(1);
+      await expect(ui.code).toHaveCount(0);
+      await expect(ui.scope.getByRole('status')).toContainText('إرسال');
+      otp.release('send'); await expect(ui.code).toBeVisible();
+      expect((await otp.snapshot()).sdk.construct).toBe(0);
+    });
+
+    test('send screen waits for acceptance and keeps reCAPTCHA stable', async ({ page, otp }, testInfo) => {
+      otp.hold('accepted');
+      await otp.open(purpose, { sendDeferred: true });
+      const ui = otp.ui(purpose);
+      const root = await ui.scope.locator('[id^="otp-"]').elementHandle();
+      await ui.phone.fill(PHONE); await ui.send.click();
+      await expect.poll(async () => (await otp.snapshot()).sdk.sends.length).toBe(1);
+      await expect(ui.code).toHaveCount(0);
+      await expect(ui.scope.getByRole('status')).toContainText('إرسال');
+      await expect(ui.scope.getByRole('dialog')).toHaveCount(0);
+      await otp.screenshot(`${purpose}-sending`, testInfo);
+      await page.evaluate(() => window.__otpTest.releaseSend());
+      await expect.poll(() => otp.count('/api/otp/firebase-send', 'accepted').length).toBe(1);
+      await expect(ui.code).toHaveCount(0);
+      expect(await root.evaluate(element => element.isConnected)).toBe(true);
+      otp.release('accepted');
+      await expect(ui.code).toBeVisible();
+      expect(await root.evaluate(element => element.isConnected)).toBe(true);
+    });
+
+    test('send failure never leaves code entry open and retains diagnostics', async ({ otp }, testInfo) => {
+      await otp.open(purpose, { sendError: 'auth/too-many-requests' });
+      const ui = otp.ui(purpose);
+      const root = await ui.scope.locator('[id^="otp-"]').elementHandle();
+      await ui.phone.fill(PHONE); await ui.send.click();
+      await expect(ui.scope.getByText('خدمة الرسائل تقيّد الطلبات مؤقتًا. يرجى الانتظار ثم المحاولة مجددًا.', { exact: true })).toBeVisible();
+      await expect(ui.code).toHaveCount(0); await expect(ui.phone).toBeVisible();
+      expect(await root.evaluate(element => element.isConnected)).toBe(true);
+      const body = otp.count('/api/otp/firebase-send', 'rejected')[0].body;
+      expect(body.failure).toEqual({ code: 'auth/too-many-requests', stage: 'send', provenance: 'firebase_sdk' });
+      expect(otp.count('/api/otp/fallback')).toHaveLength(0);
+      await otp.screenshot(`${purpose}-send-rejected`, testInfo);
+    });
+
+    test('unknown fallback send recovery keeps code entry hidden and replays its receipt', async ({ otp }, testInfo) => {
+      otp.config.fallbackFailures = 1;
+      await otp.open(purpose, { sendError: 'auth/network-request-failed' });
+      const ui = otp.ui(purpose);
+      const root = await ui.scope.locator('[id^="otp-"]').elementHandle();
+      await ui.phone.fill(PHONE); await ui.send.click();
+      const recover = ui.scope.getByRole('button', { name: 'التحقق من حالة الإرسال', exact: true });
+      await expect(recover).toBeEnabled(); await expect(ui.code).toHaveCount(0);
+      await otp.screenshot(`${purpose}-send-recovery`, testInfo);
+      await recover.click(); await expect(ui.code).toBeVisible();
+      expect(otp.count('/api/otp/challenge')).toHaveLength(1);
+      expect((await otp.snapshot()).sdk.sends).toHaveLength(1);
+      const calls = otp.count('/api/otp/fallback');
+      expect(calls).toHaveLength(2);
+      expect(calls[1].body).toEqual({ ...calls[0].body, recoveryReceipt: 'mock-fallback-receipt' });
+      expect(await root.evaluate(element => element.isConnected)).toBe(true);
+      await otp.verify(purpose); await otp.success(purpose);
+    });
+
     test('diagnostic setup error reaches the server without secrets or fallback', async ({ otp }) => {
       await otp.open(purpose, { renderTypeError: true });
-      await otp.start(purpose);
+      const ui = otp.ui(purpose); await ui.phone.fill(PHONE); await ui.send.click();
       await expect.poll(() => otp.count('/api/otp/firebase-send', 'rejected').length).toBe(1);
       const body = otp.count('/api/otp/firebase-send', 'rejected')[0].body;
       expect(body.failure).toEqual({ code: 'client/unclassified', stage: 'recaptcha_render', provenance: 'firebase_sdk' });
@@ -13,6 +104,7 @@ for (const purpose of ['login', 'booking']) {
       expect(JSON.stringify(body)).not.toContain(NORMALIZED);
       expect(otp.count('/api/otp/fallback')).toHaveLength(0);
       expect((await otp.snapshot()).sdk.sends).toHaveLength(0);
+      await expect(ui.code).toHaveCount(0);
     });
 
     test('diagnostic wrong code uploads metadata only and still allows verification retry', async ({ otp }) => {
@@ -49,6 +141,7 @@ for (const purpose of ['login', 'booking']) {
       await otp.open(purpose, { sendError: 'auth/internal-error' });
       const ui = otp.ui(purpose); await ui.phone.fill(PHONE); await ui.send.click();
       await expect(ui.scope.getByRole('status')).toContainText('الخدمة البديلة');
+      await expect(ui.code).toHaveCount(0);
       expect(otp.count('/api/otp/fallback')).toHaveLength(1);
       await otp.screenshot(`${purpose}-fallback`, testInfo);
       otp.release('fallback'); await expect(ui.back).toBeEnabled();
@@ -83,7 +176,8 @@ for (const purpose of ['login', 'booking']) {
     });
 
     test('quota rejection is not eligible for fallback', async ({ otp }) => {
-      await otp.open(purpose, { sendError: 'auth/quota-exceeded' }); const ui = await otp.start(purpose);
+      await otp.open(purpose, { sendError: 'auth/quota-exceeded' }); const ui = otp.ui(purpose);
+      await ui.phone.fill(PHONE); await ui.send.click();
       await expect(ui.scope.getByText(/خدمة الرسائل تقيّد الطلبات/)).toBeVisible();
       expect(otp.count('/api/otp/firebase-send', 'rejected')).toHaveLength(1);
       expect(otp.count('/api/otp/fallback')).toHaveLength(0);
@@ -169,8 +263,10 @@ for (const purpose of ['login', 'booking']) {
 
     test('accepted-state recovery replays acknowledgement, never SDK send', async ({ otp }) => {
       otp.config.acceptedFailures = 1;
-      await otp.open(purpose); const ui = await otp.start(purpose);
-      await expect(ui.resend).toBeEnabled(); await ui.resend.click(); await expect(ui.back).toBeEnabled();
+      await otp.open(purpose); const ui = otp.ui(purpose);
+      await ui.phone.fill(PHONE); await ui.send.click();
+      await expect(ui.recover).toBeEnabled(); await expect(ui.code).toBeVisible();
+      await ui.recover.click(); await expect(ui.back).toBeEnabled();
       expect(otp.count('/api/otp/challenge')).toHaveLength(1);
       expect(otp.count('/api/otp/firebase-send', 'reserve')).toHaveLength(1);
       expect(otp.count('/api/otp/firebase-send', 'accepted')).toHaveLength(2);
@@ -180,8 +276,10 @@ for (const purpose of ['login', 'booking']) {
 
     test('fallback recovery replays same reservation and receipt', async ({ otp }) => {
       otp.config.fallbackFailures = 1;
-      await otp.open(purpose, { sendError: 'auth/network-request-failed' }); const ui = await otp.start(purpose);
-      await expect(ui.resend).toBeEnabled(); await ui.resend.click(); await expect(ui.back).toBeEnabled();
+      await otp.open(purpose, { sendError: 'auth/network-request-failed' }); const ui = otp.ui(purpose);
+      await ui.phone.fill(PHONE); await ui.send.click();
+      await expect(ui.recover).toBeEnabled(); await expect(ui.code).toHaveCount(0);
+      await ui.recover.click(); await expect(ui.back).toBeEnabled();
       const calls = otp.count('/api/otp/fallback'); expect(calls).toHaveLength(2);
       expect(calls[1].body).toEqual({ ...calls[0].body, recoveryReceipt: 'mock-fallback-receipt' });
       expect(otp.count('/api/otp/challenge')).toHaveLength(1);
@@ -204,7 +302,7 @@ for (const purpose of ['login', 'booking']) {
       otp.hold('challenge'); await otp.open(purpose); const ui = otp.ui(purpose);
       await ui.phone.fill(PHONE); await ui.send.click();
       await expect.poll(() => otp.count('/api/otp/challenge').length).toBe(1);
-      // A physical phone edit remains possible on login; booking exposes a blocking send dialog.
+      // Equivalent formatting must not invalidate an active send in either form.
       await ui.phone.fill('+972 50-123-4567', { force: true });
       otp.release('challenge'); await expect(ui.code).toBeVisible(); await expect(ui.back).toBeEnabled();
       await otp.verify(purpose); await otp.success(purpose);
@@ -273,7 +371,8 @@ for (const purpose of ['login', 'booking']) {
       await expect.poll(async () => (await otp.snapshot()).sdk.sends.length).toBe(1);
       await page.clock.fastForward(31000);
       await expect(ui.scope.getByRole('status')).toContainText('قيد الانتظار');
-      await expect(ui.back).toBeDisabled(); await expect(ui.resend).toBeDisabled();
+      await expect(ui.code).toHaveCount(0); await expect(ui.back).toHaveCount(0);
+      await expect(ui.scope.getByRole('button', { name: /الإرسال|إرسال الرمز/ })).toBeDisabled();
       expect(otp.count('/api/otp/fallback')).toHaveLength(0); expect(otp.count('/api/otp/firebase-send', 'accepted')).toHaveLength(0);
       await otp.screenshot(`${purpose}-pending`, testInfo);
       await page.evaluate(() => window.__otpTest.releaseSend()); await expect(ui.back).toBeEnabled();

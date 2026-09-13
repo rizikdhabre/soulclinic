@@ -29,6 +29,24 @@ beforeEach(() => { vi.useFakeTimers(); vi.spyOn(console, "info").mockImplementat
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("Firebase-first controller", () => {
+  it("keeps a provider-accepted Firebase code usable when acknowledgement cannot persist", async () => {
+    const h = harness();
+    h.api.firebaseSend.mockImplementation(async ({ operation }) => {
+      if (operation === "accepted") throw Object.assign(new Error("acknowledgement unavailable"), { code: "OTP_PERSISTENCE_FAILED" });
+      return { provider: "firebase", status: "reserved", firebaseSendId: "private-send", phone };
+    });
+    try {
+      await expect(h.controller.start(phone)).rejects.toMatchObject({ code: "OTP_PERSISTENCE_FAILED" });
+      expect(h.controller.getSnapshot()).toMatchObject({ phase: "code", smsSent: true, canRetrySend: true });
+      await expect(h.controller.verify("654321")).resolves.toMatchObject({ success: true, purpose: "booking" });
+      expect(h.firebaseClient.send).toHaveBeenCalledTimes(1);
+      expect(h.firebaseClient.confirm).toHaveBeenCalledTimes(1);
+      expect(h.api.firebaseSend).toHaveBeenCalledTimes(2);
+      expect(h.api.complete).toHaveBeenCalledWith({ challengeToken: "private-challenge", purpose: "booking", idToken: "private-id-token" });
+      expect(h.api.fallback).not.toHaveBeenCalled();
+    } finally { h.controller.dispose(); }
+  });
+
   it("shows Arabic fallback progress without a generic error during the automatic transition", async () => {
     const h = harness();
     h.firebaseClient.send.mockRejectedValue(Object.assign(new Error("private"), { firebaseFailure: report }));
@@ -76,7 +94,7 @@ describe("Firebase-first controller", () => {
     try {
       await expect(h.controller.start(phone)).rejects.toBe(lostAcknowledgement);
       const oldFlow = h.flowRef.current;
-      expect(h.controller.getSnapshot()).toMatchObject({ canRetrySend: true, cooldownSeconds: 60, smsSent: false });
+      expect(h.controller.getSnapshot()).toMatchObject({ canRetrySend: true, cooldownSeconds: 60, smsSent: operation === "accepted" });
       await vi.advanceTimersByTimeAsync(600_001);
 
       replay.mockRejectedValueOnce(expired);

@@ -293,12 +293,12 @@ export function createPhoneOtpController({
     let reservationObserved = Boolean(preparedFlow);
     if (!preparedFlow) discardFlow();
     updateState({
-      phase: preparedFlow ? "code" : "idle",
+      phase: "sending",
       provider: preparedFlow?.provider || null,
       smsSent: false,
       loading: true,
       error: null,
-      statusMessage: "",
+      statusMessage: "جارٍ إرسال رمز التحقق…",
     });
     const onStage = (stage) => {
       if (!isCurrentAttempt()) return;
@@ -337,7 +337,7 @@ export function createPhoneOtpController({
             if (isCurrentAttempt()) {
               flowRef.current = flow;
               watchFirebase(flow);
-              updateState({ phase: "code", provider: flow.provider, smsSent: false });
+              updateState({ provider: flow.provider });
             }
           },
         });
@@ -366,10 +366,14 @@ export function createPhoneOtpController({
         retryAfterSeconds: publicError.retryAfterSeconds,
       }, publicError);
       if (!isCurrentAttempt()) return { started: false, reason: "cancelled" };
+      // Firebase's ConfirmationResult proves send acceptance even if our acknowledgement failed.
+      const acceptedFirebaseSend = flowRef.current?.provider === "firebase" &&
+        flowRef.current.sendStatus === "prepared" &&
+        Boolean(flowRef.current.confirmationResult) && !flowRef.current.fallbackPending;
       updateState({
-        phase: flowRef.current ? "code" : "idle",
+        phase: acceptedFirebaseSend ? "code" : flowRef.current?.sendStatus === "prepared" ? "send-recovery" : "idle",
         provider: flowRef.current?.provider || null,
-        smsSent: false,
+        smsSent: acceptedFirebaseSend,
         loading: false,
         error: publicError,
         statusMessage: "",
@@ -391,7 +395,7 @@ export function createPhoneOtpController({
 
   async function resend(phone = currentPhone) {
     if (normalizeIsraeliPhone(phone) !== currentPhone) setPhone(phone);
-    if (state.phase !== "code" || !flowRef.current) {
+    if (!flowRef.current) {
       return { started: false, reason: "not-ready" };
     }
     return runStart(phone);
@@ -399,7 +403,7 @@ export function createPhoneOtpController({
 
   async function verify(code) {
     if (disposed || inFlightRef.current) return undefined;
-    if (!flowRef.current) throw createFlowNotStartedError();
+    if (!flowRef.current || state.phase !== "code" || !state.smsSent) throw createFlowNotStartedError();
 
     const operation = Symbol("otp-verify");
     activeOperation = operation;

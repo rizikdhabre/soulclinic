@@ -84,10 +84,10 @@ it("retains the prepared token after a failed send across StrictMode renders for
     await act(async () => {
       await expect(otpFlow.start("+972521234567")).rejects.toBe(error);
     });
-    expect(otpFlow).toMatchObject({ phase: "code", smsSent: false, error: { code: "OTP_SEND_PENDING" } });
+    expect(otpFlow).toMatchObject({ phase: "send-recovery", smsSent: false, error: { code: "OTP_SEND_PENDING" } });
     expect(JSON.stringify(otpFlow)).not.toContain("private-");
     expect(clientMocks.sendOtpClientFlow).not.toHaveBeenCalled();
-    await act(async () => { await otpFlow.resend(); });
+    await act(async () => { await otpFlow.start("+972521234567"); });
     expect(clientMocks.startOtpClientFlow).toHaveBeenCalledTimes(1);
     expect(clientMocks.sendOtpClientFlow).toHaveBeenCalledTimes(1);
     expect(otpFlow).toMatchObject({ phase: "code", smsSent: true, error: null });

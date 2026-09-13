@@ -166,11 +166,12 @@ describe.each([
     }
   }
 
-  it("shows the prepared code step and explicit pending error without falsely claiming SMS success", () => {
-    const html = render({ error: { code: "OTP_SEND_PENDING" } });
-    expect(html).toContain('autoComplete="one-time-code"');
+  it("shows phone entry and send recovery without falsely claiming SMS success", () => {
+    const html = render({ phase: "send-recovery", canRetrySend: true, error: { code: "OTP_SEND_PENDING" } });
+    expect(html).not.toContain('autoComplete="one-time-code"');
+    expect(html).toContain('autoComplete="tel"');
     expect(html).toContain("لم نتمكن من تأكيد إرسال الرمز");
-    expect(html).toContain("إعادة محاولة الإرسال");
+    expect(html).toContain("التحقق من حالة الإرسال");
     expect(html).not.toContain(sentMessage);
   });
 
@@ -192,7 +193,7 @@ describe.each([
     expect(Boolean(button.props.disabled)).toBe(!allowed);
     expect(resend).not.toHaveBeenCalled();
     if (allowed) {
-      expect(button.children.join("")).toContain("إعادة محاولة الإرسال");
+      expect(button.children.join("")).toContain("التحقق من حالة الإرسال");
       expect(button.children.join("")).not.toContain("3360");
     }
     await button.props.onClick();

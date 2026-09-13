@@ -39,7 +39,7 @@ describe("OTP attempt cooldown and phone ownership", () => {
       api: { send: vi.fn().mockRejectedValueOnce(failure("OTP_SEND_FAILED")).mockResolvedValue({ provider: "twilio", status: "pending" }) },
     });
     await expect(controller.start(PHONE_A)).rejects.toMatchObject({ code: "OTP_SEND_FAILED" });
-    expect(controller.getSnapshot()).toMatchObject({ phase: "code", smsSent: false, cooldownSeconds: 60, error: { code: "OTP_SEND_FAILED" } });
+    expect(controller.getSnapshot()).toMatchObject({ phase: "send-recovery", smsSent: false, cooldownSeconds: 60, error: { code: "OTP_SEND_FAILED" } });
     await vi.advanceTimersByTimeAsync(9000);
     expect(controller.getSnapshot().cooldownSeconds).toBe(51);
     expect(controller.getSnapshot().canRetrySend).toBe(true);
@@ -60,7 +60,7 @@ describe("OTP attempt cooldown and phone ownership", () => {
     await vi.advanceTimersByTimeAsync(9000);
     pending.reject(new Error("uncoded runtime failure"));
     await started;
-    expect(controller.getSnapshot()).toMatchObject({ cooldownSeconds: 51, phase: "code" });
+    expect(controller.getSnapshot()).toMatchObject({ cooldownSeconds: 51, phase: "send-recovery" });
     controller.dispose();
   });
 
@@ -226,7 +226,7 @@ describe("prepared sends and completion retries", () => {
       api.send.mockRejectedValueOnce(persistenceError);
       await expect(controller.start(PHONE_A)).rejects.toBe(persistenceError);
       const prepared = flowRef.current;
-      expect(controller.getSnapshot()).toMatchObject({ phase: "code", smsSent: false, canRetrySend: true, cooldownSeconds: 3360 });
+      expect(controller.getSnapshot()).toMatchObject({ phase: "send-recovery", smsSent: false, canRetrySend: true, cooldownSeconds: 3360 });
       expect(JSON.stringify(controller.getSnapshot())).not.toContain("private-");
       await vi.advanceTimersByTimeAsync(9000);
       expect(api.send).toHaveBeenCalledTimes(5);
@@ -251,7 +251,7 @@ describe("prepared sends and completion retries", () => {
     try {
       await expect(controller.start(PHONE_A)).rejects.toBe(error);
       expect(flowRef.current.sendStatus).toBe("failed");
-      expect(controller.getSnapshot()).toMatchObject({ phase: "code", smsSent: false, canRetrySend: false, error: { code }, cooldownSeconds: 60 });
+      expect(controller.getSnapshot()).toMatchObject({ phase: "idle", smsSent: false, canRetrySend: false, error: { code }, cooldownSeconds: 60 });
       await expect(controller.resend()).resolves.toMatchObject({ reason: "cooldown" });
       await vi.advanceTimersByTimeAsync(60_000);
       expect(api.send).toHaveBeenCalledTimes(1);
@@ -307,7 +307,7 @@ describe("prepared sends and completion retries", () => {
     await expect(controller.start(PHONE_A)).rejects.toBe(error);
     const flow = flowRef.current;
     expect(flow).toMatchObject({ challengeToken: "mock-token-1", recoveryReceipt: "private-send-receipt" });
-    expect(controller.getSnapshot()).toMatchObject({ phase: "code", smsSent: false, error: { code } });
+    expect(controller.getSnapshot()).toMatchObject({ phase: "send-recovery", smsSent: false, error: { code } });
     expect(JSON.stringify(controller.getSnapshot())).not.toContain("private-");
     await vi.advanceTimersByTimeAsync(60_000);
     expect(api.send).toHaveBeenCalledTimes(1);
@@ -355,7 +355,7 @@ describe("prepared sends and completion retries", () => {
     await controller.start(PHONE_A).catch(() => {});
     expect(api.challenge).toHaveBeenCalledTimes(1);
     expect(api.send).toHaveBeenLastCalledWith({ challengeToken: "mock-token-1" });
-    expect(controller.getSnapshot()).toMatchObject({ smsSent: false, phase: "code" });
+    expect(controller.getSnapshot()).toMatchObject({ smsSent: false, phase: "send-recovery" });
     controller.dispose();
   });
 

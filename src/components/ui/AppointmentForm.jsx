@@ -23,7 +23,7 @@ function getOtpErrorMessage(error) {
     case "OTP_VERIFY_RATE_LIMITED":
       return "تم إدخال رمز خاطئ عدة مرات. انتظر قبل المحاولة مرة أخرى.";
     case "OTP_SEND_PENDING":
-      return "لم نتمكن من تأكيد إرسال الرمز. إذا وصلك رمز فأدخله، أو أعد محاولة الإرسال بعد الانتظار.";
+      return "لم نتمكن من تأكيد إرسال الرمز بعد. أعد التحقق من حالة الإرسال.";
     case "OTP_SERVICE_NOT_CONFIGURED":
     case "OTP_RATE_LIMIT_CONFIG_INVALID":
     case "OTP_SOURCE_UNAVAILABLE":
@@ -298,28 +298,6 @@ export function AppointmentForm({
   return (
     <>
       <div id={otpFlow.recaptchaContainerId} />
-      {step === "phone" && otpFlow.loading && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div
-            dir="rtl"
-            className="w-full max-w-md rounded-2xl bg-card border border-border p-6 shadow-xl"
-          >
-            <div className="text-base font-semibold">
-              جارٍ إرسال رمز التحقق.
-            </div>
-            <div className="mt-2 text-sm text-muted-foreground">
-              قد يستغرق وصول الرمز بضع لحظات.
-            </div>
-            <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-              <div className="h-full w-1/2 animate-pulse bg-primary" />
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="w-full md:w-auto min-h-[70vh] md:min-h-0 flex items-center justify-center md:block px-4 md:px-0">
         <div className="w-full max-w-md md:max-w-none">
@@ -393,7 +371,9 @@ export function AppointmentForm({
                   ? "جارٍ إرسال الرمز..."
                   : isSendCooldownBlocking
                     ? `انتظر ${otpFlow.cooldownSeconds} ثانية`
-                    : "تأكيد الموعد"}
+                    : otpFlow.canRetrySend
+                      ? "التحقق من حالة الإرسال"
+                      : "تأكيد الموعد"}
               </button>
             </form>
           )}
@@ -409,9 +389,7 @@ export function AppointmentForm({
               <div className="rounded-xl bg-primary/10 px-4 py-3 text-sm text-primary">
                 <div>{data.phone}</div>
                 <div className="mt-1 text-muted-foreground">
-                  {otpFlow.smsSent
-                    ? "أدخل رمز التحقق الذي تم إرساله إلى رقمك."
-                    : "إذا وصلك رمز فأدخله للمتابعة."}
+                  أدخل رمز التحقق الذي تم إرساله إلى رقمك.
                 </div>
               </div>
 
@@ -491,9 +469,9 @@ export function AppointmentForm({
                   >
                     {isSendCooldownBlocking
                       ? `إعادة الإرسال خلال ${otpFlow.cooldownSeconds} ثانية`
-                      : otpFlow.smsSent
-                        ? "إعادة إرسال الرمز"
-                        : "إعادة محاولة الإرسال"}
+                      : otpFlow.canRetrySend
+                        ? "التحقق من حالة الإرسال"
+                        : "إعادة إرسال الرمز"}
                   </button>
 
                   <button

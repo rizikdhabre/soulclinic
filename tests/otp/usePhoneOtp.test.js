@@ -63,6 +63,77 @@ describe("createPhoneOtpController", () => {
     vi.clearAllMocks();
   });
 
+  for (const provider of ["firebase", "twilio"]) {
+    it(`${provider} reservation stays sending until acceptance`, async () => {
+      const pending = deferred();
+      const flow = { provider, challengeToken: "private", sendStatus: "prepared" };
+      const { controller } = createHarness({
+        startFlow: async ({ onPrepared }) => { onPrepared(flow); return pending.promise; },
+      });
+      const start = controller.start("0521234567");
+      expect(controller.getSnapshot()).toMatchObject({ phase: "sending", smsSent: false, loading: true });
+      expect(controller.getSnapshot().statusMessage).toContain("إرسال");
+      flow.sendStatus = "sent";
+      pending.resolve(flow);
+      await start;
+      expect(controller.getSnapshot()).toMatchObject({ phase: "code", smsSent: true, loading: false });
+      controller.dispose();
+    });
+
+    it(`${provider} terminal send failure returns to phone entry and cannot verify`, async () => {
+      const error = Object.assign(new Error("private"), { code: "OTP_SEND_FAILED" });
+      const { controller, dependencies } = createHarness({
+        startFlow: async ({ onPrepared }) => {
+          const flow = { provider, sendStatus: "prepared" };
+          onPrepared(flow);
+          flow.sendStatus = "failed";
+          throw error;
+        },
+      });
+      await expect(controller.start("0521234567")).rejects.toBe(error);
+      expect(controller.getSnapshot()).toMatchObject({ phase: "idle", smsSent: false, canRetrySend: false });
+      await expect(controller.verify("654321")).rejects.toMatchObject({ code: "OTP_FLOW_NOT_STARTED" });
+      expect(dependencies.completeFlow).not.toHaveBeenCalled();
+      controller.dispose();
+    });
+
+    it(`${provider} unresolved send has recovery without code entry or another challenge`, async () => {
+      const flow = { provider, challengeToken: "private", sendStatus: "prepared", recoveryReceipt: "private-receipt" };
+      const error = Object.assign(new Error("private"), { code: "OTP_PERSISTENCE_FAILED" });
+      const recovery = deferred();
+      const { controller, dependencies } = createHarness({
+        startFlow: vi.fn(async ({ onPrepared, onChallenge }) => {
+          onChallenge({ retryAfterSeconds: 60 }); onPrepared(flow); throw error;
+        }),
+        sendFlow: vi.fn(async ({ flow: saved }) => { expect(saved).toBe(flow); return recovery.promise; }),
+      });
+      await expect(controller.start("0521234567")).rejects.toBe(error);
+      expect(controller.getSnapshot()).toMatchObject({ phase: "send-recovery", smsSent: false, canRetrySend: true, cooldownSeconds: 60 });
+      await expect(controller.verify("654321")).rejects.toMatchObject({ code: "OTP_FLOW_NOT_STARTED" });
+      const retry = controller.start("+972521234567");
+      expect(controller.getSnapshot()).toMatchObject({ phase: "sending", smsSent: false, loading: true });
+      flow.sendStatus = "sent"; recovery.resolve(flow); await retry;
+      expect(dependencies.startFlow).toHaveBeenCalledTimes(1);
+      expect(dependencies.sendFlow).toHaveBeenCalledTimes(1);
+      expect(controller.getSnapshot()).toMatchObject({ phase: "code", smsSent: true });
+      controller.dispose();
+    });
+
+    it(`${provider} explicit resend hides the previous code entry until the new send succeeds`, async () => {
+      const pending = deferred();
+      const { controller, dependencies, scheduler } = createHarness();
+      await controller.start("0521234567"); scheduler.tick(); scheduler.tick();
+      dependencies.startFlow.mockImplementationOnce(({ onPrepared }) => {
+        onPrepared({ provider, sendStatus: "prepared" }); return pending.promise;
+      });
+      const resend = controller.resend();
+      expect(controller.getSnapshot()).toMatchObject({ phase: "sending", smsSent: false });
+      pending.resolve({ provider, sendStatus: "sent" }); await resend;
+      expect(controller.getSnapshot()).toMatchObject({ phase: "code", smsSent: true });
+      controller.dispose();
+    });
+  }
+
   it("guards start, verify, and resend with one shared in-flight operation", async () => {
     const start = deferred();
     const flowRef = { current: null };

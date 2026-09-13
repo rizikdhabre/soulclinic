@@ -97,6 +97,7 @@ const test = base.extend({
           verify: scope.getByRole('button', { name: purpose === 'login' ? 'تأكيد الرمز' : 'التحقق وحفظ الموعد', exact: true }),
           back: scope.getByRole('button', { name: purpose === 'login' ? 'رجوع' : 'تغيير الرقم', exact: true }),
           resend: scope.getByRole('button', { name: /إعادة|^جاري الإرسال\.\.\.$/ }),
+          recover: scope.getByRole('button', { name: 'التحقق من حالة الإرسال', exact: true }),
         };
       },
       async start(purpose) {

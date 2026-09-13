@@ -2,10 +2,31 @@
 
 ## Scope
 
-Diagnostics-only changes on `codex/otp-failure-diagnostics`, based on main
+Diagnostics and send-screen fixes on `codex/otp-failure-diagnostics`, based on main
 `76ad12b30ed9d542f67e3d519c17857b8a6d127e`. No changes to fallback eligibility,
-provider mode, SMS limits, cooldowns, session/booking verification, or Arabic UI.
-No cloud configuration, environment files or `.gitignore` files are changed.
+SMS limits, cooldowns, server session/booking verification, or storage. Arabic UI is
+preserved with corrected sending/recovery states. No environment files or `.gitignore`
+files are changed. Preview rollout requires `OTP_PROVIDER_MODE=firebase_first` scoped
+only to this new branch; Production settings and Firebase configuration remain untouched.
+
+## Send Screen
+
+- Admission and reservation alone never open code entry. The controller stays `sending`
+  through SDK/reCAPTCHA/send handling, including automatic fallback, with Arabic progress.
+- Successful sending opens `code`. Terminal failures return to the phone form (`idle`).
+- Unresolved sending stays on the phone form (`send-recovery`). The status-recovery
+  button replays the saved attempt/receipt, not a new challenge. Existing cooldown and
+  in-flight fencing remain authoritative; there is no automatic retry loop.
+- A local Firebase ConfirmationResult is provider acceptance. If acknowledgement
+  persistence fails afterward, keep code entry usable and preserve proof-backed server
+  completion without another SMS or another acknowledgement request. This exception
+  does not apply to unknown sends, failed challenges, or Twilio-selected challenges.
+- Explicit resend hides the old code entry while its new send runs. The recovery button
+  is labeled separately from an explicit SMS resend, including acknowledgement recovery.
+- Both reCAPTCHA root elements remain outside conditional form content. Booking's
+  blocking loading overlay is removed; inline progress leaves reCAPTCHA unobstructed.
+- The verify action is gated until accepted code-entry state. Wrong/expired code and
+  completion errors keep their existing verification/recovery behavior.
 
 ## Evidence Retained
 
@@ -76,7 +97,7 @@ terminal send failures. Late Firebase results retain the existing protections.
    `fallbackDecision: blocked` plus the code/stage explains the policy stop; `eligible`
    alone does not prove that Twilio was dispatched or delivered.
 
-## Verification
+## Initial Diagnostics Verification
 
 Baseline: 1,389 passed and one existing Firebase Admin startup test timed out under
 default worker concurrency. The unchanged suite rerun with `--maxWorkers=2` passed all
@@ -107,3 +128,33 @@ and lock files are unchanged. The existing stale Browserslist-data warning remai
 Independent review's browser-log coverage and ignored-test findings were addressed;
 follow-up review reported no new actionable issue. No SMS, real appointment, production
 data write, push, merge or deployment was performed during this implementation.
+
+## Send-Screen Verification And Preview Readiness
+
+Current combined branch: `npm run test:run -- --maxWorkers=2` passed **1,500 tests in
+38 files** (43.32s), including ephemeral MongoDB standalone and replica-set suites.
+`node tests/e2e/firebaseOtpV2/run.cjs` passed **138 tests**, zero retries (2.8m), with
+mocked providers and intercepted APIs. Desktop/mobile screenshots were checked; the
+browser suite asserts stable roots, no overflow, pending/failed/resend/recovery states,
+and proof-backed Firebase completion through an acknowledgement outage. These are
+Chromium viewport tests, not proof of real iPhone Safari or carrier delivery.
+
+The eight new controller regressions and six initial mobile browser regressions failed
+before the fix. Review then identified acknowledgement recovery as a required exception;
+its regression also failed before the correction. Older prepared-code expectations were
+updated to the new states while retaining same-attempt resend API behavior. Final
+read-only review reported no actionable issue.
+
+Final focused lint passed on all nine changed production modules. The final Next.js
+16.1.4 Turbopack build, type-check stage and all 56 static pages passed using only the
+synthetic loopback Mongo URI described above. Dependencies did not change. Original
+checkout `.env.local` and `.gitignore` hashes remain unchanged; original main is clean.
+
+Read-only Firebase inspection confirms Phone Auth enabled, Israel allowed, and no
+explicit Enterprise phone enforcement. The newly generated Preview hostname is not
+covered by the currently authorized domains and requires user approval before adding it.
+Vercel's Firebase variable names are present in All Environments. The existing Preview
+provider-mode variable is scoped to the old feature branch, so the new branch needs its
+own Preview-only setting before manual Firebase testing. No real SMS or appointment
+was used during implementation. User approved pushing/deploying this branch to Preview
+only; merging, pushing main, and Production deployment remain unapproved.

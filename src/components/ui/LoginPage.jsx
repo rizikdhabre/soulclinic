@@ -23,7 +23,7 @@ function getLoginErrorMessage(error) {
     case "OTP_VERIFY_RATE_LIMITED":
       return "تم إدخال رمز خاطئ عدة مرات. انتظر قبل المحاولة مرة أخرى.";
     case "OTP_SEND_PENDING":
-      return "لم نتمكن من تأكيد إرسال الرمز. إذا وصلك رمز فأدخله، أو أعد محاولة الإرسال بعد الانتظار.";
+      return "لم نتمكن من تأكيد إرسال الرمز بعد. أعد التحقق من حالة الإرسال.";
     case "OTP_SERVICE_NOT_CONFIGURED":
     case "OTP_RATE_LIMIT_CONFIG_INVALID":
     case "OTP_SOURCE_UNAVAILABLE":
@@ -89,6 +89,7 @@ export default function LoginPage() {
   async function handleSendOtp() {
     if (otpFlow.loading || isSendCooldownBlocking) return;
 
+    setOtp("");
     setLocalError("");
     if (!normalizedPhone) {
       setLocalError(getLoginErrorMessage({ code: "INVALID_PHONE" }));
@@ -217,7 +218,9 @@ export default function LoginPage() {
                   ? "جاري الإرسال..."
                   : isSendCooldownBlocking
                     ? `انتظر ${otpFlow.cooldownSeconds} ثانية`
-                    : "إرسال رمز التحقق"}
+                    : otpFlow.canRetrySend
+                      ? "التحقق من حالة الإرسال"
+                      : "إرسال رمز التحقق"}
               </span>
             </Button>
           </>
@@ -227,9 +230,7 @@ export default function LoginPage() {
           <>
             <div className="text-center">
               <p className="text-subtle">
-                {otpFlow.smsSent
-                  ? "تم إرسال رمز إلى رقمك. أدخل الرمز للمتابعة."
-                  : "إذا وصلك رمز فأدخله للمتابعة."}
+                تم إرسال رمز إلى رقمك. أدخل الرمز للمتابعة.
               </p>
               <p className="mt-1 text-xs text-foreground/60">
                 {normalizedPhone}
@@ -302,9 +303,9 @@ export default function LoginPage() {
                 ? `إعادة الإرسال خلال ${otpFlow.cooldownSeconds} ثانية`
                 : otpFlow.loading
                   ? "جاري الإرسال..."
-                  : otpFlow.smsSent
-                    ? "إعادة إرسال الرمز"
-                    : "إعادة محاولة الإرسال"}
+                  : otpFlow.canRetrySend
+                    ? "التحقق من حالة الإرسال"
+                    : "إعادة إرسال الرمز"}
             </button>
           </>
         )}
