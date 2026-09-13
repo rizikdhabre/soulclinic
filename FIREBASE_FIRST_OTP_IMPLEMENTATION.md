@@ -1,5 +1,51 @@
 # Firebase-First OTP V2
 
+## Approved Production Rollout (2026-09-13)
+
+This section supersedes the historical Preview-only stop conditions below. After
+manually receiving an initial Firebase code and a resend, the user confirmed an
+appointment and cancelled it from their profile on the repaired Preview. Vercel
+recorded `booking_grant_issued` with provider `firebase` at 09:07:16 UTC, correlation
+`fde4428a-2b34-4cf5-a989-0e7bc6aa09ad`. The later resend rejection was
+`auth/too-many-requests`, not the previous Admin initialization failure; it correctly
+did not initiate Twilio fallback. This verifies that scenario, not every possible
+carrier, browser, or all five originally proposed booking scenarios.
+
+The user then approved restoring cooldowns, merging/pushing main, deploying Production,
+and deleting the feature branch/worktree. The temporary branch-specific Preview bypass
+has been removed completely. Every environment now enforces the normal 60-second phone
+cooldown, five phone starts/hour, shared-source admission and Twilio-send limits,
+verification limits, and finite global paid-SMS budgets. No limits were raised and no
+stored limit records were cleared. Same-attempt fallback still does not consume another
+phone-start admission.
+
+Fresh pre-merge verification after restoration:
+
+- Regression RED: 4 failed / 6 passed before removing the bypass.
+- Focused GREEN: 116/116 tests, 4 files, 1.71 seconds, exit 0.
+- Full unit/integration suite: 1390/1390 tests, 37 files, 21.76 seconds, exit 0.
+- Full Playwright suite: 106/106 desktop/mobile cases, 2.2 minutes, exit 0.
+- Production build: exit 0; 24.1-second compilation, TypeScript phase, all 56 pages.
+- Traced serverless artifact: 666 files, 2 relocated links; Admin app/auth imports pass.
+- Focused ESLint and `git diff --check`: exit 0.
+- npm audit: 21 reported packages (2 low, 7 moderate, 11 high, 1 critical), unchanged
+  from the prior report; no advisory for firebase-admin, jwks-rsa or jose. Unrelated
+  dependency upgrades were not included in this rollout.
+- Automated providers were mocked and MongoDB tests isolated; no real SMS or
+  appointments were created by these checks.
+- The original `.env.local` and both worktrees' `.gitignore` files remain byte-for-byte
+  unchanged. Storage implementation and storage environment-variable names are unchanged.
+
+With explicit rollout authorization, `OTP_PROVIDER_MODE=firebase_first` was added to
+Vercel's Production environment. No credential or storage variable was changed. A new
+main deployment is required to apply it; saving the variable alone is not deployment
+success. Verify the deployment's main SHA, Production target, Ready status and domain
+before cleanup. Preserve old main `214cfec9cc68ce76f006c0c48dc69b8880a9c1b9` under
+`rollback/pre-firebase-first-2026-09-13`. For a provider-only rollback, set Production
+`OTP_PROVIDER_MODE=twilio_only` and deploy again; in-flight challenges retain their
+stored policy. For an immediate code rollback, promote the previous known-good Vercel
+Production deployment. Do not reset or delete application data.
+
 ## Scope and Rollout
 
 Implemented on `codex/firebase-first-otp-v2`, based on the inspected, clean current main

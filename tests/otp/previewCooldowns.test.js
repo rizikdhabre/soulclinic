@@ -16,32 +16,29 @@ function harness(env = PREVIEW) {
   return { ...options, store: createOtpRateLimitStore(options) };
 }
 
-describe("feature Preview request cooldown exception", () => {
-  it("allows repeated phone/shared-source sends without clearing existing production limit state", async () => {
+describe("OTP cooldowns in every deployment", () => {
+  it("enforces existing phone/shared-source limits on the former exempt Preview", async () => {
     const h = harness();
     const normal = createOtpRateLimitStore({ ...h, env: {} });
     await normal.claimPhoneStart(PHONE);
     for (let i = 0; i < 10; i += 1) await normal.claimSourceAction("shared-source", "challenge");
     for (let i = 0; i < 5; i += 1) await normal.claimSourceAction("shared-source", "send");
     const before = structuredClone([h.phoneCollection.documents, h.sourceCollection.documents]);
-    for (let i = 0; i < 12; i += 1) {
-      await expect(h.store.claimPhoneStart(PHONE)).resolves.toMatchObject({
-        retryAt: "2026-08-23T12:00:00.000Z", retryAfterSeconds: 0,
-      });
-      await expect(h.store.claimSourceAction("shared-source", "challenge")).resolves.toBeUndefined();
-      await expect(h.store.claimSourceAction("shared-source", "send")).resolves.toBeUndefined();
-    }
+    await expect(h.store.claimPhoneStart(PHONE)).rejects.toMatchObject({ code: "OTP_RATE_LIMITED", retryAfterSeconds: 60 });
+    await expect(h.store.claimSourceAction("shared-source", "challenge")).rejects.toMatchObject({ code: "OTP_SOURCE_RATE_LIMITED" });
+    await expect(h.store.claimSourceAction("shared-source", "send")).rejects.toMatchObject({ code: "OTP_SEND_SOURCE_RATE_LIMITED" });
     expect([h.phoneCollection.documents, h.sourceCollection.documents]).toEqual(before);
     await expect(normal.claimPhoneStart(PHONE)).rejects.toMatchObject({ code: "OTP_RATE_LIMITED" });
   });
 
   it.each([
+    PREVIEW,
     {},
     { ...PREVIEW, VERCEL_ENV: "production" },
     { ...PREVIEW, VERCEL_ENV: "development" },
     { ...PREVIEW, VERCEL_GIT_COMMIT_REF: "main" },
     { VERCEL_ENV: "preview" },
-  ])("keeps phone and source restrictions outside the exact feature Preview (%#)", async (env) => {
+  ])("keeps phone and source restrictions regardless of deployment metadata (%#)", async (env) => {
     const { store } = harness(env);
     await store.claimPhoneStart(PHONE);
     await expect(store.claimPhoneStart(PHONE)).rejects.toMatchObject({ code: "OTP_RATE_LIMITED" });
@@ -57,7 +54,7 @@ describe("feature Preview request cooldown exception", () => {
     await expect(store.reservePhoneVerifyAttempt(PHONE, "verify-next")).rejects.toMatchObject({ code: "OTP_VERIFY_RATE_LIMITED" });
   });
 
-  it.each(["login", "booking"])("returns zero cooldown through the real %s challenge/controller flow", async (purpose) => {
+  it.each(["login", "booking"])("enforces resend deadlines through the real %s challenge/controller flow", async (purpose) => {
     const h = harness();
     const collection = new MemoryMongoCollection();
     const service = createOtpChallengeService({
@@ -75,9 +72,12 @@ describe("feature Preview request cooldown exception", () => {
       firebaseClient: { send: async () => ({ confirm: vi.fn() }), clearConfirmation: vi.fn() } });
     try {
       await expect(controller.start(PHONE)).resolves.toMatchObject({ started: true, provider: "firebase" });
-      expect(controller.getSnapshot()).toMatchObject({ smsSent: true, cooldownSeconds: 0 });
+      expect(controller.getSnapshot()).toMatchObject({ smsSent: true, cooldownSeconds: 60 });
+      await expect(controller.resend(PHONE)).resolves.toMatchObject({ started: false, reason: "cooldown" });
+      expect(collection.documents).toHaveLength(1);
+      h.clock.advance(60_000);
       await expect(controller.resend(PHONE)).resolves.toMatchObject({ started: true, provider: "firebase" });
-      expect(controller.getSnapshot()).toMatchObject({ smsSent: true, cooldownSeconds: 0, error: null });
+      expect(controller.getSnapshot()).toMatchObject({ smsSent: true, cooldownSeconds: 60, error: null });
       expect(collection.documents).toHaveLength(2);
       expect(collection.documents[0].challengeTokenHash).not.toBe(collection.documents[1].challengeTokenHash);
       expect(api.complete).not.toHaveBeenCalled();
