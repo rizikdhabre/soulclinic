@@ -24,6 +24,10 @@ Fresh pre-merge verification after restoration:
 - Regression RED: 4 failed / 6 passed before removing the bypass.
 - Focused GREEN: 116/116 tests, 4 files, 1.71 seconds, exit 0.
 - Full unit/integration suite: 1390/1390 tests, 37 files, 21.76 seconds, exit 0.
+- Merged main checkout after `npm ci --ignore-scripts --no-audit --no-fund`:
+  first run had 1388 passed and 2 default 5-second test timeouts (source-file scan
+  and real Admin SDK loading), with no failed OTP assertion. An unchanged full-suite
+  rerun passed 1390/1390 in 25.29 seconds, exit 0. No timeout or limit was increased.
 - Full Playwright suite: 106/106 desktop/mobile cases, 2.2 minutes, exit 0.
 - Production build: exit 0; 24.1-second compilation, TypeScript phase, all 56 pages.
 - Traced serverless artifact: 666 files, 2 relocated links; Admin app/auth imports pass.
