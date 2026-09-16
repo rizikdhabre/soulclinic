@@ -10,6 +10,7 @@ import { firebaseFailureDetails } from "./firebaseDiagnostics";
 
 const fail = (code = "OTP_PROVIDER_REJECTED", status = 400) => new OtpError(code, status, "The OTP provider operation is not allowed.");
 const uuid = (value) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+const recoveryBlockingCategories = new Set(["invalid_code", "expired_code", "security_rejection", "provider_throttle", "quota_or_billing", "configuration", "app_verification"]);
 
 async function context(input, deps) {
   const env = deps.env ?? process.env;
@@ -41,11 +42,16 @@ async function recordClientFailure(ctx, input) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (!challenge || challenge.provider !== "firebase" || !["firebase_sending", "firebase_sent", "verifying"].includes(challenge.status)) return { recorded: false };
     const records = challenge.firebaseClientFailures ?? [];
-    if (records.length >= 6 || records.some(({ observedAt: _at, ...record }) => JSON.stringify(record) === fingerprint)) return { recorded: false };
+    const recordAvailable = records.length < 6 && !records.some(({ observedAt: _at, ...record }) => JSON.stringify(record) === fingerprint);
+    const blockFallback = recoveryBlockingCategories.has(details.failureCategory) && challenge.firebaseRecoveryBlocked !== true;
+    // The telemetry cap must never discard a newly known security restriction.
+    if (!recordAvailable && !blockFallback) return { recorded: false };
     const version = challenge.firebaseDiagnosticVersion;
     const updated = await otpPersistence(() => ctx.store.transition({ challengeTokenHash: ctx.challengeTokenHash, provider: "firebase", from: challenge.status, now: ctx.now(),
       match: { firebaseSendId: input.firebaseSendId, expiresAt: { $gt: ctx.now() }, firebaseDiagnosticVersion: version ?? { $exists: false } },
-      patch: { firebaseDiagnosticVersion: (version ?? 0) + 1, firebaseClientFailures: [...records, { ...details, observedAt: ctx.now() }] } }));
+      patch: { firebaseDiagnosticVersion: (version ?? 0) + 1,
+        ...(recordAvailable ? { firebaseClientFailures: [...records, { ...details, observedAt: ctx.now() }] } : {}),
+        ...(blockFallback ? { firebaseRecoveryBlocked: true } : {}) } }));
     if (updated) {
       const pending = details.failureCategory === "pending";
       logOtpEvent({ correlationId: challenge.correlationId, purpose: challenge.purpose, provider: "firebase",
@@ -115,15 +121,27 @@ export async function requestFirebaseFallback(input, deps = {}) {
     const report = { code: input.failure.code, stage: input.failure.stage, provenance: input.failure.provenance };
     const sameFallback = (value) => value?.provider === "twilio" && value.firebaseSendId === input.firebaseSendId &&
       value.fallbackFailure?.code === report.code && value.fallbackFailure?.stage === report.stage && value.fallbackFailure?.provenance === report.provenance;
-    if (!sameFallback(challenge)) {
-      if (challenge.provider !== "firebase" || challenge.status !== "firebase_sending" || challenge.firebaseCompletionStartedAt) throw fail();
-      const transitioned = await otpPersistence(() => store.transition({ challengeTokenHash, provider: "firebase", from: "firebase_sending", now: now(),
-        match: { firebaseSendId: input.firebaseSendId, expiresAt: { $gt: now() }, firebaseCompletionStartedAt: { $exists: false } },
+    // A concurrent diagnostic write may change the version without changing
+    // ownership. Re-read and revalidate; never ignore a newly recorded rejection.
+    for (let attempt = 0; attempt < 3 && !sameFallback(challenge); attempt += 1) {
+      const postSend = ["confirm", "token", "delivery", "server_verify"].includes(report.stage);
+      const serverFailure = report.stage === "server_verify";
+      if (challenge.provider !== "firebase" || challenge.status !== (postSend ? "firebase_sent" : "firebase_sending")) throw fail();
+      if (challenge.firebaseRecoveryBlocked === true) throw fail();
+      if (serverFailure ? challenge.firebaseTechnicalFailureAttempt !== challenge.verifyAttemptId || !challenge.verifyAttemptId : challenge.firebaseCompletionStartedAt) throw fail();
+      if (postSend && challenge.firebaseClientFailures?.some(value => recoveryBlockingCategories.has(value.failureCategory))) throw fail();
+      if (report.stage === "delivery" && (!(challenge.firebaseAcceptedAt instanceof Date) || !(challenge.retryAt instanceof Date))) throw fail();
+      if (report.stage === "delivery" && challenge.retryAt > now()) throw fail("OTP_RATE_LIMITED", 429);
+      const transitioned = await otpPersistence(() => store.transition({ challengeTokenHash, provider: "firebase", from: challenge.status, now: now(),
+        match: { firebaseSendId: input.firebaseSendId, expiresAt: { $gt: now() },
+          firebaseDiagnosticVersion: challenge.firebaseDiagnosticVersion ?? { $exists: false },
+          ...(serverFailure ? { verifyAttemptId: challenge.verifyAttemptId, firebaseTechnicalFailureAttempt: challenge.verifyAttemptId }
+            : { firebaseCompletionStartedAt: { $exists: false } }) },
         patch: { provider: "twilio", status: "prepared", fallbackFailure: report, fallbackAt: now(), fallbackAmbiguous: decision.ambiguous === true,
           firebaseSendFailure: { ...details, observedAt: now() } } }));
       challenge = transitioned || await otpPersistence(() => store.findByTokenHash(challengeTokenHash));
-      if (!sameFallback(challenge)) throw fail();
     }
+    if (!sameFallback(challenge)) throw fail();
     logOtpEvent({ correlationId: challenge.correlationId, stage: "twilio_fallback_reserved", provider: "twilio", decision: "reserved" });
     // The existing sender owns paid budgets, atomic dispatch, receipts, and replay.
     return await requestTwilioSend(input, deps);

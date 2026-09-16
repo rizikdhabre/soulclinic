@@ -12,6 +12,109 @@ async function inScrollPosition(locator) {
   })).toBe(true);
 }
 
+async function traceSelectionScroll(button, interrupt = null) {
+  return button.evaluate((element, interrupt) => new Promise(resolve => {
+    const clicked = performance.now();
+    let started;
+    const originalScrollTo = window.scrollTo;
+    window.scrollTo = (...args) => {
+      started ??= performance.now();
+      return originalScrollTo.apply(window, args);
+    };
+    const frames = [{ time: 0, y: scrollY }];
+    // Click without Playwright's own auto-scroll so only the booking motion is measured.
+    element.click();
+    function sample() {
+      // Measure the animation, not React's scheduling delay after the click.
+      if (started === undefined) {
+        if (performance.now() - clicked < 5000) return requestAnimationFrame(sample);
+        window.scrollTo = originalScrollTo;
+        return resolve(frames);
+      }
+      frames.push({ time: performance.now() - started, y: scrollY });
+      if (interrupt && frames.at(-1).time >= 250) {
+        frames.at(-1).interrupted = true;
+        if (interrupt === 'unmount') {
+          // Keep document height stable so removing the page does not clamp scrollY.
+          const spacer = document.createElement('div');
+          spacer.style.height = `${document.documentElement.scrollHeight}px`;
+          document.body.appendChild(spacer);
+          window.__otpTest.unmount();
+        } else {
+          window.dispatchEvent(new Event(interrupt));
+        }
+        interrupt = null;
+      }
+      if (frames.at(-1).time < 1000) requestAnimationFrame(sample);
+      else { window.scrollTo = originalScrollTo; resolve(frames); }
+    }
+    requestAnimationFrame(sample);
+  }), interrupt);
+}
+
+function expectSlowSmoothScroll(frames) {
+  const distance = frames.at(-1).y - frames[0].y;
+  expect(distance).toBeGreaterThan(200);
+  const progress = frame => (frame.y - frames[0].y) / distance;
+  const at = time => frames.find(frame => frame.time >= time);
+  expect(progress(at(100)), 'No abrupt jump when the next step is revealed').toBeLessThan(0.12);
+  expect(progress(at(250))).toBeGreaterThan(0.1);
+  expect(progress(at(250))).toBeLessThan(0.4);
+  expect(progress(at(500))).toBeGreaterThan(0.55);
+  expect(progress(at(500))).toBeLessThan(0.9);
+  const arrival = frames.find(frame => Math.abs(frame.y - frames.at(-1).y) <= 1);
+  expect(arrival.time, 'Scrolling should take about 750ms, not browser-default speed').toBeGreaterThanOrEqual(650);
+  expect(arrival.time).toBeLessThan(850);
+  for (let index = 1; index < frames.length; index += 1) {
+    const delta = progress(frames[index]) - progress(frames[index - 1]);
+    expect(delta).toBeGreaterThanOrEqual(-0.005);
+    const elapsed = frames[index].time - frames[index - 1].time;
+    expect(delta, 'Motion must remain within the easing curve even if a frame is delayed').toBeLessThan(Math.max(0.15, elapsed / 750 * Math.PI / 2 + 0.03));
+  }
+}
+
+test('booking scrolling takes a slow smooth path from calendar to time to phone', async ({ page, otp }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  otp.config.allowBookingApi = true;
+  await otp.open('appointments');
+  const calendar = page.getByRole('region', { name: 'اختيار التاريخ', exact: true });
+  const times = page.getByRole('region', { name: 'اختيار الوقت', exact: true });
+  const form = page.getByRole('region', { name: 'تأكيد الموعد', exact: true });
+  const root = await otp.ui('booking').scope.locator('[id^="otp-"]').elementHandle();
+
+  expectSlowSmoothScroll(await traceSelectionScroll(calendar.getByRole('button', { name: /^\d+$/ }).and(page.locator(':enabled')).last()));
+  expect(await times.evaluate(element => element.getBoundingClientRect().top)).toBeCloseTo(160, 0);
+  await expect(otp.ui('booking').phone).toBeHidden();
+  expectSlowSmoothScroll(await traceSelectionScroll(times.getByRole('button', { name: '10:30', exact: true })));
+  expect(await form.evaluate(element => element.getBoundingClientRect().top)).toBeCloseTo(160, 0);
+  await expect(otp.ui('booking').phone).toBeVisible();
+  expect(await root.evaluate(element => element.isConnected)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(otp.requests).toEqual([]);
+  expect(otp.appointmentRequests).toEqual([]);
+});
+
+for (const interrupt of ['wheel', 'touchstart', 'unmount']) {
+  test(`booking scrolling cancels on ${interrupt}`, async ({ page, otp }) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    otp.config.allowBookingApi = true;
+    await otp.open('appointments');
+    const calendar = page.getByRole('region', { name: 'اختيار التاريخ', exact: true });
+    const frames = await traceSelectionScroll(calendar.getByRole('button', { name: /^\d+$/ }).and(page.locator(':enabled')).last(), interrupt);
+    const stopped = frames.find(frame => frame.interrupted);
+    expect(stopped.y).toBeGreaterThan(frames[0].y + 20);
+    for (const frame of frames.filter(frame => frame.time > stopped.time)) {
+      expect(frame.y).toBeCloseTo(stopped.y, 0);
+    }
+    if (interrupt !== 'unmount') {
+      const top = await page.getByRole('region', { name: 'اختيار الوقت', exact: true }).evaluate(element => element.getBoundingClientRect().top);
+      expect(top, 'Interruption must stop before reaching the next section').toBeGreaterThan(200);
+    }
+    expect(otp.requests).toEqual([]);
+    expect(otp.appointmentRequests).toEqual([]);
+  });
+}
+
 test('booking journey reveals and scrolls to each step without remounting verification', async ({ page, otp }, testInfo) => {
   otp.config.allowBookingApi = true;
   await otp.open('appointments');
@@ -135,22 +238,18 @@ test('unmounting the booking success screen cancels its redirect', async ({ page
 test('booking guided steps respect reduced motion and fit a narrow screen', async ({ page, otp }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 320, height: 640 });
-  await page.addInitScript(() => {
-    window.__scrollCalls = [];
-    const scroll = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function(options) {
-      window.__scrollCalls.push(options);
-      return scroll.call(this, options);
-    };
-  });
   otp.config.allowBookingApi = true;
-  await otp.open('appointments'); await pickDate(page);
-  await page.getByRole('button', { name: '10:30', exact: true }).click();
+  await otp.open('appointments');
+  const calendar = page.getByRole('region', { name: 'اختيار التاريخ', exact: true });
+  const dateFrames = await traceSelectionScroll(calendar.getByRole('button', { name: /^\d+$/ }).and(page.locator(':enabled')).last());
+  const timeFrames = await traceSelectionScroll(page.getByRole('button', { name: '10:30', exact: true }));
+  for (const frames of [dateFrames, timeFrames]) {
+    expect(frames.at(-1).y).toBeGreaterThan(frames[0].y + 200);
+    for (const frame of frames.slice(1)) expect(frame.y).toBeCloseTo(frames.at(-1).y, 0);
+  }
+  await inScrollPosition(page.getByRole('region', { name: 'تأكيد الموعد', exact: true }));
   await otp.start('booking');
   await expect(otp.ui('booking').code).toBeFocused();
-  const calls = await page.evaluate(() => window.__scrollCalls);
-  expect(calls.length).toBeGreaterThanOrEqual(3);
-  expect(calls.every(options => options.behavior !== 'smooth')).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 

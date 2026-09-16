@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useReducedMotion } from "framer-motion";
 import axios from "axios";
 import { format } from "date-fns";
@@ -8,6 +8,7 @@ import { AppointmentHeader } from "@/components/ui/AppointmentHeader";
 import { AppointmentForm } from "@/components/ui/AppointmentForm";
 import { TimeSlotPicker } from "@/components/ui/TimeSlotPicker";
 import { useSearchParams } from "next/navigation";
+import { scrollBookingStep } from "./scrollBookingStep";
 
 export default function AppointmentsClient() {
   const searchParams = useSearchParams();
@@ -24,10 +25,10 @@ export default function AppointmentsClient() {
   const formRef = useRef(null);
   const reduceMotion = useReducedMotion();
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!selectedDate) return;
     const target = selectedTime ? formRef.current : timesRef.current;
-    target?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+    return scrollBookingStep(target, reduceMotion);
   }, [selectedDate, selectedTime, reduceMotion]);
 
   const handleDateSelect = (date) => {
@@ -87,7 +88,7 @@ export default function AppointmentsClient() {
   };
 
   return (
-    <div className="min-h-screen bg-background" dir="rtl">
+    <div className="min-h-screen bg-background" dir="rtl" style={{ overflowAnchor: "none" }}>
       <div className="max-w-xl mx-auto px-4 sm:px-6 py-12 md:py-20">
         <AppointmentHeader />
 

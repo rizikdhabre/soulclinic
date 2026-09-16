@@ -13,6 +13,16 @@ const request = (body) => new Request("https://preview.example/api/otp/fallback"
 
 describe("Firebase endpoint boundaries", () => {
   beforeEach(() => { Object.values(services).forEach((mock) => mock.mockReset()); });
+  it("projects a settled server-verification fallback permit only for the trusted temporary failure", async () => {
+    for (const code of ["OTP_VERIFY_TEMPORARY_FAILURE", "OTP_PERSISTENCE_FAILED", "OTP_VERIFICATION_INVALID"]) {
+      services.completeOtpChallenge.mockRejectedValue(Object.assign(new OtpError(code, 503, "private"), { firebaseFallbackAllowed: true }));
+      const response = await complete(request({ challengeToken: token, purpose: "login", idToken: "test-only-proof" }));
+      const body = await response.json();
+      expect(body.firebaseFallbackAllowed === true).toBe(code === "OTP_VERIFY_TEMPORARY_FAILURE");
+      expect(JSON.stringify(body)).not.toContain("private");
+      expect(response.cookies.getAll()).toEqual([]);
+    }
+  });
   it("forwards validated diagnostic SDK codes separately from the failure report", async () => {
     services.requestFirebaseSend.mockResolvedValue({ status: "failed" });
     const failure = { code: "client/unclassified", stage: "send", provenance: "firebase_sdk" };

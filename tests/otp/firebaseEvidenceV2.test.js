@@ -49,6 +49,18 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe("Firebase signed phone evidence", () => {
+  it.each([
+    [{ code: "ECONNRESET" }, true],
+    [{ status: 503 }, true],
+    [{ status: 429 }, false],
+    [{ code: "auth/user-disabled" }, false],
+    [{ code: "auth/invalid-credential" }, false],
+    [{ code: "unrecognized" }, false],
+  ])("only positively identified Admin infrastructure errors authorize switching (%j)", async (details, eligible) => {
+    verifyIdToken.mockRejectedValue(Object.assign(new Error("private"), details));
+    const error = await verify().catch(error => error);
+    expect(error.firebaseTechnicalFailure === true).toBe(eligible);
+  });
   it("requires SDK verification with revocation checks and returns only bounded identity evidence", async () => {
     verifyIdToken.mockResolvedValue({ ...claims(), email: "test-only-private-email", unrelated: { token: TOKEN } });
     expect(await verify()).toEqual({ uid: "firebase-phone-user", authTime: NOW_SECONDS - 10 });
@@ -211,6 +223,20 @@ describe("Firebase authentication freshness", () => {
 });
 
 describe("Firebase verification failure classification", () => {
+  it.each([
+    [{ code: "app/network-error" }, true],
+    [{ status: 503 }, true],
+    [{ code: "app/network-error", response: { status: 429 } }, false],
+    [{ code: "auth/quota-exceeded", cause: { status: 503 } }, false],
+    [{ code: "auth/user-disabled", cause: { code: "ECONNRESET" } }, false],
+    [{ code: "app/invalid-credential", cause: { code: "ENOTFOUND" } }, false],
+    [{}, false],
+    [{ code: "auth/argument-error", message: "Error fetching public keys for Google certs: Too Many Requests" }, false],
+  ])("grants fallback only for identified infrastructure failures (%#)", async (fields, allowed) => {
+    verifyIdToken.mockRejectedValue(Object.assign(new Error("private-provider-body"), fields));
+    const error = await verify().catch(value => value);
+    expect(error.firebaseTechnicalFailure === true).toBe(allowed);
+  });
   it("logs the bounded Admin cause at the failed verification boundary and remains fail closed", async () => {
     const correlationId = "061a1297-e394-40a2-9e22-fc63b2c186a1";
     verifyIdToken.mockRejectedValue(Object.assign(new Error("Error fetching public keys for Google certs: private-provider-payload"), { code: "auth/argument-error" }));

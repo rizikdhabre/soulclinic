@@ -34,12 +34,12 @@ describe("Firebase send fallback boundary", () => {
     },
   );
 
-  it.each(["auth/internal-error", "auth/network-request-failed", "auth/unknown"])("allows %s only for an explicit SDK send rejection, marked ambiguous", (code) => {
+  it.each(["auth/internal-error", "auth/network-request-failed", "auth/unknown", "auth/timeout"])("allows explicit SDK rejection %s with stage-aware decisions", (code) => {
     expect(classifyFirebaseSendFailure(report(code))).toEqual({
       eligible: true, ambiguous: true, reason: "sdk_send_rejected_ambiguous",
     });
     for (const stage of ["initialize", "recaptcha_init", "recaptcha_render", "recaptcha_token", "confirm", "token", "lifecycle"]) {
-      expect(classifyFirebaseSendFailure(report(code, stage)).eligible).toBe(false);
+      expect(classifyFirebaseSendFailure(report(code, stage)).eligible).toBe(code !== "auth/unknown" && stage !== "lifecycle");
     }
     for (const provenance of [undefined, "client", "recaptcha_sdk", "timeout", "untrusted"]) {
       expect(classifyFirebaseSendFailure({ code, stage: "send", provenance }).eligible).toBe(false);
@@ -65,7 +65,7 @@ describe("Firebase send fallback boundary", () => {
     "auth/too-many-requests", "auth/quota-exceeded", "auth/billing-not-enabled",
     "auth/unauthorized-domain", "auth/invalid-api-key", "auth/operation-not-allowed",
     "auth/app-not-authorized", "auth/auth-domain-config-required", "auth/recaptcha-not-enabled",
-    "auth/invalid-app-id", "auth/argument-error", "auth/timeout",
+    "auth/invalid-app-id", "auth/argument-error",
     "auth/phone-auth-disabled", "client/operation-pending", "client/unclassified",
   ])("never treats %s as send fallback permission", (code) => {
     for (const stage of ["send", "recaptcha_init", "recaptcha_render", "recaptcha_token", "confirm", "token"]) {

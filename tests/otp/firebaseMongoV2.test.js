@@ -188,6 +188,38 @@ describe.each(["standalone", "replica set"])("isolated Firebase-first real Mongo
     };
   }
 
+  it("fences concurrent post-send fallback and completes only the Twilio-owned booking", async () => {
+    const f = await prepare();
+    const { firebaseSendId } = await f.reserve();
+    await f.accepted(firebaseSendId);
+    const phoneBefore = await phoneCollection.find({}).toArray();
+    const failure = { code: "auth/network-request-failed", stage: "confirm", provenance: "firebase_sdk" };
+    const results = await Promise.all(Array.from({ length: 10 }, () => settle(f.fallback(firebaseSendId, { failure }))));
+    expect(results.some(result => result.status === "fulfilled")).toBe(true);
+    expect(deps.sendVerification).toHaveBeenCalledTimes(1);
+    expect(await phoneCollection.find({}).toArray()).toEqual(phoneBefore);
+    expect(await f.current()).toMatchObject({ provider: "twilio", status: "sent" });
+    await expect(f.complete()).rejects.toMatchObject({ code: "OTP_PROVIDER_REJECTED" });
+    const completed = await completeOtpChallenge({ ...f.input, code: "654321" }, deps);
+    expect(completed).toMatchObject({ purpose: "booking", success: true });
+    expect(deps.verifyFirebaseEvidence).not.toHaveBeenCalled();
+    expect(deps.verifyTwilioCode).toHaveBeenCalledTimes(1);
+    expect(await deps.grants.countDocuments()).toBe(1);
+  });
+
+  it("server deadline gates non-receipt and saved fallback cannot dispatch again", async () => {
+    const f = await prepare();
+    const { firebaseSendId } = await f.reserve();
+    await f.accepted(firebaseSendId);
+    const failure = { code: "client/sms-not-received", stage: "delivery", provenance: "client" };
+    await expect(f.fallback(firebaseSendId, { failure })).rejects.toMatchObject({ code: "OTP_RATE_LIMITED" });
+    expect(deps.sendVerification).not.toHaveBeenCalled();
+    time += OTP_PHONE_START_COOLDOWN_MS + 1;
+    expect(await f.fallback(firebaseSendId, { failure })).toMatchObject({ provider: "twilio", status: "pending" });
+    expect(await f.fallback(firebaseSendId, { failure })).toMatchObject({ provider: "twilio", status: "pending" });
+    expect(deps.sendVerification).toHaveBeenCalledTimes(1);
+  });
+
   it("atomically deduplicates concurrent diagnostics while preserving challenge and security state", async () => {
     const f = await prepare();
     const { firebaseSendId } = await f.reserve();
@@ -200,7 +232,7 @@ describe.each(["standalone", "replica set"])("isolated Firebase-first real Mongo
     const results = await Promise.all(Array.from({ length: 10 }, () => requestFirebaseSend(report, deps)));
     expect(results.filter(value => value.recorded)).toHaveLength(1);
     const after = await f.current();
-    expect(after.firebaseClientFailures).toEqual([expect.objectContaining({ errorCode: "auth/network-request-failed", sdkErrorCode: "auth/network-request-failed", failureStage: "token", failureCategory: "verification_technical", fallbackDecision: "blocked", observedAt: expect.any(Date) })]);
+    expect(after.firebaseClientFailures).toEqual([expect.objectContaining({ errorCode: "auth/network-request-failed", sdkErrorCode: "auth/network-request-failed", failureStage: "token", failureCategory: "verification_technical", fallbackDecision: "eligible", observedAt: expect.any(Date) })]);
     expect(JSON.stringify(after.firebaseClientFailures)).not.toContain("private-token");
     expect(after).toMatchObject({ provider: before.provider, status: before.status, expiresAt: before.expiresAt, purgeAt: before.purgeAt });
     expect(await phoneCollection.find({}).toArray()).toEqual(phoneBefore);

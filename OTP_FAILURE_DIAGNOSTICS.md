@@ -302,3 +302,100 @@ Use only owner-authorized numbers and bookings. Chromium emulation does not esta
 real iPhone keyboard behavior: Safari may require a tap to open its software keyboard
 even when the code input is focused. No Production deployment or Firebase settings change
 is authorized by this follow-up.
+
+## Technical Recovery and Slower Scrolling (2026-09-17)
+
+This follow-up implements the owner's revised policy on the same Preview branch,
+based on `be2e069a14ebc463d05bc67c25a0a250aa269c6b`. The observed missing setup path
+was a rejected module import with `ChunkLoadError`, previously `client/unclassified`.
+The new behavior is shared by login and appointment verification.
+
+### Transfer Policy
+
+| Identified failure or action | Eligible boundary | Behavior |
+| --- | --- | --- |
+| ChunkLoadError / NetworkError / recognized dynamic-import TypeError | Rejected SDK/adapter import only | One automatic Twilio transfer before Firebase dispatch |
+| auth/internal-error, auth/network-request-failed, auth/timeout | SDK initialization, reCAPTCHA setup/token, settled send | Automatic bounded transfer |
+| recaptcha/network-request-failed, recaptcha/timeout | Identified verifier operation | Automatic bounded transfer |
+| auth/unknown and explicitly approved auth/error-code:-39 | Settled Firebase SEND rejection only | Existing bounded, delivery-ambiguous transfer |
+| auth/internal-error, auth/network-request-failed, auth/timeout | Settled code confirmation or ID-token retrieval | Clear Firebase challenge proof; require a fresh Twilio verification |
+| Identified Admin network/5xx failure | Server evidence check has settled without approval | Persist a server-only permit, then require fresh Twilio verification |
+| User reports no SMS receipt | Accepted Firebase challenge, server cooldown elapsed | Arabic alternative-service action; one transfer, not automatic delivery detection |
+| Wrong/expired codes, abuse/security rejection, quota, configuration, 429, application limits | Any boundary | No automatic transfer and no limit bypass |
+| Pending operation, code-less unrelated exception, unknown certificate response | Any boundary | Fail closed or retain recovery; no speculative parallel SMS |
+
+Server ownership, phone/purpose/source binding, expiry, paid source/global budgets,
+single-dispatch reservations, encrypted recovery receipts and approval/session/grant
+recovery remain in the existing services. No second Twilio subsystem was added.
+Fallback does not charge the same challenge's admission cooldown again. Non-receipt
+is a user report, not proof of non-delivery. Late Firebase delivery is still possible;
+the application accepts only Twilio proof after a committed transfer.
+
+Post-send transfer requires accepted Firebase state. If its acknowledgement write
+failed, the client reconciles that write before discarding confirmation. Live server
+verification, observed approval, session/profile/booking failures never trigger SMS.
+An Admin transfer permit is tied to its settled attempt, not a client assertion.
+Prior server evidence rejection and local wrong-code/security rejection remain sticky
+across later technical failures. Rejections carried by encrypted retry receipts remain
+sticky when recovered. Unclassified Admin errors remain retryable with cached proof but
+cannot authorize switching. Certificate-fetch text alone is insufficient: this SDK can
+drop HTTP status for certificate errors, including security/throttling responses.
+
+Concurrent diagnostics use versioned CAS. Fallback retries this CAS at most three times,
+rereading and fully revalidating restrictions each time, without repeating SMS dispatch.
+The first reported security restriction persists independently of the six-entry telemetry
+cap, with the same CAS version, so a full history cannot hide a known rejection.
+Saved send results and fallback receipts replay the same paid send. Confirmation/token
+failure never submits the old Firebase code to Twilio; the UI clears its input and asks
+for the new code. Application completion retries after valid Firebase proof still use
+the cached proof, not another `confirm(code)` call. Diagnostic payloads retain bounded
+error/stage/correlation identifiers only; no codes, tokens, raw phone or IP data are added.
+
+### Presentation
+
+Calendar-to-time and time-to-phone transitions use a 750ms cosine easing curve with
+header offset. New selection, unmount, wheel and touch interrupt the previous motion;
+reduced motion remains immediate. Browser scroll anchoring cannot jump the revealed
+steps. The stable reCAPTCHA root, Arabic sending card and confirmed-booking shop
+redirect remain. The new Arabic non-receipt action stays disabled during cooldown or
+after an ineligible rejection, and disappears once Twilio owns the challenge.
+
+### Scope and Verification
+
+Changes are in the existing Firebase policy/diagnostics/client/evidence/completion/send
+modules, the completion route's bounded permit projection, shared OTP controller, both
+OTP forms, booking scroll helper/page, and their regression tests. Dependencies,
+environment variables, storage, scheduling rules, session/grant issuance implementations
+and `.gitignore` are unchanged. Tests that live under the ignored test directory are
+explicitly added to Git; generated artifacts are not.
+
+Baseline actually run: 1,651 tests passed in 38 files (24.10s). Added regressions failed
+before implementation. Review-driven tests also first reproduced stale rejection state,
+certificate status loss and failed acceptance reconciliation. After fixes, the full
+unit/integration suite passed 1,721 tests in 40 files (127.39s), including real isolated
+MongoDB standalone/replica-set concurrency tests with mocked Firebase/Twilio providers.
+An initial 196-case browser run passed 195; the scroll measurement incorrectly included
+React scheduling time before animation. The test now measures from actual scrolling
+and accounts for elapsed time between frames, without changing the 750ms implementation.
+
+Final browser verification: `node tests/e2e/firebaseOtpV2/run.cjs --workers=2` passed all
+204 desktop/mobile cases (357.55s), with zero failures, retries/flaky cases or skips.
+All 19 production browser-source hashes match the tested bundle; desktop/mobile
+Twilio-code screenshots were visually inspected. The final clean-environment Next.js
+build/type-check stage passed (56 static pages), and focused ESLint/diff whitespace checks
+passed. The pre-existing outdated Browserslist data warning remains. Independent static
+re-review found no remaining important defects. `.gitignore` and the original checkout's
+`.env.local` hashes match their recorded baselines; the original main checkout is clean.
+
+`npm audit --omit=dev --audit-level=high --json` reported 11 existing production dependency
+vulnerabilities: 5 moderate, 5 high, 1 critical. No dependency files changed and no automatic
+upgrade was attempted. These require separate dependency remediation before a production
+release; this follow-up is Preview-only. No real SMS, real appointment, Production setting,
+Firebase domain, cloud data, main branch or local environment file was changed.
+
+Manual testing requires the exact new Preview hostname to be authorized in Firebase.
+Use an owned number, check initial Firebase success, technical-error transfer, and the
+non-receipt action after cooldown. Enter only the Twilio code after switching. Do not
+interpret emulated Chromium mobile tests as real iPhone/Safari or carrier-delivery proof.
+Rollback remains the existing `OTP_PROVIDER_MODE=twilio_only` server policy for newly
+created challenges; persisted in-flight challenges retain their own provider policy.

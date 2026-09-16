@@ -260,13 +260,15 @@ for (const purpose of ['login', 'booking']) {
       });
     }
 
-    test('token fetch recovery keeps credential and never sends fallback', async ({ otp }) => {
+    test('technical token fetch failure switches to a fresh Twilio verification', async ({ otp }) => {
       await otp.open(purpose, { tokenFailures: 1 }); const ui = await otp.start(purpose);
-      await otp.verify(purpose); await expect(ui.verify).toBeEnabled();
+      await otp.verify(purpose);
+      await expect(ui.scope.getByText('أدخل الرمز الجديد المرسل عبر الخدمة البديلة.', { exact: true })).toBeVisible();
+      await expect(ui.code).toHaveValue('');
       expect(otp.count('/api/otp/complete')).toHaveLength(0);
       await otp.verify(purpose); await otp.success(purpose);
-      const { sdk } = await otp.snapshot(); expect(sdk.confirms).toEqual([CODE]); expect(sdk.tokens).toBe(2);
-      expect(otp.count('/api/otp/fallback')).toHaveLength(0);
+      const { sdk } = await otp.snapshot(); expect(sdk.confirms).toEqual([CODE]); expect(sdk.tokens).toBe(1);
+      expect(otp.count('/api/otp/fallback')).toHaveLength(1);
     });
 
     test('cached proof completion retries are bounded to three requests', async ({ otp }) => {

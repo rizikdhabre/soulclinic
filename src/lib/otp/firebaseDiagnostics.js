@@ -15,11 +15,13 @@ export const FIREBASE_ERROR_TYPES = Object.freeze([
 export const FIREBASE_FAILURE_CATEGORIES = Object.freeze([
   "invalid_phone", "invalid_code", "expired_code", "verification_state", "provider_throttle", "quota_or_billing",
   "configuration", "app_verification", "security_rejection", "technical_send", "technical_recaptcha",
-  "technical_setup", "verification_technical", "client_lifecycle", "pending", "unclassified", "provider_code_39",
+  "technical_setup", "verification_technical", "client_lifecycle", "pending", "unclassified", "provider_code_39", "delivery_unconfirmed",
 ]);
 export const FIREBASE_FALLBACK_REASONS = Object.freeze([
   "invalid_report", "operation_pending", "sdk_send_rejected_ambiguous", "recaptcha_technical_failure", "not_eligible",
   "approved_code_39_send_rejection",
+  "module_load_technical_failure", "sdk_setup_technical_failure", "sdk_verification_technical_failure",
+  "user_reported_non_receipt", "server_verification_technical_failure",
 ]);
 
 const codes = new Set(FIREBASE_FAILURE_CODES);
@@ -48,6 +50,10 @@ export function firebaseErrorDiagnostic(error, boundary) {
 
 function category(code, stage, decision) {
   if (code === "auth/error-code:-39") return "provider_code_39";
+  if (code === "client/sms-not-received") return "delivery_unconfirmed";
+  if (decision.eligible && ["confirm", "token", "server_verify"].includes(stage)) return "verification_technical";
+  if (decision.eligible && stage === "initialize") return "technical_setup";
+  if (decision.eligible && stage.startsWith("recaptcha_")) return "technical_recaptcha";
   if (decision.eligible) return decision.reason === "recaptcha_technical_failure" ? "technical_recaptcha" : "technical_send";
   if (code === "client/operation-pending") return "pending";
   if (inCodes(code, ["auth/invalid-phone-number", "auth/missing-phone-number"])) return "invalid_phone";

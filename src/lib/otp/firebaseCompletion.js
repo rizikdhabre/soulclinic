@@ -34,7 +34,9 @@ export async function approveFirebaseChallenge(payload, initial, store, deps = {
     // The next reservation still CAS-checks current provider/status; no live owner is reset here.
     if (isUncommittedFirebaseReservation(observed, challenge)) return challenge;
     return persistObservedResult(store, { challengeTokenHash, provider: "firebase", from: "verifying", now: now(),
-      match: { verifyAttemptId: observed.attemptId, firebaseSendId: observed.firebaseSendId }, patch: { status: "firebase_sent" } },
+      match: { verifyAttemptId: observed.attemptId, firebaseSendId: observed.firebaseSendId }, patch: { status: "firebase_sent",
+        ...(observed.blockFallback === true ? { firebaseRecoveryBlocked: true } : {}),
+        firebaseTechnicalFailureAttempt: observed.technicalFailure === true ? observed.attemptId : null } },
     (value) => value?.provider === "firebase" && value.status === "firebase_sent" && value.verifyAttemptId === observed.attemptId && value.firebaseSendId === observed.firebaseSendId);
   }
   try {
@@ -76,15 +78,21 @@ export async function approveFirebaseChallenge(payload, initial, store, deps = {
       throw error;
     }
     let evidence;
+    let evidenceStarted = false;
     try {
       const rates = await otpPersistence(() => getOtpRateStore(deps));
       await otpPersistence(() => rates.reservePhoneVerifyAttempt(challenge.phone, verifyAttemptId));
+      evidenceStarted = true;
       evidence = await (deps.verifyFirebaseEvidence ?? verifyFirebaseEvidence)(payload.idToken, challenge, { env, now: now() });
     } catch (error) {
+      const identifiedTechnicalFailure = evidenceStarted && error instanceof OtpError && error.code === "OTP_VERIFY_TEMPORARY_FAILURE" && error.firebaseTechnicalFailure === true;
       const observed = { operation: "firebase_retry", provider: "firebase", retry: true, challengeTokenHash, phone: challenge.phone, purpose: challenge.purpose,
-        attemptId: verifyAttemptId, firebaseSendId: challenge.firebaseSendId, observedAt: +now(), expiresAt: +challenge.expiresAt };
+        attemptId: verifyAttemptId, firebaseSendId: challenge.firebaseSendId, observedAt: +now(), expiresAt: +challenge.expiresAt,
+        blockFallback: evidenceStarted && !identifiedTechnicalFailure,
+        technicalFailure: identifiedTechnicalFailure && challenge.firebaseRecoveryBlocked !== true };
       receipt = sealOtpReceipt(observed, env);
       await saveRetry(observed);
+      if (observed.technicalFailure) error.firebaseFallbackAllowed = true;
       throw error instanceof OtpError ? error : fail("OTP_VERIFY_TEMPORARY_FAILURE");
     }
     if (typeof evidence?.uid !== "string" || !evidence.uid || evidence.uid.length > 128 || !Number.isSafeInteger(evidence.authTime) ||

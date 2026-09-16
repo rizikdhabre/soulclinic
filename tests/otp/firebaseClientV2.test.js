@@ -102,6 +102,15 @@ beforeEach(async () => {
 describe("privacy-safe Firebase diagnostic events", () => {
   const events = () => diagnosticLog.mock.calls.filter(([label]) => label === "OTP flow").map(([, event]) => event);
 
+  it("identifies a failed Firebase chunk import before any provider send", async () => {
+    fixture.loadSdk.mockRejectedValue(Object.assign(new Error("private asset URL"), { name: "ChunkLoadError" }));
+    const error = await client().send(PHONE, { correlationId: CORRELATION }).catch(value => value);
+    expect(error.firebaseFailure).toEqual({ code: "client/module-load-failed", stage: "initialize", provenance: "client" });
+    expect(classifyFirebaseSendFailure(error.firebaseFailure).eligible).toBe(true);
+    expect(fixture.sdk.signInWithPhoneNumber).not.toHaveBeenCalled();
+    expect(JSON.stringify(events())).not.toContain("private asset URL");
+  });
+
   it("retains code 39 and clears the settled verifier without removing the stable form container", async () => {
     const root = document.getElementById("login-recaptcha");
     const value = client();
@@ -625,7 +634,7 @@ describe("confirmation proof retry and sign-out", () => {
     fixture.user.getIdToken.mockRejectedValueOnce(sdkError("auth/network-request-failed"));
     const error = await value.confirm(confirmation, "123456").catch((error) => error);
     expect(error.firebaseFailure).toEqual({ code: "auth/network-request-failed", stage: "token", provenance: "firebase_sdk" });
-    expect(classifyFirebaseSendFailure(error.firebaseFailure).eligible).toBe(false);
+    expect(classifyFirebaseSendFailure(error.firebaseFailure).eligible).toBe(true);
     const proof = await value.confirm(confirmation, "123456");
     expect(proof).toBe("private-id-token");
     expect(await value.confirm(confirmation, "654321")).toBe(proof);
@@ -647,13 +656,13 @@ describe("confirmation proof retry and sign-out", () => {
     expect(fixture.user.getIdToken).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["auth/invalid-verification-code", "auth/code-expired", "auth/network-request-failed"])("keeps %s confirmation failures out of send fallback and permits a new code", async (code) => {
+  it.each(["auth/invalid-verification-code", "auth/code-expired", "auth/network-request-failed"])("preserves %s confirmation stage with bounded technical eligibility", async (code) => {
     fixture.confirmation.confirm.mockRejectedValueOnce(sdkError(code));
     const value = client();
     const confirmation = await value.send(PHONE);
     const error = await value.confirm(confirmation, "bad").catch((error) => error);
     expect(error.firebaseFailure.stage).toBe("confirm");
-    expect(classifyFirebaseSendFailure(error.firebaseFailure).eligible).toBe(false);
+    expect(classifyFirebaseSendFailure(error.firebaseFailure).eligible).toBe(code === "auth/network-request-failed");
     await value.confirm(confirmation, "123456");
     expect(fixture.confirmation.confirm).toHaveBeenCalledTimes(2);
   });

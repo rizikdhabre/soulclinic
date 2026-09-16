@@ -1,6 +1,6 @@
 import axios from "axios";
 import { logOtpEvent } from "./diagnostics";
-import { classifyFirebaseSendFailure } from "./firebaseSendPolicy";
+import { classifyFirebaseSendFailure, isFirebaseModuleLoadError } from "./firebaseSendPolicy";
 import { firebaseErrorDiagnostic, firebaseFailureDetails, projectFirebaseDiagnostic } from "./firebaseDiagnostics";
 
 const PROOF_LIFETIME_MS = 300_000;
@@ -164,6 +164,7 @@ function reportClientFailure(flow, api, error, stage, boundary) {
 
 async function replayFallback({ flow, api, onStage, isCurrentAttempt }) {
   // Once transfer is requested, Firebase proof must never be used again.
+  flow.clearProof?.();
   flow.provider = "twilio";
   delete flow.confirmationResult;
   delete flow.idToken;
@@ -188,6 +189,30 @@ async function replayFallback({ flow, api, onStage, isCurrentAttempt }) {
     }
     throw error;
   }
+}
+
+async function switchToTwilio({ flow, failure, diagnostic, ...options }) {
+  if (["confirm", "token"].includes(failure.stage) && flow.sendStatus !== "sent") {
+    // Keep the Firebase confirmation recoverable while its accepted-send write is unresolved.
+    const accepted = await options.api.firebaseSend({ challengeToken: flow.challengeToken, firebaseSendId: flow.firebaseSendId, operation: "accepted" });
+    assertCurrent(options.isCurrentAttempt);
+    if (accepted?.provider !== "firebase" || accepted.status !== "pending") throw flowError("OTP_SEND_PENDING");
+    rememberSendSuccess(flow, accepted);
+  }
+  flow.fallbackFailure = { code: failure.code, stage: failure.stage, provenance: failure.provenance };
+  flow.failureDiagnostic = projectFirebaseDiagnostic(diagnostic);
+  flow.fallbackPending = true;
+  flow.sendStatus = "prepared";
+  clearRecovery(flow);
+  await replayFallback({ flow, ...options });
+  return { requiresNewCode: true, provider: "twilio" };
+}
+
+export async function requestAlternativeOtp({ flow, api, onStage = () => {}, isCurrentAttempt = () => true }) {
+  assertCurrent(isCurrentAttempt);
+  if (flow?.provider !== "firebase" || flow.sendStatus !== "sent" || flow.proofObtained || flow.firebaseRecoveryBlocked || flow.completePromise || flow.sendPromise) throw flowError("OTP_PROVIDER_REJECTED");
+  return switchToTwilio({ flow, api, onStage, isCurrentAttempt,
+    failure: { code: "client/sms-not-received", stage: "delivery", provenance: "client" } });
 }
 
 async function sendFirebase({ flow, api, firebaseClient, getFirebaseClient, onStage, isCurrentAttempt }) {
@@ -263,9 +288,12 @@ async function sendFirebase({ flow, api, firebaseClient, getFirebaseClient, onSt
       };
     } catch (error) {
       assertCurrent(isCurrentAttempt);
-      const failure = error?.firebaseFailure;
+      const failure = !clientLoaded && isFirebaseModuleLoadError(error)
+        ? { code: "client/module-load-failed", stage: "initialize", provenance: "client" }
+        : error?.firebaseFailure;
       flow.failureDiagnostic = projectFirebaseDiagnostic(error?.firebaseDiagnostic);
-      if (classifyFirebaseSendFailure(failure).eligible) {
+      if (!clientLoaded && failure?.code === "client/module-load-failed") flow.failureDiagnostic = firebaseErrorDiagnostic(error, "firebase_client_load");
+      if (!["confirm", "token", "delivery", "server_verify"].includes(failure?.stage) && classifyFirebaseSendFailure(failure).eligible) {
         flow.fallbackFailure = { code: failure.code, stage: failure.stage, provenance: failure.provenance };
         flow.fallbackPending = true;
         return replayFallback({ flow, api, onStage, isCurrentAttempt });
@@ -370,6 +398,7 @@ async function runComplete({
   api,
   firebaseClient,
   getFirebaseClient,
+  onStage = () => {},
   isCurrentAttempt = () => true,
 }) {
   assertCurrent(isCurrentAttempt);
@@ -377,7 +406,10 @@ async function runComplete({
   let completionRequested = false;
   try {
     let proof = { code };
-    if (flow.fallbackPending) await sendOtpClientFlow({ flow, api, isCurrentAttempt });
+    if (flow.fallbackPending) {
+      await sendOtpClientFlow({ flow, api, onStage, isCurrentAttempt });
+      return { requiresNewCode: true, provider: "twilio" };
+    }
     if (flow.provider === "firebase") {
       if (flow.proofObtained && (!flow.idToken || Date.now() >= flow.proofExpiresAt || flow.completionAttempts >= MAX_COMPLETION_ATTEMPTS)) {
         flow.clearProof?.();
@@ -416,6 +448,16 @@ async function runComplete({
   } catch (error) {
     if (isCurrentAttempt() && !completionRequested && flow.provider === "firebase") {
       reportClientFailure(flow, api, error, "confirm", "firebase_confirm");
+      const failure = error?.firebaseFailure;
+      if (["invalid_code", "expired_code", "security_rejection", "provider_throttle", "quota_or_billing", "configuration", "app_verification"].includes(firebaseFailureDetails(failure).failureCategory)) flow.firebaseRecoveryBlocked = true;
+      if (!flow.firebaseRecoveryBlocked && ["confirm", "token"].includes(failure?.stage) && classifyFirebaseSendFailure(failure).eligible) {
+        return switchToTwilio({ flow, api, onStage, isCurrentAttempt, failure, diagnostic: error.firebaseDiagnostic });
+      }
+    }
+    if (isCurrentAttempt() && completionRequested && flow.provider === "firebase" && !flow.firebaseRecoveryBlocked &&
+        responseErrorCode(error) === "OTP_VERIFY_TEMPORARY_FAILURE" && error?.response?.data?.firebaseFallbackAllowed === true) {
+      return switchToTwilio({ flow, api, onStage, isCurrentAttempt,
+        failure: { code: "server/firebase-verification-unavailable", stage: "server_verify", provenance: "server" } });
     }
     if (isCurrentAttempt() && completionRequested) rememberRecovery(flow, "complete", error);
     logFailure(flow, "complete", error);

@@ -31,6 +31,31 @@ beforeEach(() => { vi.spyOn(console, "info").mockImplementation(() => {}); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("Firebase-first frontend flow", () => {
+  it("retains the local wrong-code block even when diagnostics are lost and Admin later fails", async () => {
+    const h = harness(); await h.start();
+    h.api.firebaseSend.mockRejectedValue(new Error("diagnostic unavailable"));
+    h.firebaseClient.confirm.mockRejectedValueOnce(sdkFailure({ code: "auth/invalid-verification-code", stage: "confirm", provenance: "firebase_sdk" }));
+    await h.complete().catch(() => {});
+    h.api.complete.mockRejectedValue(failure("OTP_VERIFY_TEMPORARY_FAILURE", { firebaseFallbackAllowed: true }));
+    await expect(h.complete()).rejects.toBeDefined();
+    expect(h.api.fallback).not.toHaveBeenCalled();
+    expect(h.flow().provider).toBe("firebase");
+  });
+  it("reconciles accepted-send persistence before transferring a technical confirmation failure", async () => {
+    const h = harness();
+    const send = h.api.firebaseSend.getMockImplementation();
+    let broken = true;
+    h.api.firebaseSend.mockImplementation(input => input.operation === "accepted" && broken ? Promise.reject(failure("OTP_PERSISTENCE_FAILED")) : send(input));
+    await h.start().catch(() => {});
+    h.firebaseClient.confirm.mockRejectedValue(sdkFailure({ code: "auth/network-request-failed", stage: "confirm", provenance: "firebase_sdk" }));
+    await expect(h.complete()).rejects.toBeDefined();
+    expect(h.api.fallback).not.toHaveBeenCalled();
+    expect(h.flow().confirmationResult).toBe(confirmation);
+    broken = false;
+    await expect(h.complete()).resolves.toMatchObject({ requiresNewCode: true });
+    expect(h.api.firebaseSend).toHaveBeenCalledWith(expect.objectContaining({ operation: "accepted" }));
+    expect(h.api.fallback).toHaveBeenCalledTimes(1);
+  });
   it.each(["login", "booking"])("code 39 switches the same %s attempt to Twilio and completes with only its code", async (purpose) => {
     const h = harness();
     const code39 = { code: "auth/error-code:-39", stage: "send", provenance: "firebase_sdk" };
@@ -127,28 +152,26 @@ describe("Firebase-first frontend flow", () => {
     expect(h.api.fallback).not.toHaveBeenCalled();
   });
 
-  it("reports a lazy adapter import failure without reclassifying it as a Firebase network rejection", async () => {
+  it("switches on a known lazy adapter import failure without relabeling it as a Firebase network rejection", async () => {
     const h = harness();
     const error = Object.assign(new Error("private module URL"), { name: "ChunkLoadError" });
-    await expect(h.start({ firebaseClient: undefined, getFirebaseClient: async () => { throw error; } })).rejects.toBe(error);
-    expect(h.api.firebaseSend).toHaveBeenLastCalledWith(expect.objectContaining({ operation: "diagnostic",
-      failure: { code: "client/unclassified", stage: "initialize", provenance: "client" },
+    await expect(h.start({ firebaseClient: undefined, getFirebaseClient: async () => { throw error; } })).resolves.toMatchObject({ provider: "twilio" });
+    expect(h.api.fallback).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      failure: { code: "client/module-load-failed", stage: "initialize", provenance: "client" },
       diagnostic: { boundary: "firebase_client_load", errorType: "ChunkLoadError" } }));
-    expect(h.api.fallback).not.toHaveBeenCalled();
-    expect(console.info).toHaveBeenCalledWith("OTP flow", expect.objectContaining({ stage: "firebase_client_failure", errorCode: "client/unclassified", failureStage: "initialize",
-      failureBoundary: "firebase_client_load", errorType: "ChunkLoadError", fallbackDecision: "blocked" }));
+    expect(h.firebaseClient.send).not.toHaveBeenCalled();
   });
 
-  it.each(["confirm", "token"])("reports %s failure to the server without sending or verifying again", async (stage) => {
+  it.each(["confirm", "token"])("reports technical %s failure and requests fresh Twilio verification", async (stage) => {
     const h = harness();
     await h.start();
     const error = sdkFailure({ code: "auth/network-request-failed", stage, provenance: "firebase_sdk" });
     h.firebaseClient.confirm.mockRejectedValue(error);
-    await expect(h.complete()).rejects.toBe(error);
+    await expect(h.complete()).resolves.toMatchObject({ requiresNewCode: true, provider: "twilio" });
     expect(h.api.firebaseSend).toHaveBeenLastCalledWith(expect.objectContaining({ operation: "diagnostic", failure: error.firebaseFailure }));
     expect(h.api.complete).not.toHaveBeenCalled();
     expect(h.firebaseClient.confirm).toHaveBeenCalledTimes(1);
-    expect(h.api.fallback).not.toHaveBeenCalled();
+    expect(h.api.fallback).toHaveBeenCalledTimes(1);
   });
 
   it("a failed or hanging diagnostic upload never replaces or delays the original error", async () => {
@@ -267,7 +290,7 @@ describe("Firebase-first frontend flow", () => {
     expect(h.firebaseClient.send).toHaveBeenCalledTimes(1);
     expect(h.api.fallback).not.toHaveBeenCalled();
   });
-  it.each(["auth/invalid-verification-code", "auth/code-expired", "auth/network-request-failed"])("keeps %s confirmation failures on Firebase", async (code) => {
+  it.each(["auth/invalid-verification-code", "auth/code-expired", "auth/too-many-requests"])("keeps %s confirmation failures on Firebase", async (code) => {
     const h = harness();
     await h.start();
     h.firebaseClient.confirm.mockRejectedValue(sdkFailure({ code, stage: "confirm", provenance: "firebase_sdk" }));
@@ -462,9 +485,11 @@ describe("Firebase-first frontend flow", () => {
     await h.complete().catch(() => {});
     expect(h.flow()).toMatchObject({ recoveryOperation: "fallback", recoveryReceipt: "private-fallback-receipt" });
     h.api.fallback.mockResolvedValue({ provider: "twilio", status: "pending" });
-    await h.complete();
+    await expect(h.complete()).resolves.toMatchObject({ requiresNewCode: true });
     expect(h.api.fallback).toHaveBeenLastCalledWith({ challengeToken: "private-challenge", firebaseSendId: "private-send-id", failure: report, recoveryReceipt: "private-fallback-receipt" });
     expect(h.firebaseClient.confirm).not.toHaveBeenCalled();
-    expect(h.api.complete).toHaveBeenCalledExactlyOnceWith({ challengeToken: "private-challenge", purpose: "login", code: "654321" });
+    expect(h.api.complete).not.toHaveBeenCalled();
+    await h.complete({ code: "987654" });
+    expect(h.api.complete).toHaveBeenCalledExactlyOnceWith({ challengeToken: "private-challenge", purpose: "login", code: "987654" });
   });
 });

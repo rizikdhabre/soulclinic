@@ -77,7 +77,7 @@ export function AppointmentForm({
     note: "",
   });
   const [bookingStep, setStep] = useState("phone");
-  const [otp, setOtp] = useState("");
+  const [otpEntry, setOtpEntry] = useState({ version: 0, value: "" });
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
@@ -95,6 +95,8 @@ export function AppointmentForm({
   const otpFlow = usePhoneOtp({
     purpose: "booking",
   });
+  const otp = otpEntry.version === otpFlow.codeVersion ? otpEntry.value : "";
+  const setOtp = (value) => setOtpEntry({ version: otpFlow.codeVersion, value });
 
   const step = bookingStep === "phone" || bookingStep === "otp"
     ? (otpFlow.phase === "code" || otpFlow.phase === "complete" ? "otp" : "phone")
@@ -270,6 +272,17 @@ export function AppointmentForm({
     }
   };
 
+  const handleAlternativeOtp = async () => {
+    if (!otpFlow.alternativeAvailable || submitting) return;
+    setOtp("");
+    setMessage("");
+    try {
+      await otpFlow.useAlternative();
+    } catch {
+      // The hook retains the challenge and exposes its projected error.
+    }
+  };
+
   const handleDetailsSubmit = async (event) => {
     event.preventDefault();
     if (submitting || bookingFlow.getSnapshot().submitting) return;
@@ -415,7 +428,9 @@ export function AppointmentForm({
               <div className="rounded-xl bg-primary/10 px-4 py-3 text-sm text-primary">
                 <div>{data.phone}</div>
                 <div className="mt-1 text-muted-foreground">
-                  أدخل رمز التحقق الذي تم إرساله إلى رقمك.
+                  {otpFlow.provider === "twilio" && otpFlow.codeVersion > 0
+                    ? "أدخل الرمز الجديد المرسل عبر الخدمة البديلة."
+                    : "أدخل رمز التحقق الذي تم إرساله إلى رقمك."}
                 </div>
               </div>
 
@@ -474,6 +489,16 @@ export function AppointmentForm({
               )}
 
               <div className="grid grid-cols-1 gap-3">
+                {otpFlow.provider === "firebase" && (
+                  <button
+                    type="button"
+                    onClick={handleAlternativeOtp}
+                    disabled={!otpFlow.alternativeAvailable || submitting}
+                    className="w-full whitespace-normal py-2 text-sm text-foreground/70 hover:text-foreground disabled:opacity-50"
+                  >
+                    لم يصلني الرمز، أرسله عبر الخدمة البديلة
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleVerifyOtp}

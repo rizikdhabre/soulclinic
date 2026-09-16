@@ -20,16 +20,26 @@ export const FIREBASE_FAILURE_CODES = Object.freeze([
   "client/container-busy", "client/send-in-progress", "client/cancelled",
   "client/operation-pending", "client/invalid-confirmation", "client/invalid-proof",
   "client/unclassified",
+  "client/module-load-failed", "client/sms-not-received", "server/firebase-verification-unavailable",
 ]);
 
 export const FIREBASE_FAILURE_STAGES = Object.freeze([
   "initialize", "recaptcha_init", "recaptcha_render", "recaptcha_token",
-  "send", "confirm", "token", "lifecycle", "logout",
+  "send", "confirm", "token", "lifecycle", "logout", "delivery", "server_verify",
 ]);
-export const FIREBASE_FAILURE_PROVENANCES = Object.freeze(["firebase_sdk", "recaptcha_sdk", "client"]);
+export const FIREBASE_FAILURE_PROVENANCES = Object.freeze(["firebase_sdk", "recaptcha_sdk", "client", "server"]);
 
 const codes = new Set(FIREBASE_FAILURE_CODES);
 const recaptchaStages = new Set(["recaptcha_init", "recaptcha_render", "recaptcha_token"]);
+const technicalCodes = new Set(["auth/internal-error", "auth/network-request-failed", "auth/timeout"]);
+
+// Call only around a rejected dynamic import, never around a provider operation.
+export function isFirebaseModuleLoadError(error) {
+  if (error?.code != null) return false;
+  if (error?.name === "ChunkLoadError" || error?.name === "NetworkError") return true;
+  return error?.name === "TypeError" && typeof error.message === "string" &&
+    /^(Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module)/i.test(error.message);
+}
 
 export function classifyFirebaseSendFailure(report) {
   if (!report || typeof report !== "object" || Array.isArray(report) ||
@@ -43,13 +53,31 @@ export function classifyFirebaseSendFailure(report) {
   if (code === "client/operation-pending") {
     return { eligible: false, ambiguous: true, reason: "operation_pending" };
   }
+  if (code === "client/module-load-failed" && stage === "initialize" && provenance === "client") {
+    return { eligible: true, ambiguous: false, reason: "module_load_technical_failure" };
+  }
+  if (code === "client/sms-not-received" && stage === "delivery" && provenance === "client") {
+    return { eligible: true, ambiguous: true, reason: "user_reported_non_receipt" };
+  }
+  if (code === "server/firebase-verification-unavailable" && stage === "server_verify" && provenance === "server") {
+    // The server must independently find its own settled infrastructure failure.
+    return { eligible: true, ambiguous: false, reason: "server_verification_technical_failure" };
+  }
+  if (technicalCodes.has(code) && provenance === "firebase_sdk") {
+    if (stage === "initialize" || recaptchaStages.has(stage)) {
+      return { eligible: true, ambiguous: false, reason: "sdk_setup_technical_failure" };
+    }
+    if (stage === "confirm" || stage === "token") {
+      return { eligible: true, ambiguous: true, reason: "sdk_verification_technical_failure" };
+    }
+  }
   if (stage === "send" && provenance === "firebase_sdk" && code === "auth/error-code:-39") {
     // Explicit owner-approved exception; not a diagnosis of code 39 or permission for all 503s.
     // Only a settled rejection qualifies. Existing paid budgets and one-use transfer still apply.
     return { eligible: true, ambiguous: true, reason: "approved_code_39_send_rejection" };
   }
   if (stage === "send" && provenance === "firebase_sdk" &&
-      (code === "auth/internal-error" || code === "auth/network-request-failed" || code === "auth/unknown")) {
+      (technicalCodes.has(code) || code === "auth/unknown")) {
     // An SDK rejection is not proof of non-delivery. A live local watchdog is never this path.
     return { eligible: true, ambiguous: true, reason: "sdk_send_rejected_ambiguous" };
   }

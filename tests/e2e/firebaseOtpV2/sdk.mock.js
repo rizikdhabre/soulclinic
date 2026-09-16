@@ -1,5 +1,6 @@
 // Bundler-only SDK replacement. The production adapter, controller and React UI stay real.
 const state = () => window.__otpTest;
+if (state().scenario.sdkLoadError) throw Object.assign(new Error('Synthetic module load failure'), { name: 'ChunkLoadError' });
 const sdkError = code => Object.assign(new Error('Synthetic SDK error'), { code });
 const apps = [];
 const renderedHosts = new WeakSet();

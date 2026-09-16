@@ -1,5 +1,5 @@
 import { isOtpCorrelationId, logOtpEvent } from "./diagnostics";
-import { FIREBASE_FAILURE_CODES } from "./firebaseSendPolicy";
+import { FIREBASE_FAILURE_CODES, isFirebaseModuleLoadError } from "./firebaseSendPolicy";
 import { firebaseErrorDiagnostic, firebaseFailureDetails } from "./firebaseDiagnostics";
 
 const APP_NAME = "soulclinic-phone-otp-v2";
@@ -40,6 +40,11 @@ function failure(code, stage, provenance = "client") {
 
 function sdkFailure(error, stage, provenance = "firebase_sdk", boundary = stage) {
   if (brandedErrors.has(error)) return error;
+  if (boundary === "firebase_sdk_load" && isFirebaseModuleLoadError(error)) {
+    const safe = failure("client/module-load-failed", "initialize", "client");
+    safe.firebaseDiagnostic = firebaseErrorDiagnostic(error, boundary);
+    return safe;
+  }
   // Positive evidence from a specific public verifier method, never error-message matching.
   if (provenance === "firebase_sdk" && stage.startsWith("recaptcha_") &&
       (error?.code === "auth/network-request-failed" || error?.code === "auth/timeout")) {

@@ -8,6 +8,7 @@ import {
   createOtpApiClient,
   startOtpClientFlow,
   sendOtpClientFlow,
+  requestAlternativeOtp,
 } from "@/lib/otp/client";
 
 const INITIAL_STATE = {
@@ -19,6 +20,8 @@ const INITIAL_STATE = {
   error: null,
   cooldownSeconds: 0,
   statusMessage: "",
+  alternativeAvailable: false,
+  codeVersion: 0,
 };
 
 const PUBLIC_OTP_ERROR_CODES = new Set([
@@ -208,6 +211,8 @@ export function createPhoneOtpController({
       ...patch,
       canRetrySend: flowRef.current?.sendStatus === "prepared",
     };
+    state.alternativeAvailable = state.phase === "code" && state.provider === "firebase" && !state.loading &&
+      !flowRef.current?.proofObtained && !flowRef.current?.firebaseRecoveryBlocked && !state.error && state.cooldownSeconds === 0;
     for (const listener of listeners) listener();
   }
 
@@ -413,11 +418,20 @@ export function createPhoneOtpController({
     updateState({ loading: true, error: null });
 
     try {
-      const result = await completeFlow({ flow: activeFlow, code, api, getFirebaseClient, isCurrentAttempt: () => !disposed && operationVersion === version });
+      const result = await completeFlow({ flow: activeFlow, code, api, getFirebaseClient,
+        onStage: stage => {
+          if (stage === "fallback" && !disposed && operationVersion === version) updateState({ phase: "sending", provider: "twilio", smsSent: false,
+            statusMessage: "جارٍ محاولة إرسال الرمز عبر الخدمة البديلة…", codeVersion: state.codeVersion + 1 });
+        },
+        isCurrentAttempt: () => !disposed && operationVersion === version });
       if (disposed || operationVersion !== version) {
         throw createFlowCancelledError();
       }
 
+      if (result?.requiresNewCode === true && activeFlow.provider === "twilio" && activeFlow.sendStatus === "sent") {
+        updateState({ phase: "code", provider: "twilio", smsSent: true, loading: false, error: null, statusMessage: "" });
+        return undefined;
+      }
       flowRef.current = null;
       stopCooldown();
       updateState({
@@ -430,10 +444,15 @@ export function createPhoneOtpController({
       return result;
     } catch (error) {
       if (!disposed && operationVersion === version) {
+        const publicError = projectError(error, "verify");
+        if (activeFlow.fallbackPending) rememberRestriction(currentPhone, error?.response?.data ?? error, publicError);
         updateState({
-          phase: "code",
+          phase: activeFlow.fallbackPending ? activeFlow.sendStatus === "prepared" ? "send-recovery" : "idle" : "code",
+          smsSent: !activeFlow.fallbackPending,
+          provider: activeFlow.provider,
+          statusMessage: "",
           loading: false,
-          error: projectError(error, "verify"),
+          error: publicError,
         });
       }
       throw error;
@@ -442,6 +461,36 @@ export function createPhoneOtpController({
         activeOperation = null;
         inFlightRef.current = false;
         updateState({ loading: false });
+      }
+    }
+  }
+
+  async function useAlternative() {
+    refreshCooldown();
+    if (disposed || inFlightRef.current || !state.alternativeAvailable) return { started: false };
+    const activeFlow = flowRef.current;
+    const operationVersion = version;
+    const operation = Symbol("otp-alternative");
+    activeOperation = operation;
+    inFlightRef.current = true;
+    const isCurrentAttempt = () => !disposed && operationVersion === version;
+    updateState({ phase: "sending", loading: true, smsSent: false, error: null, codeVersion: state.codeVersion + 1,
+      statusMessage: "جارٍ محاولة إرسال الرمز عبر الخدمة البديلة…" });
+    try {
+      await requestAlternativeOtp({ flow: activeFlow, api, isCurrentAttempt });
+      if (!isCurrentAttempt()) return { started: false };
+      updateState({ phase: "code", provider: "twilio", smsSent: true, statusMessage: "" });
+      return { started: true, provider: "twilio" };
+    } catch (error) {
+      if (isCurrentAttempt()) {
+        const publicError = projectError(error, "start");
+        rememberRestriction(currentPhone, error?.response?.data ?? error, publicError);
+        updateState({ phase: activeFlow.sendStatus === "prepared" ? "send-recovery" : "idle", provider: activeFlow.provider, error: publicError, statusMessage: "" });
+      }
+      throw error;
+    } finally {
+      if (activeOperation === operation) {
+        activeOperation = null; inFlightRef.current = false; updateState({ loading: false });
       }
     }
   }
@@ -482,6 +531,7 @@ export function createPhoneOtpController({
     start,
     verify,
     resend,
+    useAlternative,
     reset,
     setPhone,
     refreshCooldown,
@@ -519,6 +569,7 @@ export function usePhoneOtp({ purpose }) {
     start: controller.start,
     verify: controller.verify,
     resend: controller.resend,
+    useAlternative: controller.useAlternative,
     reset: controller.reset,
     setPhone: controller.setPhone,
   };

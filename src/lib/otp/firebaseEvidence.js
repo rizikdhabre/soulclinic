@@ -45,23 +45,28 @@ function expiredEvidence() {
   return new OtpError("OTP_VERIFICATION_EXPIRED", 401, "Phone verification evidence has expired.");
 }
 
-function infrastructureFailure(error) {
+function infrastructureFailure(error, fallback = false) {
   const pending = [error];
   const seen = new Set();
+  let identified = false;
   for (let index = 0; index < pending.length && index < 12; index += 1) {
     const item = pending[index];
     if (!item || typeof item !== "object" || seen.has(item)) continue;
     seen.add(item);
     const status = item.status ?? item.statusCode;
-    if (NETWORK_CODES.has(item.code) || status === 408 || status === 429 || (status >= 500 && status <= 599)) return true;
+    if (fallback && (status === 429 || status === 401 || status === 403 ||
+        INVALID_TOKEN_CODES.has(item.code) || CONFIGURATION_CODES.has(item.code) ||
+        ["auth/id-token-expired", "auth/too-many-requests", "auth/quota-exceeded"].includes(item.code))) return false;
+    if (NETWORK_CODES.has(item.code) || status === 408 || (!fallback && status === 429) || (status >= 500 && status <= 599)) identified = true;
     pending.push(item.cause, item.response);
   }
-  return false;
+  return identified;
 }
 
 function verificationError(error) {
   if (!(error instanceof OtpError) && infrastructureFailure(error)) {
-    return new OtpError("OTP_VERIFY_TEMPORARY_FAILURE", 503, "Phone verification is temporarily unavailable.");
+    return Object.assign(new OtpError("OTP_VERIFY_TEMPORARY_FAILURE", 503, "Phone verification is temporarily unavailable."),
+      { firebaseTechnicalFailure: infrastructureFailure(error, true) });
   }
   if (error?.code === "auth/id-token-expired") return expiredEvidence();
   if (CONFIGURATION_CODES.has(error?.code)) {
@@ -76,6 +81,8 @@ function verificationError(error) {
     if (TOKEN_REJECTION_PREFIXES.some((prefix) => message.startsWith(prefix))) {
       return invalidEvidence();
     }
+    // A certificate-fetch prefix alone loses the HTTP status in the Admin SDK.
+    // It can also mean 403/429, so only the structured infrastructure path permits transfer.
   }
   return new OtpError("OTP_VERIFY_TEMPORARY_FAILURE", 503, "Phone verification is temporarily unavailable.");
 }

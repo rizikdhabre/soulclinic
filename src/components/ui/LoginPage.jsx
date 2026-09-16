@@ -63,11 +63,13 @@ export default function LoginPage() {
   const router = useRouter();
 
   const [rawPhone, setRawPhone] = useState("");
-  const [otp, setOtp] = useState("");
+  const [otpEntry, setOtpEntry] = useState({ version: 0, value: "" });
   const [localError, setLocalError] = useState("");
   const otpFlow = usePhoneOtp({
     purpose: "login",
   });
+  const otp = otpEntry.version === otpFlow.codeVersion ? otpEntry.value : "";
+  const setOtp = (value) => setOtpEntry({ version: otpFlow.codeVersion, value });
 
   const step = otpFlow.phase === "code" || otpFlow.phase === "complete" ? "otp" : "phone";
 
@@ -109,6 +111,7 @@ export default function LoginPage() {
     setLocalError("");
     try {
       const completion = await otpFlow.verify(otp.trim());
+      if (!completion) return;
       if (
         completion?.success === true &&
         completion?.purpose === "login"
@@ -138,6 +141,17 @@ export default function LoginPage() {
     otpFlow.reset();
     setOtp("");
     setLocalError("");
+  }
+
+  async function handleAlternativeOtp() {
+    if (!otpFlow.alternativeAvailable) return;
+    setOtp("");
+    setLocalError("");
+    try {
+      await otpFlow.useAlternative();
+    } catch {
+      // The hook retains the challenge and exposes its projected error.
+    }
   }
 
   return (
@@ -230,7 +244,9 @@ export default function LoginPage() {
           <>
             <div className="text-center">
               <p className="text-subtle">
-                تم إرسال رمز إلى رقمك. أدخل الرمز للمتابعة.
+                {otpFlow.provider === "twilio" && otpFlow.codeVersion > 0
+                  ? "أدخل الرمز الجديد المرسل عبر الخدمة البديلة."
+                  : "تم إرسال رمز إلى رقمك. أدخل الرمز للمتابعة."}
               </p>
               <p className="mt-1 text-xs text-foreground/60">
                 {normalizedPhone}
@@ -307,6 +323,16 @@ export default function LoginPage() {
                     ? "التحقق من حالة الإرسال"
                     : "إعادة إرسال الرمز"}
             </button>
+            {otpFlow.provider === "firebase" && (
+              <button
+                type="button"
+                onClick={handleAlternativeOtp}
+                disabled={!otpFlow.alternativeAvailable}
+                className="w-full whitespace-normal text-sm text-foreground/70 hover:text-foreground disabled:opacity-50"
+              >
+                لم يصلني الرمز، أرسله عبر الخدمة البديلة
+              </button>
+            )}
           </>
         )}
       </div>

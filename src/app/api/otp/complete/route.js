@@ -55,6 +55,7 @@ function errorResponse(code, error) {
       success: false,
       error: { code: safeCode, message },
       ...metadata,
+      ...(safeCode === "OTP_VERIFY_TEMPORARY_FAILURE" && trusted?.firebaseFallbackAllowed === true ? { firebaseFallbackAllowed: true } : {}),
       ...(boundedString(trusted?.recoveryReceipt, 2048) ? { recoveryReceipt: trusted.recoveryReceipt } : {}),
     },
     { status, headers },

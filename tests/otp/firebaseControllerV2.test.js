@@ -29,6 +29,20 @@ beforeEach(() => { vi.useFakeTimers(); vi.spyOn(console, "info").mockImplementat
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("Firebase-first controller", () => {
+  it("technical confirmation fallback asks for a new Twilio code and never submits the Firebase code to Twilio", async () => {
+    const h = harness();
+    await h.controller.start(phone);
+    h.firebaseClient.confirm.mockRejectedValue(Object.assign(new Error("private"), { firebaseFailure: { code: "auth/network-request-failed", stage: "confirm", provenance: "firebase_sdk" } }));
+    await expect(h.controller.verify("654321")).resolves.toBeUndefined();
+    expect(h.controller.getSnapshot()).toMatchObject({ provider: "twilio", phase: "code", smsSent: true, error: null });
+    expect(h.api.fallback).toHaveBeenCalledTimes(1);
+    expect(h.api.complete).not.toHaveBeenCalled();
+    expect(h.firebaseClient.clearConfirmation).toHaveBeenCalledTimes(1);
+    await h.controller.verify("987654");
+    expect(h.api.complete).toHaveBeenCalledWith(expect.objectContaining({ code: "987654" }));
+    expect(h.firebaseClient.confirm).toHaveBeenCalledTimes(1);
+    h.controller.dispose();
+  });
   it("keeps a provider-accepted Firebase code usable when acknowledgement cannot persist", async () => {
     const h = harness();
     h.api.firebaseSend.mockImplementation(async ({ operation }) => {
@@ -169,7 +183,6 @@ describe("Firebase-first controller", () => {
   it.each([
     ["auth/invalid-verification-code", "INVALID_OTP"],
     ["auth/code-expired", "OTP_VERIFICATION_EXPIRED"],
-    ["auth/network-request-failed", "OTP_VERIFY_TEMPORARY_FAILURE"],
     ["auth/too-many-requests", "OTP_VERIFY_RATE_LIMITED"],
   ])("projects %s safely as %s during confirmation", async (code, expected) => {
     const h = harness();
