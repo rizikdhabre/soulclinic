@@ -1,11 +1,15 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Check } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, LoaderCircle } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import { format } from "date-fns";
+import { ar } from "date-fns/locale";
 import { usePhoneOtp } from "@/hooks/usePhoneOtp";
 import { createBookingFormFlow } from "@/lib/bookingFormFlow";
 import { normalizeIsraeliPhone } from "@/lib/phone";
+
+const CONFIRMED_BOOKING_DESTINATION = "https://www.soulperfume.co/shop";
 
 function getOtpErrorMessage(error) {
   switch (error?.code) {
@@ -64,6 +68,7 @@ export function AppointmentForm({
   selectedTime,
   onSubmit,
   bookingError,
+  onBookingBusyChange,
 }) {
   const [data, setData] = useState({
     firstName: "",
@@ -76,6 +81,9 @@ export function AppointmentForm({
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
+  const otpInputRef = useRef(null);
+  const successRef = useRef(null);
+  const reduceMotion = useReducedMotion();
   const bookingFlowRef = useRef(null);
   if (!bookingFlowRef.current) {
     bookingFlowRef.current = createBookingFormFlow();
@@ -91,6 +99,26 @@ export function AppointmentForm({
   const step = bookingStep === "phone" || bookingStep === "otp"
     ? (otpFlow.phase === "code" || otpFlow.phase === "complete" ? "otp" : "phone")
     : bookingStep;
+
+  const isBookingBusy = submitting ||
+    (otpFlow.loading && otpFlow.phase === "code") || step === "success";
+  useEffect(() => {
+    onBookingBusyChange?.(isBookingBusy);
+  }, [isBookingBusy, onBookingBusyChange]);
+
+  useEffect(() => {
+    if (step !== "otp" || otpFlow.phase !== "code") return;
+    otpInputRef.current?.focus({ preventScroll: true });
+    otpInputRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
+  }, [step, otpFlow.phase, reduceMotion]);
+
+  useEffect(() => {
+    if (step !== "success") return;
+    successRef.current?.focus({ preventScroll: true });
+    successRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
+    const redirect = window.setTimeout(() => window.location.assign(CONFIRMED_BOOKING_DESTINATION), 3000);
+    return () => window.clearTimeout(redirect);
+  }, [step, reduceMotion]);
 
   const normalizedPhone = normalizeIsraeliPhone(data.phone);
   const isSendCooldownBlocking = otpFlow.cooldownSeconds > 0 && !otpFlow.canRetrySend;
@@ -299,20 +327,20 @@ export function AppointmentForm({
     <>
       <div id={otpFlow.recaptchaContainerId} />
 
-      <div className="w-full md:w-auto min-h-[70vh] md:min-h-0 flex items-center justify-center md:block px-4 md:px-0">
-        <div className="w-full max-w-md md:max-w-none">
+      <div className="w-full" dir="rtl">
+        <div className="w-full">
           {otpFlow.statusMessage && (
-            <p role="status" aria-live="polite" className="mb-3 text-sm text-muted-foreground" dir="rtl">
-              {otpFlow.statusMessage}
-            </p>
+            <div role="status" aria-live="polite" aria-atomic="true" className="mb-4 flex min-h-40 flex-col items-center justify-center gap-3 rounded-lg border border-primary/30 bg-primary/10 px-5 py-6 text-center">
+              <LoaderCircle role="img" aria-label="جارٍ الإرسال" className="h-8 w-8 shrink-0 animate-spin text-primary motion-reduce:animate-none" />
+              <p className="font-medium text-foreground">{otpFlow.statusMessage}</p>
+              <p className="text-sm text-muted-foreground">يرجى الانتظار حتى يكتمل إرسال الرمز.</p>
+            </div>
           )}
           {step === "phone" && (
             <form
               onSubmit={handlePhoneSubmit}
               className="
-                space-y-4 rounded-2xl bg-card p-6 border border-border
-                min-h-[350px] md:min-h-0
-                flex flex-col justify-center md:block
+                space-y-4 rounded-lg bg-card p-5 sm:p-6 border border-border
               "
             >
               <input
@@ -381,9 +409,7 @@ export function AppointmentForm({
           {step === "otp" && (
             <div
               className="
-                space-y-4 rounded-2xl bg-card p-6 border border-border
-                min-h-[350px] md:min-h-0
-                flex flex-col justify-center md:block
+                space-y-4 rounded-lg bg-card p-5 sm:p-6 border border-border
               "
             >
               <div className="rounded-xl bg-primary/10 px-4 py-3 text-sm text-primary">
@@ -394,6 +420,7 @@ export function AppointmentForm({
               </div>
 
               <input
+                ref={otpInputRef}
                 placeholder="أدخل رمز التحقق"
                 value={otp}
                 onChange={(event) => setOtp(event.target.value)}
@@ -490,9 +517,7 @@ export function AppointmentForm({
           {step === "retry" && (
             <div
               className="
-                space-y-4 rounded-2xl bg-card p-6 border border-border
-                min-h-[350px] md:min-h-0
-                flex flex-col justify-center md:block
+                space-y-4 rounded-lg bg-card p-5 sm:p-6 border border-border
               "
             >
               <div className="rounded-xl bg-primary/10 px-4 py-3 text-sm text-primary">
@@ -548,9 +573,7 @@ export function AppointmentForm({
             <form
               onSubmit={handleDetailsSubmit}
               className="
-                space-y-4 rounded-2xl bg-card p-6 border border-border
-                min-h-[350px] md:min-h-0
-                flex flex-col justify-center md:block
+                space-y-4 rounded-lg bg-card p-5 sm:p-6 border border-border
               "
             >
               <div className="rounded-xl bg-primary/10 px-4 py-3 text-sm text-primary">
@@ -639,17 +662,29 @@ export function AppointmentForm({
 
           {step === "success" && (
             <div
+              ref={successRef}
+              role="status"
+              aria-live="polite"
+              tabIndex={-1}
               className="
-                space-y-4 rounded-2xl bg-card p-6 border border-border
-                min-h-[350px] md:min-h-0
-                flex flex-col justify-center items-center
+                space-y-4 rounded-lg bg-card px-5 py-10 border border-border
+                flex flex-col justify-center items-center text-center outline-none
               "
             >
-              <Check className="mb-4 text-green-500 w-8 h-8" />
-              <h3 className="text-lg font-semibold">تم الحجز بنجاح</h3>
-              <p className="text-muted-foreground mt-2 text-center">
-                {format(selectedDate, "PPP")} at {selectedTime}
+              <motion.div
+                initial={reduceMotion ? false : { opacity: 0, scale: 0.6, rotate: -15 }}
+                animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                transition={{ type: "spring", stiffness: 220, damping: 14 }}
+                className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary"
+              >
+                <Check role="img" aria-label="تم تأكيد الموعد" className="h-11 w-11" strokeWidth={3} />
+              </motion.div>
+              <h3 className="text-xl font-semibold tracking-normal">تم تأكيد الموعد بنجاح</h3>
+              <p className="text-sm text-muted-foreground">
+                {format(selectedDate, "PPP", { locale: ar })}، الساعة <span dir="ltr">{selectedTime}</span>
               </p>
+              <p className="text-sm text-muted-foreground">سيتم نقلك إلى متجر العطور خلال لحظات.</p>
+              <a href={CONFIRMED_BOOKING_DESTINATION} className="text-sm font-medium text-primary underline underline-offset-4">زيارة متجر العطور</a>
             </div>
           )}
         </div>

@@ -13,6 +13,8 @@ const test = base.extend({
     const unexpected = [];
     const pageErrors = [];
     const challenges = new Map();
+    const shopNavigations = [];
+    const appointmentRequests = [];
     const holds = new Map();
     const config = { provider: 'firebase', cooldown: 60, profileComplete: true };
     page.on('pageerror', error => pageErrors.push(error.message));
@@ -23,8 +25,21 @@ const test = base.extend({
       const url = new URL(request.url());
       const endpoint = url.pathname;
       const block = async () => { unexpected.push(`${request.method()} ${url.origin}${endpoint}`); await route.abort('blockedbyclient'); };
+      if (request.isNavigationRequest() && request.method() === 'GET' && url.href === 'https://www.soulperfume.co/shop') {
+        shopNavigations.push(url.href);
+        return route.fulfill({ status: 200, contentType: 'text/html', body: '<h1>Isolated shop destination</h1>' });
+      }
       if (url.origin !== baseURL) return block();
-      if (request.method() === 'GET' && ['/login', '/booking', '/both', '/harness.js', '/styles.css', '/health'].includes(endpoint)) return route.continue();
+      if (request.method() === 'GET' && ['/login', '/booking', '/both', '/appointments', '/harness.js', '/styles.css', '/health'].includes(endpoint)) return route.continue();
+      if (config.allowBookingApi && endpoint === '/api/appointments') {
+        if (request.method() === 'GET') return route.fulfill({ json: { appointments: [], blockedTimes: [], editedTimes: [] } });
+        if (request.method() === 'POST') {
+          appointmentRequests.push(request.postDataJSON());
+          if (holds.has('appointment')) await holds.get('appointment').promise;
+          if (config.bookingConflict) return route.fulfill({ status: 409, json: { error: 'TIME_SLOT_UNAVAILABLE' } });
+          return route.fulfill({ json: { success: true } });
+        }
+      }
       if (request.method() !== 'POST' || !['/api/otp/challenge', '/api/otp/firebase-send', '/api/otp/fallback', '/api/otp/send', '/api/otp/complete'].includes(endpoint)) return block();
       const body = request.postDataJSON();
       requests.push({ endpoint, body });
@@ -73,7 +88,7 @@ const test = base.extend({
       });
     });
     const api = {
-      requests, unexpected, config, count,
+      requests, unexpected, config, count, shopNavigations, appointmentRequests,
       hold(key) {
         let release;
         const promise = new Promise(resolve => { release = resolve; });
@@ -84,8 +99,9 @@ const test = base.extend({
         await page.addInitScript(scenario => {
           window.__otpTest = { scenario, sdk: { sends: [], confirms: [], tokens: 0, construct: 0, clear: 0, signOut: 0, containers: [] }, navigation: [], submissions: [] };
         }, scenario);
-        await page.goto(`/${purpose}`);
-        await expect(page.locator('input[inputmode="tel"]').first()).toBeVisible();
+        await page.goto(purpose === 'appointments' ? '/appointments?duration=20&price=180&title=Test' : `/${purpose}`);
+        if (purpose === 'appointments') await expect(page.getByRole('heading', { name: 'حجز موعد', exact: true })).toBeVisible();
+        else await expect(page.locator('input[inputmode="tel"]').first()).toBeVisible();
       },
       ui(purpose) {
         const scope = page.getByTestId(purpose);
@@ -114,7 +130,7 @@ const test = base.extend({
       async success(purpose) {
         if (purpose === 'login') await expect.poll(() => page.evaluate(() => window.__otpTest.navigation)).toEqual(['/userAppointments']);
         else {
-          await expect(page.getByText('تم الحجز بنجاح', { exact: true })).toBeVisible();
+          await expect(page.getByRole('heading', { name: 'تم تأكيد الموعد بنجاح', exact: true })).toBeVisible();
           await expect.poll(() => page.evaluate(() => window.__otpTest.submissions.length)).toBe(1);
         }
       },

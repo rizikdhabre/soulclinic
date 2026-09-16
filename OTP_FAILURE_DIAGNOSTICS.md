@@ -252,3 +252,53 @@ Rollout is this Preview branch only. Do not merge to main or change Production.
 Manual testing needs the current Preview hostname authorized in Firebase; no domain
 or Firebase configuration is changed by this patch. A previously failed challenge
 is not reopened: refresh and begin a new attempt after the normal cooldown.
+
+## Booking UI Preview Follow-Up (2026-09-17)
+
+The owner requested presentation-only changes on the same Preview branch:
+
+- Initially reveal only the calendar. Date selection reveals and scrolls to times;
+  time selection reveals and scrolls to the phone form. Respect reduced motion.
+- Preserve the mounted appointment form and reCAPTCHA root while changing selections.
+  Clip calendar slide animations locally to prevent mobile horizontal overflow.
+- Show an inline Arabic waiting card during sending and fallback, without an overlay
+  hiding reCAPTCHA. Code entry still requires provider send acceptance. Focus its input
+  when accepted, including after explicit resend; failures keep the correct error state.
+- After a successful booking submission, animate the checkmark and display Arabic
+  confirmation, date and time. After three seconds navigate to the exact fixed URL
+  `https://www.soulperfume.co/shop`; a normal link is also available. Cancel the timer
+  on unmount. OTP confirmation alone, incomplete profiles and failed bookings never redirect.
+- Disable the calendar/time controls during verification, saving and confirmed success
+  so the submitted selection remains visible. A slot conflict restores time selection,
+  shows its existing Arabic explanation there, and retains the grant for booking recovery.
+
+Production changes are confined to `src/app/appointments/AppointmentsClient.js` and
+`src/components/ui/AppointmentForm.jsx`. No provider policy, OTP controller/service,
+API route, scheduling rule, session/grant logic, environment, dependency or `.gitignore`
+was changed. The original main checkout remains separate and clean.
+
+The browser sidecar now also mounts the real booking page/calendar/time picker. Its
+appointment reads/writes are opt-in Playwright responses only, and the shop destination
+is intercepted as a static test document. No real SMS or appointment was created.
+The new `bookingExperience.spec.cjs` belongs in Git despite the ignored test directory;
+generated screenshots/traces remain local. Baseline: 1,651 unit/integration tests passed.
+Six initial desktop UI regressions failed before implementation. An animated-calendar
+overflow regression and two review-driven booking-state regressions also failed before
+their fixes. See the browser harness README for scope and safety boundaries.
+
+Final verification: `npm run test:run -- --maxWorkers=2 --testTimeout=15000 --silent`
+passed all 1,651 tests in 38 files (51.24s). `node tests/e2e/firebaseOtpV2/run.cjs`
+passed all 172 desktop/mobile cases, zero retries/failures/skips (297.46s). The test
+bundle manifest matches both final production source files. Screenshots were inspected
+on desktop and mobile. Focused ESLint passed without warnings; the clean-environment
+Next.js build/type-check stage passed with 56 static pages and synthetic loopback Mongo
+configuration. An independent static re-review found no remaining actionable defects.
+The existing outdated Browserslist-data build warning remains unrelated to this change.
+
+Manual Preview checks: authorize the new exact deployment hostname in Firebase before
+testing SMS. Check calendar-only entry, date/time scrolling, waiting/fallback card,
+accepted-send and resend focus, and the success checkmark followed by the shop redirect.
+Use only owner-authorized numbers and bookings. Chromium emulation does not establish
+real iPhone keyboard behavior: Safari may require a tap to open its software keyboard
+even when the code input is focused. No Production deployment or Firebase settings change
+is authorized by this follow-up.

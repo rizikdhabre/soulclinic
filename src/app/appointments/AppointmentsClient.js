@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { motion } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
+import { useReducedMotion } from "framer-motion";
 import axios from "axios";
 import { format } from "date-fns";
 import { AnimatedCalendar } from "@/components/ui/AnimatedCalendar";
@@ -19,6 +19,16 @@ export default function AppointmentsClient() {
   const [selectedTime, setSelectedTime] = useState(null);
   const [bookingError, setBookingError] = useState(null);
   const [availabilityRefreshKey, setAvailabilityRefreshKey] = useState(0);
+  const [isBookingBusy, setBookingBusy] = useState(false);
+  const timesRef = useRef(null);
+  const formRef = useRef(null);
+  const reduceMotion = useReducedMotion();
+
+  useEffect(() => {
+    if (!selectedDate) return;
+    const target = selectedTime ? formRef.current : timesRef.current;
+    target?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+  }, [selectedDate, selectedTime, reduceMotion]);
 
   const handleDateSelect = (date) => {
     setSelectedDate(date);
@@ -77,52 +87,29 @@ export default function AppointmentsClient() {
   };
 
   return (
-    <div className="min-h-screen gradient-hero">
-      {/* Background decoration */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 1 }}
-          className="absolute top-0 right-0 w-[600px] h-[600px] rounded-full bg-primary/5 blur-3xl -translate-y-1/2 translate-x-1/2"
-        />
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 1, delay: 0.2 }}
-          className="absolute bottom-0 left-0 w-[600px] h-[600px] rounded-full bg-primary/5 blur-3xl translate-y-1/2 -translate-x-1/2"
-        />
-      </div>
-
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-20">
+    <div className="min-h-screen bg-background" dir="rtl">
+      <div className="max-w-xl mx-auto px-4 sm:px-6 py-12 md:py-20">
         <AppointmentHeader />
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.5 }}
-          className="grid grid-cols-1 lg:grid-cols-3 gap-6"
-        >
-          {/* Calendar Card */}
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.5, delay: 0.6 }}
-            className="bg-card rounded-2xl p-6 shadow-lg border border-border/50"
-          >
+        <div className="space-y-8">
+          <fieldset role="region" aria-label="اختيار التاريخ" disabled={isBookingBusy} className="min-w-0 overflow-hidden pb-4">
             <AnimatedCalendar
               selectedDate={selectedDate}
               onSelectDate={handleDateSelect}
             />
-          </motion.div>
+          </fieldset>
 
-          {/* Time Slots Card */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.7 }}
-            className="bg-card rounded-2xl p-6 shadow-lg border border-border/50"
+          <fieldset
+            role="region"
+            ref={timesRef}
+            aria-label="اختيار الوقت"
+            disabled={isBookingBusy}
+            hidden={!selectedDate}
+            className="min-w-0 scroll-mt-40 min-h-[calc(100svh-10rem)] border-t border-border pt-6"
           >
+            {bookingError && !selectedTime && (
+              <p role="alert" className="mb-4 rounded-lg bg-red-500/10 px-4 py-3 text-sm text-red-600">{bookingError}</p>
+            )}
             <TimeSlotPicker
               selectedDate={selectedDate}
               selectedTime={selectedTime}
@@ -130,23 +117,24 @@ export default function AppointmentsClient() {
               duration={duration}
               refreshKey={availabilityRefreshKey}
             />
-          </motion.div>
+          </fieldset>
 
-          {/* Form Card */}
-          <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.5, delay: 0.8 }}
-            className="bg-card rounded-2xl p-6 shadow-lg border border-border/50"
+          <section
+            ref={formRef}
+            aria-label="تأكيد الموعد"
+            hidden={!selectedTime}
+            className="scroll-mt-40 min-h-[calc(100svh-10rem)] border-t border-border pt-6"
           >
+            {/* Keep the form and its reCAPTCHA root mounted when selection changes. */}
             <AppointmentForm
               selectedDate={selectedDate}
               selectedTime={selectedTime}
               bookingError={bookingError}
+              onBookingBusyChange={setBookingBusy}
               onSubmit={handleFormSubmit}
             />
-          </motion.div>
-        </motion.div>
+          </section>
+        </div>
       </div>
     </div>
   );

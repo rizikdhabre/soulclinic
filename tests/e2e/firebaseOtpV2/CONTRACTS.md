@@ -20,4 +20,7 @@ firebase-send reserve `{provider:'firebase',phone,firebaseSendId,status:'reserve
 accepted `{provider:'firebase',status:'pending'}`; fallback `{provider:'twilio',status:'pending'}`;
 complete sends `idToken` (Firebase) or `code` (Twilio), with endpoint-scoped recovery receipts.
 Booking success supplies a synthetic grant and records the `onSubmit` callback in memory.
-No appointment API request is permitted, including after successful booking UI completion.
+Form-only tests disallow appointment API requests. Full-page booking UI tests now explicitly
+opt in to Playwright-intercepted appointment reads/writes; responses and submission records
+are in memory only. No request reaches an application server or creates an appointment.
+The exact shop redirect is also fulfilled locally to prevent outbound navigation.

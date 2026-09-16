@@ -41,7 +41,7 @@ async function main() {
         if (!relative.startsWith('src/')) return undefined;
         const contents = fs.readFileSync(args.path, 'utf8');
         sourceHashes[relative] = createHash('sha256').update(contents).digest('hex');
-        return { contents, loader: path.extname(args.path).slice(1) };
+        return { contents, loader: path.extname(args.path) === '.js' ? 'jsx' : path.extname(args.path).slice(1) };
       });
     } }],
   });
@@ -76,7 +76,7 @@ async function main() {
     ['/health', ['application/json', JSON.stringify({ isolated: true, sdkMocked: true, productionComponents: true })]],
   ]);
   const html = '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"></head><body><div id="root"></div><script src="/harness.js"></script></body></html>';
-  for (const route of ['/login', '/booking', '/both']) assets.set(route, ['text/html; charset=utf-8', html]);
+  for (const route of ['/login', '/booking', '/both', '/appointments']) assets.set(route, ['text/html; charset=utf-8', html]);
   const server = http.createServer((request, response) => {
     response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'");
     response.setHeader('Cache-Control', 'no-store');
