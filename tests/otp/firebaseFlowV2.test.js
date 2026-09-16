@@ -31,6 +31,50 @@ beforeEach(() => { vi.spyOn(console, "info").mockImplementation(() => {}); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("Firebase-first frontend flow", () => {
+  it.each(["login", "booking"])("code 39 switches the same %s attempt to Twilio and completes with only its code", async (purpose) => {
+    const h = harness();
+    const code39 = { code: "auth/error-code:-39", stage: "send", provenance: "firebase_sdk" };
+    const error = sdkFailure(code39);
+    error.firebaseDiagnostic = { boundary: "firebase_send", errorType: "FirebaseError", sdkErrorCode: code39.code };
+    h.firebaseClient.send.mockRejectedValue(error);
+    const onStage = vi.fn();
+    await h.start({ purpose, onStage });
+    expect(onStage).toHaveBeenCalledWith("fallback");
+    expect(h.api.fallback).toHaveBeenCalledExactlyOnceWith({ challengeToken: "private-challenge", firebaseSendId: "private-send-id",
+      failure: code39, diagnostic: error.firebaseDiagnostic });
+    expect(h.api.challenge).toHaveBeenCalledTimes(1);
+    expect(h.api.send).not.toHaveBeenCalled();
+    expect(h.flow()).toMatchObject({ provider: "twilio", sendStatus: "sent", fallbackPending: false });
+    expect(h.flow()).not.toHaveProperty("confirmationResult");
+    expect(h.flow()).not.toHaveProperty("idToken");
+    await h.complete();
+    expect(h.firebaseClient.confirm).not.toHaveBeenCalled();
+    expect(h.api.complete).toHaveBeenCalledExactlyOnceWith({ challengeToken: "private-challenge", purpose, code: "654321" });
+  });
+
+  it("code 39 fallback retries its saved receipt without restarting Firebase", async () => {
+    const h = harness();
+    const code39 = { code: "auth/error-code:-39", stage: "send", provenance: "firebase_sdk" };
+    h.firebaseClient.send.mockRejectedValue(sdkFailure(code39));
+    h.api.fallback.mockRejectedValueOnce(failure("OTP_PERSISTENCE_FAILED", { recoveryReceipt: "private-fallback-receipt" }));
+    await expect(h.start()).rejects.toMatchObject({ code: "OTP_PERSISTENCE_FAILED" });
+    await h.retry();
+    expect(h.api.fallback).toHaveBeenLastCalledWith({ challengeToken: "private-challenge", firebaseSendId: "private-send-id", failure: code39,
+      recoveryReceipt: "private-fallback-receipt" });
+    expect(h.firebaseClient.send).toHaveBeenCalledTimes(1);
+    expect(h.api.challenge).toHaveBeenCalledTimes(1);
+    expect(h.api.send).not.toHaveBeenCalled();
+  });
+
+  it.each(["confirm", "token"])("code 39 during %s never changes providers", async (stage) => {
+    const h = harness();
+    await h.start();
+    h.firebaseClient.confirm.mockRejectedValue(sdkFailure({ code: "auth/error-code:-39", stage, provenance: "firebase_sdk" }));
+    await expect(h.complete()).rejects.toBeDefined();
+    expect(h.flow().provider).toBe("firebase");
+    expect(h.api.fallback).not.toHaveBeenCalled();
+    expect(h.api.complete).not.toHaveBeenCalled();
+  });
   it("forwards diagnostic-only SDK identity through send rejection without selecting Twilio", async () => {
     const h = harness();
     const value = { code: "client/unclassified", stage: "send", provenance: "firebase_sdk" };

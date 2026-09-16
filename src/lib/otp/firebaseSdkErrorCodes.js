@@ -108,6 +108,7 @@ export const FIREBASE_SDK_ERROR_CODES = Object.freeze([
   "auth/web-storage-unsupported",
   "auth/wrong-password",
   "auth/unknown", // Existing bounded backend passthrough, absent from AuthErrorCodes.
+  "auth/error-code:-39", // Observed backend "Error code: 39" normalized by the SDK.
 ]);
 
 export const FIREBASE_SDK_ERROR_CODE_STATES = Object.freeze(["missing", "redacted"]);

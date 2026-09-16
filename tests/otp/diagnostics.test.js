@@ -23,6 +23,14 @@ describe("privacy-safe OTP diagnostics", () => {
     expect(info).toHaveBeenCalledExactlyOnceWith("OTP flow", { stage: "firebase_send_rejected", sdkErrorCodeState: "redacted" });
   });
 
+  it("logs only safe code 39 identifiers and the explicitly approved fallback reason", () => {
+    const safe = { correlationId, stage: "fallback_decision", errorCode: "auth/error-code:-39",
+      sdkErrorCode: "auth/error-code:-39", failureCategory: "provider_code_39", fallbackDecision: "eligible",
+      reason: "approved_code_39_send_rejection", fallbackReason: "approved_code_39_send_rejection" };
+    logOtpEvent({ ...safe, phone: "private-phone", idToken: "private-token", message: "private-token" });
+    expect(info).toHaveBeenCalledExactlyOnceWith("OTP flow", safe);
+  });
+
   it.each(FIREBASE_FAILURE_CODES)("retains the classified client failure %s instead of an empty error", (errorCode) => {
     logOtpEvent({ correlationId, stage: "firebase_send_rejected", errorCode });
     expect(info).toHaveBeenCalledExactlyOnceWith("OTP flow", { correlationId, stage: "firebase_send_rejected", errorCode });

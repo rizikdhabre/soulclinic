@@ -198,3 +198,57 @@ The final Playwright harness passed all 146 desktop/mobile tests, zero retries (
 including eight new cases for diagnostic-only identifiers and payload redaction.
 External providers/API writes were mocked; this does not prove real iPhone or SMS
 delivery. Production was not changed, and the original checkout remains clean.
+
+## Explicit Code 39 Fallback Exception (2026-09-16)
+
+The owner explicitly approved Twilio fallback for the observed backend response
+`503 / Error code: 39`, which the installed Firebase SDK normalizes to
+`auth/error-code:-39`. This is a business-policy exception, not a claim that code 39
+always means an outage rather than an anti-abuse, carrier, quota, or other restriction.
+
+The shared policy allows only the exact identifier, at stage `send`, with provenance
+`firebase_sdk`, after the SDK promise rejects. Setup, confirmation, token retrieval,
+pending operations, lookalike codes and arbitrary HTTP 503s do not gain permission.
+Other quota, throttle, security and configuration decisions remain unchanged.
+Diagnostics retain the exact identifier, category `provider_code_39`, and reason
+`approved_code_39_send_rejection`, without messages, provider payloads or tokens.
+
+The existing fallback is reused without changing the sender or verification services:
+the settled Firebase verifier is cleared while the form container stays mounted;
+the client drops Firebase confirmation/proof from the attempt; the server atomically
+transfers the same challenge to Twilio; only Twilio verification can then complete it.
+No new challenge is admitted for fallback, so its own phone cooldown is not charged
+again. Source-send and global paid-SMS budgets still apply. Parallel fallback calls,
+lost responses and persistence recovery retain one provider dispatch per reservation.
+The old Firebase proof is rejected after transition, including when a code accompanies it.
+Completion replay uses the same session/grant, without another external code check.
+
+The report from the browser is still not trusted evidence of a provider outage: the
+server enforces challenge/source binding, expiry, provider state and spending limits.
+The outcome remains marked ambiguous. SoulClinic cannot retract an SMS already accepted
+by Firebase or guarantee that cross-provider duplicate delivery is impossible. It can
+and does enforce that only Twilio proof completes a transferred SoulClinic challenge.
+
+Source changes: `firebaseSendPolicy.js`, `firebaseSdkErrorCodes.js`,
+`firebaseDiagnostics.js`, `diagnostics.js`. Six focused test files plus the existing
+Playwright login/booking matrix cover this exception. No dependency, environment,
+storage, scheduling, session semantics or `.gitignore` changes were needed.
+
+Verification: unchanged baseline `npm run test:run` had 1,626 passes and one existing
+Admin module-load test exceed its 5-second timeout; an isolated rerun also exceeded
+that timeout. Before the production edit, 14 new regressions failed for the missing
+code-39 behavior. After implementation, all 494 focused tests passed. Full suite:
+`npm run test:run -- --maxWorkers=2 --testTimeout=15000 --silent` passed all 1,651 tests
+in 38 files (26.36s), including ephemeral standalone and replica-set MongoDB suites.
+The longer timeout is test-run-only; neither test configuration nor runtime deadlines
+were changed. Focused ESLint and Next.js build/type checks passed (56 static pages),
+using a synthetic loopback Mongo URI and no environment files or real providers.
+Playwright passed all 150 desktop/mobile Chromium tests with zero failures, retries,
+or skips (163.27s), including code-39 fallback for both login and booking. Firebase,
+Twilio and application writes were mocked; no real SMS or appointments were created.
+This validates browser behavior, not real iPhone compatibility or carrier delivery.
+
+Rollout is this Preview branch only. Do not merge to main or change Production.
+Manual testing needs the current Preview hostname authorized in Firebase; no domain
+or Firebase configuration is changed by this patch. A previously failed challenge
+is not reopened: refresh and begin a new attempt after the normal cooldown.

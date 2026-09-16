@@ -7,7 +7,7 @@ const ISO_UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const STAGES = new Set(["challenge", "send", "verify", "complete", "configuration", "challenge_admission", "firebase_init", "firebase_sdk_load", "firebase_auth_init", "recaptcha_init", "recaptcha_render", "recaptcha_token", "firebase_recaptcha_init", "firebase_recaptcha_token", "firebase_send_started", "firebase_send_accepted", "firebase_send_rejected", "firebase_send_unknown", "fallback_decision", "twilio_fallback_reserved", "twilio_send_accepted", "twilio_send_rejected", "twilio_send_unknown", "firebase_code_confirm", "firebase_id_token_ready", "firebase_server_evidence_checked", "twilio_code_check", "provider_approved", "application_session_issued", "booking_grant_issued", "completion_response"]);
 const DECISIONS = new Set(["started", "reserved", "success", "failed", "blocked", "reject", "recovered"]);
 STAGES.add("firebase_client_failure");
-const REASONS = new Set(["invalid_report", "operation_pending", "sdk_send_rejected_ambiguous", "recaptcha_technical_failure", "not_eligible", "client_reported", "certificate_fetch_failure"]);
+const REASONS = new Set([...FIREBASE_FALLBACK_REASONS, "client_reported", "certificate_fetch_failure"]);
 for (const stage of ["firebase_admin_sdk_load", "firebase_admin_init", "firebase_admin_verify"]) STAGES.add(stage);
 const ERROR_CODES = new Set([
   "INVALID_PHONE", "INVALID_OTP_PURPOSE", "INVALID_OTP", "OTP_RATE_LIMITED",

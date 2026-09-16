@@ -15,10 +15,11 @@ export const FIREBASE_ERROR_TYPES = Object.freeze([
 export const FIREBASE_FAILURE_CATEGORIES = Object.freeze([
   "invalid_phone", "invalid_code", "expired_code", "verification_state", "provider_throttle", "quota_or_billing",
   "configuration", "app_verification", "security_rejection", "technical_send", "technical_recaptcha",
-  "technical_setup", "verification_technical", "client_lifecycle", "pending", "unclassified",
+  "technical_setup", "verification_technical", "client_lifecycle", "pending", "unclassified", "provider_code_39",
 ]);
 export const FIREBASE_FALLBACK_REASONS = Object.freeze([
   "invalid_report", "operation_pending", "sdk_send_rejected_ambiguous", "recaptcha_technical_failure", "not_eligible",
+  "approved_code_39_send_rejection",
 ]);
 
 const codes = new Set(FIREBASE_FAILURE_CODES);
@@ -46,6 +47,7 @@ export function firebaseErrorDiagnostic(error, boundary) {
 }
 
 function category(code, stage, decision) {
+  if (code === "auth/error-code:-39") return "provider_code_39";
   if (decision.eligible) return decision.reason === "recaptcha_technical_failure" ? "technical_recaptcha" : "technical_send";
   if (code === "client/operation-pending") return "pending";
   if (inCodes(code, ["auth/invalid-phone-number", "auth/missing-phone-number"])) return "invalid_phone";

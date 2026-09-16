@@ -102,6 +102,21 @@ beforeEach(async () => {
 describe("privacy-safe Firebase diagnostic events", () => {
   const events = () => diagnosticLog.mock.calls.filter(([label]) => label === "OTP flow").map(([, event]) => event);
 
+  it("retains code 39 and clears the settled verifier without removing the stable form container", async () => {
+    const root = document.getElementById("login-recaptcha");
+    const value = client();
+    fixture.sdk.signInWithPhoneNumber.mockRejectedValueOnce(Object.assign(sdkError("auth/error-code:-39"), { name: "FirebaseError" }));
+    const error = await value.send(PHONE, { correlationId: CORRELATION }).catch(error => error);
+    expect(error.firebaseFailure).toEqual({ code: "auth/error-code:-39", stage: "send", provenance: "firebase_sdk" });
+    expect(classifyFirebaseSendFailure(error.firebaseFailure).eligible).toBe(true);
+    expect(error.firebaseDiagnostic.sdkErrorCode).toBe("auth/error-code:-39");
+    expect(fixture.instances[0].clear).toHaveBeenCalledTimes(1);
+    expect(root.childNodes).toHaveLength(0);
+    expect(document.getElementById("login-recaptcha")).toBe(root);
+    expect(fixture.confirmation.confirm).not.toHaveBeenCalled();
+    expect(JSON.stringify(events())).not.toMatch(/private|secret|972521234567/);
+  });
+
   it.each(["auth/invalid-credential", "auth/user-not-found", "auth/missing-or-invalid-nonce"])(
     "retains diagnostic-only SDK send code %s while fallback remains blocked", async (code) => {
       fixture.sdk.signInWithPhoneNumber.mockRejectedValue(Object.assign(sdkError(code), { name: "FirebaseError" }));

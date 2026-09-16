@@ -1,8 +1,9 @@
 // Shared wire enum: keep this module SDK-free for both browser and server callers.
 // Auth names checked against Firebase 12.19.0 / @firebase/auth 1.13.6 AuthErrorCodes.
-// UNKNOWN is a backend-code passthrough, not an AuthErrorCodes member. Never invent it.
+// UNKNOWN and the observed code 39 are backend passthroughs, not AuthErrorCodes members.
 export const FIREBASE_FAILURE_CODES = Object.freeze([
   "auth/network-request-failed", "auth/unknown", "auth/timeout", "auth/internal-error",
+  "auth/error-code:-39",
   "auth/invalid-phone-number", "auth/missing-phone-number", "auth/invalid-verification-code",
   "auth/missing-verification-code", "auth/code-expired", "auth/invalid-verification-id",
   "auth/missing-verification-id", "auth/user-disabled", "auth/rejected-credential",
@@ -41,6 +42,11 @@ export function classifyFirebaseSendFailure(report) {
   const { code, stage, provenance } = report;
   if (code === "client/operation-pending") {
     return { eligible: false, ambiguous: true, reason: "operation_pending" };
+  }
+  if (stage === "send" && provenance === "firebase_sdk" && code === "auth/error-code:-39") {
+    // Explicit owner-approved exception; not a diagnosis of code 39 or permission for all 503s.
+    // Only a settled rejection qualifies. Existing paid budgets and one-use transfer still apply.
+    return { eligible: true, ambiguous: true, reason: "approved_code_39_send_rejection" };
   }
   if (stage === "send" && provenance === "firebase_sdk" &&
       (code === "auth/internal-error" || code === "auth/network-request-failed" || code === "auth/unknown")) {

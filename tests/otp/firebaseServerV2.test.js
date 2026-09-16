@@ -7,7 +7,7 @@ import { completeOtpChallenge } from "@/lib/otp/completionService";
 import { hashBearerToken } from "@/lib/otp/crypto";
 import { verifyCustomerSession } from "@/lib/customerSession";
 import { OtpError } from "@/lib/otp/errors";
-import { MemoryMongoCollection } from "../helpers/memoryOtpStores";
+import { MemoryMongoClient, MemoryMongoCollection } from "../helpers/memoryOtpStores";
 
 vi.mock("server-only", () => ({}));
 
@@ -45,6 +45,53 @@ async function fixture(purpose = "login", mode = "firebase_first") {
 }
 
 describe("Firebase primary server ownership", () => {
+  it.each(["login", "booking"])("code 39 completes %s once through Twilio and rejects the old Firebase proof", async (purpose) => {
+    const f = await fixture(purpose);
+    f.deps.grants = new MemoryMongoCollection();
+    f.deps.client = new MemoryMongoClient([f.collection, f.deps.grants], { transactionsUnsupported: true });
+    const { firebaseSendId } = await f.reserve();
+    const report = { ...failure, code: "auth/error-code:-39" };
+    await f.fallback(firebaseSendId, { failure: report });
+    expect(await f.current()).toMatchObject({ provider: "twilio", fallbackFailure: report, fallbackAmbiguous: true,
+      firebaseSendFailure: { errorCode: report.code, fallbackReason: "approved_code_39_send_rejection" } });
+    await expect(f.complete({ code: "654321" })).rejects.toHaveProperty("code");
+    expect(f.deps.verifyFirebaseEvidence).not.toHaveBeenCalled();
+    expect(f.deps.verifyTwilioCode).not.toHaveBeenCalled();
+    const result = await f.complete({ idToken: undefined, code: "654321" });
+    expect(await f.complete({ idToken: undefined, code: "654321" })).toEqual(result);
+    expect(result.purpose).toBe(purpose);
+    expect(f.deps.verifyTwilioCode).toHaveBeenCalledTimes(1);
+    expect(f.deps.sendVerification).toHaveBeenCalledTimes(1);
+    if (purpose === "login") {
+      expect(await verifyCustomerSession(result.sessionToken, { env: f.deps.env, now: f.deps.clock.now() })).toMatchObject({ phone: PHONE });
+    } else {
+      expect(result.verificationToken).toEqual(expect.any(String));
+      expect(f.deps.grants.documents).toHaveLength(1);
+    }
+  });
+
+  it.each([
+    ["claimSourceAction", "OTP_SEND_SOURCE_RATE_LIMITED"],
+    ["claimGlobalSend", "OTP_SEND_BUDGET_EXCEEDED"],
+  ])("code 39 does not bypass %s before a paid SMS", async (method, code) => {
+    const f = await fixture();
+    const { firebaseSendId } = await f.reserve();
+    f.deps.rateStore[method].mockRejectedValue(new OtpError(code, 429, "Test limit"));
+    await expect(f.fallback(firebaseSendId, { failure: { ...failure, code: "auth/error-code:-39" } })).rejects.toHaveProperty("code", code);
+    expect(f.deps.sendVerification).not.toHaveBeenCalled();
+    expect(f.deps.rateStore.claimPhoneStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("code 39 cannot bypass source binding or an already accepted Firebase send", async () => {
+    const f = await fixture();
+    const { firebaseSendId } = await f.reserve();
+    const report = { ...failure, code: "auth/error-code:-39" };
+    await expect(requestFirebaseFallback({ ...f.input, firebaseSendId, failure: report }, { ...f.deps, deriveSourceHash: () => "other" }))
+      .rejects.toHaveProperty("code", "OTP_CHALLENGE_FAILED");
+    await f.accepted(firebaseSendId);
+    await expect(f.fallback(firebaseSendId, { failure: report })).rejects.toHaveProperty("code", "OTP_PROVIDER_REJECTED");
+    expect(f.deps.sendVerification).not.toHaveBeenCalled();
+  });
   it("saves the separate SDK identifier but cannot use diagnostic hints to authorize fallback", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const f = await fixture("booking");
@@ -313,12 +360,12 @@ describe("Firebase primary server ownership", () => {
     expect(f.deps.sendVerification).not.toHaveBeenCalled();
   });
 
-  it("switches the same challenge once and does not reapply its own phone cooldown", async () => {
+  it.each([failure.code, "auth/error-code:-39"])("switches %s once without reapplying its own phone cooldown", async (code) => {
     const f = await fixture();
     const { firebaseSendId } = await f.reserve();
     const id = (await f.current())._id;
-    expect(await f.fallback(firebaseSendId)).toMatchObject({ provider: "twilio", status: "pending" });
-    expect(await f.fallback(firebaseSendId)).toMatchObject({ provider: "twilio", status: "pending" });
+    expect(await f.fallback(firebaseSendId, { failure: { ...failure, code } })).toMatchObject({ provider: "twilio", status: "pending" });
+    expect(await f.fallback(firebaseSendId, { failure: { ...failure, code } })).toMatchObject({ provider: "twilio", status: "pending" });
     expect((await f.current())._id.equals(id)).toBe(true);
     expect(f.deps.rateStore.claimPhoneStart).toHaveBeenCalledTimes(1);
     expect(f.deps.rateStore.claimGlobalSend).toHaveBeenCalledTimes(1);
@@ -352,22 +399,22 @@ describe("Firebase primary server ownership", () => {
     expect(f.deps.sendVerification).not.toHaveBeenCalled();
   });
 
-  it("fences concurrent fallback requests to a single Twilio dispatch", async () => {
+  it.each([failure.code, "auth/error-code:-39"])("fences concurrent %s fallback requests to a single Twilio dispatch", async (code) => {
     const f = await fixture();
     const { firebaseSendId } = await f.reserve();
-    await Promise.allSettled(Array.from({ length: 10 }, () => f.fallback(firebaseSendId)));
+    await Promise.allSettled(Array.from({ length: 10 }, () => f.fallback(firebaseSendId, { failure: { ...failure, code } })));
     expect(f.deps.sendVerification).toHaveBeenCalledTimes(1);
   });
 
-  it("replays a recovered fallback send after persistence outage without a second SMS", async () => {
+  it.each([failure.code, "auth/error-code:-39"])("recovers %s after persistence outage without a second SMS", async (code) => {
     const f = await fixture();
     const { firebaseSendId } = await f.reserve();
     const original = f.deps.challengeStore.transition;
     f.deps.challengeStore.transition = (v, ...args) => v.patch.status === "sent" ? Promise.reject(new Error("offline")) : original(v, ...args);
-    const error = await f.fallback(firebaseSendId).catch((e) => e);
+    const error = await f.fallback(firebaseSendId, { failure: { ...failure, code } }).catch((e) => e);
     expect(error).toMatchObject({ code: "OTP_PERSISTENCE_FAILED", recoveryReceipt: expect.any(String) });
     f.deps.challengeStore.transition = original;
-    expect(await f.fallback(firebaseSendId, { recoveryReceipt: error.recoveryReceipt })).toMatchObject({ status: "pending" });
+    expect(await f.fallback(firebaseSendId, { failure: { ...failure, code }, recoveryReceipt: error.recoveryReceipt })).toMatchObject({ status: "pending" });
     expect(f.deps.sendVerification).toHaveBeenCalledTimes(1);
   });
 

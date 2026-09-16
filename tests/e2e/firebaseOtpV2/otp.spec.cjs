@@ -163,21 +163,26 @@ for (const purpose of ['login', 'booking']) {
       expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([]);
     });
 
-    test('settled technical send rejection transfers once with Arabic fallback status', async ({ page, otp }, testInfo) => {
-      otp.hold('fallback');
-      await otp.open(purpose, { sendError: 'auth/internal-error' });
-      const ui = otp.ui(purpose); await ui.phone.fill(PHONE); await ui.send.click();
-      await expect(ui.scope.getByRole('status')).toContainText('الخدمة البديلة');
-      await expect(ui.code).toHaveCount(0);
-      expect(otp.count('/api/otp/fallback')).toHaveLength(1);
-      await otp.screenshot(`${purpose}-fallback`, testInfo);
-      otp.release('fallback'); await expect(ui.back).toBeEnabled();
-      await otp.verify(purpose); await otp.success(purpose);
-      expect((await otp.snapshot()).sdk.confirms).toEqual([]);
-      expect(otp.count('/api/otp/fallback')[0].body).toMatchObject({ challengeToken: 'mock-challenge-1', firebaseSendId: 'reservation:mock-challenge-1', failure: { code: 'auth/internal-error', stage: 'send', provenance: 'firebase_sdk' } });
-      expect(otp.count('/api/otp/complete')[0].body).toEqual({ challengeToken: 'mock-challenge-1', purpose, code: CODE });
-      expect(otp.count('/api/otp/send')).toHaveLength(0);
-    });
+    for (const sendError of ['auth/internal-error', 'auth/error-code:-39']) {
+      test(`settled ${sendError} send rejection transfers once with Arabic fallback status`, async ({ page, otp }, testInfo) => {
+        otp.hold('fallback');
+        await otp.open(purpose, { sendError });
+        const ui = otp.ui(purpose); await ui.phone.fill(PHONE); await ui.send.click();
+        await expect(ui.scope.getByRole('status')).toContainText('الخدمة البديلة');
+        await expect(ui.code).toHaveCount(0);
+        expect(otp.count('/api/otp/fallback')).toHaveLength(1);
+        await otp.screenshot(`${purpose}-fallback`, testInfo);
+        otp.release('fallback'); await expect(ui.back).toBeEnabled();
+        await otp.verify(purpose); await otp.success(purpose);
+        expect((await otp.snapshot()).sdk.confirms).toEqual([]);
+        expect(otp.count('/api/otp/fallback')[0].body).toMatchObject({ challengeToken: 'mock-challenge-1', firebaseSendId: 'reservation:mock-challenge-1', failure: { code: sendError, stage: 'send', provenance: 'firebase_sdk' } });
+        expect(otp.count('/api/otp/challenge')).toHaveLength(1);
+        expect(otp.count('/api/otp/fallback')).toHaveLength(1);
+        expect((await otp.snapshot()).sdk.sends).toEqual([NORMALIZED]);
+        expect(otp.count('/api/otp/complete')[0].body).toEqual({ challengeToken: 'mock-challenge-1', purpose, code: CODE });
+        expect(otp.count('/api/otp/send')).toHaveLength(0);
+      });
+    }
 
     test('reCAPTCHA technical failure falls back before SDK SMS send', async ({ otp }) => {
       await otp.open(purpose, { renderError: 'auth/network-request-failed' });

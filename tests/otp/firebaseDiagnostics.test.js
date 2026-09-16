@@ -3,6 +3,17 @@ import { AuthErrorCodes } from "firebase/auth";
 import { firebaseFailureDetails, firebaseErrorDiagnostic, projectFirebaseDiagnostic } from "@/lib/otp/firebaseDiagnostics";
 
 describe("Firebase diagnostic classification, separate from fallback authorization", () => {
+  it("retains observed code 39 with its explicit exception rather than a generic technical label", () => {
+    const code = "auth/error-code:-39";
+    const diagnostic = firebaseErrorDiagnostic({ name: "FirebaseError", code, message: "private-token" }, "firebase_send");
+    expect(diagnostic).toEqual({ boundary: "firebase_send", errorType: "FirebaseError", sdkErrorCode: code });
+    expect(firebaseFailureDetails({ code, stage: "send", provenance: "firebase_sdk" }, diagnostic)).toMatchObject({
+      errorCode: code, sdkErrorCode: code, failureCategory: "provider_code_39",
+      fallbackDecision: "eligible", fallbackReason: "approved_code_39_send_rejection",
+    });
+    expect(firebaseFailureDetails({ code: "client/unclassified", stage: "send", provenance: "firebase_sdk" }, diagnostic))
+      .toMatchObject({ fallbackDecision: "blocked" });
+  });
   it.each([...new Set(Object.values(AuthErrorCodes))])("retains the public SDK identifier %s independently of fallback policy", (code) => {
     const diagnostic = firebaseErrorDiagnostic({ name: "FirebaseError", code, message: "private-token" }, "firebase_send");
     expect(diagnostic).toEqual({ boundary: "firebase_send", errorType: "FirebaseError", sdkErrorCode: code });

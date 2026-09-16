@@ -8,13 +8,31 @@ import {
 const report = (code, stage = "send", provenance = "firebase_sdk") => ({ code, stage, provenance });
 
 describe("Firebase send fallback boundary", () => {
-  it("uses installed public SDK error names, except explicit backend UNKNOWN", () => {
+  it("uses public SDK names plus explicitly observed backend passthrough codes", () => {
     const publicCodes = new Set(Object.values(AuthErrorCodes));
     for (const code of FIREBASE_FAILURE_CODES.filter((code) => code.startsWith("auth/"))) {
-      if (code !== "auth/unknown") expect(publicCodes.has(code), code).toBe(true);
+      if (!["auth/unknown", "auth/error-code:-39"].includes(code)) expect(publicCodes.has(code), code).toBe(true);
     }
     expect(Object.isFrozen(FIREBASE_FAILURE_CODES)).toBe(true);
   });
+
+  it("allows the approved code 39 exception only for a settled SDK send rejection", () => {
+    expect(classifyFirebaseSendFailure(report("auth/error-code:-39"))).toEqual({
+      eligible: true, ambiguous: true, reason: "approved_code_39_send_rejection",
+    });
+    for (const stage of ["initialize", "recaptcha_init", "recaptcha_render", "recaptcha_token", "confirm", "token", "lifecycle", "logout"]) {
+      expect(classifyFirebaseSendFailure(report("auth/error-code:-39", stage)).eligible).toBe(false);
+    }
+    for (const provenance of ["client", "recaptcha_sdk", undefined]) {
+      expect(classifyFirebaseSendFailure({ ...report("auth/error-code:-39"), provenance }).eligible).toBe(false);
+    }
+  });
+
+  it.each(["auth/error-code:-38", "auth/error-code:-390", "auth/error-code:39", "Error code: 39", "503", "auth/error-code:-39\nprivate"])(
+    "does not widen the code 39 exception to %s", (code) => {
+      expect(classifyFirebaseSendFailure(report(code)).eligible).toBe(false);
+    },
+  );
 
   it.each(["auth/internal-error", "auth/network-request-failed", "auth/unknown"])("allows %s only for an explicit SDK send rejection, marked ambiguous", (code) => {
     expect(classifyFirebaseSendFailure(report(code))).toEqual({
