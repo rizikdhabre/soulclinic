@@ -86,6 +86,12 @@ function findCommittedPlan(plans, filter) {
   return plans.findOne(filter, { readConcern: { level: "majority" } });
 }
 
+async function rejectDeletedRequest(db, requestId, options = { readConcern: { level: "majority" } }) {
+  if (await db.collection("deletedTreatmentPlanRequests").findOne({ _id: requestId }, { ...options, projection: { _id: 1 } })) {
+    throw error("TREATMENT_PLAN_DELETED", "This canceled treatment plan was deleted. Its original request cannot be booked again.", 410);
+  }
+}
+
 async function ensureIndexes(db) {
   try {
     await db.collection("treatmentPlans").createIndex({ requestId: 1 }, { unique: true, name: "unique_treatment_plan_request" });
@@ -132,6 +138,7 @@ async function insertPlan(request, resources) {
   try {
     return await session.withTransaction(async () => {
       // Rechecking inside the transaction also handles a simultaneous retry.
+      await rejectDeletedRequest(db, request.requestId, { session });
       const previous = await plans.findOne({ requestId: request.requestId }, { session });
       if (previous) return assertSameRequest(previous, request);
 
@@ -255,6 +262,7 @@ export async function createTreatmentPlan(input, deps = {}) {
     (deps.sendTemplate || (env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_WHATSAPP_FROM)));
   const resources = { db, client, env, now, templateConfigured, sendTemplate: deps.sendTemplate };
   const plans = db.collection("treatmentPlans");
+  await rejectDeletedRequest(db, request.requestId);
   let plan = await findCommittedPlan(plans, { requestId: request.requestId });
   if (plan) assertSameRequest(plan, request);
   else {
@@ -283,6 +291,8 @@ export async function createTreatmentPlan(input, deps = {}) {
       }
     }
   }
+  await rejectDeletedRequest(db, request.requestId);
   const status = await notifyOnce(plan, resources);
+  await rejectDeletedRequest(db, request.requestId);
   return { success: true, planId: String(plan._id), appointmentIds: plan.appointments.map((row) => String(row._id)), notification: { status } };
 }

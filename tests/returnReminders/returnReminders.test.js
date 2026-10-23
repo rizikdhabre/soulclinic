@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { MongoClient, ObjectId } from "mongodb";
 import { MongoMemoryServer } from "mongodb-memory-server-core";
 import { getReturnReminderEligibility, sendDueReturnReminders } from "@/lib/returnReminders";
+import { optOutReturnRemindersByPhone } from "@/lib/returnReminderPreferences";
 
 vi.mock("@/lib/db", () => ({ getCollection: () => { throw new Error("Application database forbidden"); } }));
 vi.mock("@/lib/whatsapp", () => ({ sendWhatsAppTemplate: () => { throw new Error("Real messages forbidden"); } }));
@@ -100,15 +101,39 @@ describe("calendar eligibility", () => {
 });
 
 describe("durable monthly return dispatch", () => {
-  it("requires explicit permission and never automatically enrolls a customer", async () => {
+  it("sends to existing and newly added eligible customers by default without fabricating consent records", async () => {
+    await customer();
+    expect((await sendDueReturnReminders({ now: NOW }, deps)).sent).toBe(1);
+    await customer(undefined, { phone: "+972531234567" });
+    expect((await sendDueReturnReminders({ now: NOW }, deps)).sent).toBe(1);
+    expect(deps.sendWhatsAppTemplate).toHaveBeenCalledTimes(2);
+    expect(await preferences.countDocuments()).toBe(0);
+  });
+
+  it("keeps unrecognized disabled and malformed stored preferences off until explicitly enabled", async () => {
     await customer();
     for (const enabled of [undefined, false, "true"]) {
-      if (enabled !== undefined) await preferences.updateOne({ _id: PHONE }, { $set: { enabled } }, { upsert: true });
+      await preferences.replaceOne({ _id: PHONE }, enabled === undefined ? { _id: PHONE } : { _id: PHONE, enabled }, { upsert: true });
       expect((await sendDueReturnReminders({ now: NOW }, deps)).sent).toBe(0);
     }
     expect(await state.countDocuments()).toBe(0);
     await permit();
     expect((await sendDueReturnReminders({ now: NOW }, deps)).sent).toBe(1);
+  });
+
+  it("sends after the one-time renewed consent while preserving old preference history", async () => {
+    await customer();
+    const prior = { _id: PHONE, enabled: false, source: "unsubscribe_link", updatedAt: NOW, disabledAt: NOW };
+    await preferences.insertOne(prior);
+    expect((await sendDueReturnReminders({ now: NOW }, deps)).sent).toBe(1);
+    expect(await preferences.findOne({ _id: PHONE })).toEqual(prior);
+  });
+
+  it("keeps a legacy opt-out newer than renewed consent off", async () => {
+    await customer();
+    await preferences.insertOne({ _id: PHONE, enabled: false, source: "whatsapp", updatedAt: new Date("2026-10-23T15:27:08.001Z") });
+    expect((await sendDueReturnReminders({ now: NOW }, deps)).sent).toBe(0);
+    expect(await state.countDocuments()).toBe(0);
   });
 
   it("sends four variables, stores only an opaque token digest and retains immutable attempt history", async () => {
@@ -143,12 +168,27 @@ describe("durable monthly return dispatch", () => {
   });
 
   it("coalesces concurrent workers and differently formatted duplicate customer phones", async () => {
-    await enabledCustomer();
+    await customer();
     for (const phone of ["052-123-4567", "00972 (52) 123 4567", "972521234567", 972521234567]) await customer(undefined, { phone });
     await Promise.all(Array.from({ length: 6 }, () => sendDueReturnReminders({ now: NOW }, deps)));
     expect(deps.sendWhatsAppTemplate).toHaveBeenCalledTimes(1);
     expect(await state.countDocuments()).toBe(1);
     expect(await history.countDocuments()).toBe(1);
+    expect(await preferences.countDocuments()).toBe(0);
+  });
+
+  it("counts one default-enabled phone once in dry-run despite duplicate customer formats", async () => {
+    for (const phone of [PHONE, "052-123-4567", "00972 (52) 123 4567", "972521234567", 972521234567]) await customer(undefined, { phone });
+    expect(await sendDueReturnReminders({ now: NOW, dryRun: true }, deps)).toMatchObject({ eligible: 1, sent: 0 });
+    expect(await preferences.countDocuments()).toBe(0);
+  });
+
+  it("skips a malformed phone object without starving a later eligible customer", async () => {
+    await customer(undefined, { phone: { toString: null } });
+    await customer();
+    expect(await sendDueReturnReminders({ now: NOW }, deps)).toMatchObject({ sent: 1, failed: 0, unknown: 0 });
+    expect(deps.sendWhatsAppTemplate).toHaveBeenCalledTimes(1);
+    expect(deps.sendWhatsAppTemplate.mock.calls[0][0].to).toBe(`whatsapp:${PHONE}`);
   });
 
   it.each(["upcoming", "recent attendance", "missing schedule"])("another matching account blocks the earlier selected account: %s", async (reason) => {
@@ -194,6 +234,21 @@ describe("durable monthly return dispatch", () => {
     });
     expect((await sendDueReturnReminders({ now: NOW }, deps)).sent).toBe(0);
     expect(deps.sendWhatsAppTemplate).not.toHaveBeenCalled();
+  });
+
+  it("honors a fresh opt-out of a default-enabled phone in the final permission read", async () => {
+    await customer();
+    intercept("returnReminderState", "updateOne", async (target, args) => {
+      const updated = await target.updateOne(...args);
+      if (args[1].$set?.dispatchStartedAt) {
+        await optOutReturnRemindersByPhone({ phone: PHONE, now: NOW }, { getCollection: async (name) => db.collection(name) });
+      }
+      return updated;
+    });
+    expect(await sendDueReturnReminders({ now: NOW }, deps)).toMatchObject({ sent: 0, skipped: 1 });
+    expect(deps.sendWhatsAppTemplate).not.toHaveBeenCalled();
+    expect((await history.findOne({})).dispatch.status).toBe("canceled");
+    expect((await preferences.findOne({ _id: PHONE })).enabled).toBe(false);
   });
 
   it("does not dispatch a stale process whose claim was superseded", async () => {
@@ -265,13 +320,16 @@ describe("durable monthly return dispatch", () => {
   });
 
   it("bounds actual dispatches and continues past cooled, ineligible and malformed candidates", async () => {
-    for (let index = 0; index < 110; index++) {
+    for (let index = 0; index < 130; index++) {
       const phone = `+9725${String(index).padStart(8, "0")}`;
-      await enabledCustomer(index < 55 ? [] : undefined, { phone });
+      await customer(index >= 40 && index < 75 ? [] : undefined, { phone: index < 10 ? `invalid-${index}` : phone });
+      if (index >= 10 && index < 20) await state.insertOne({ _id: phone, nextAttemptAt: new Date("2026-11-01T09:00:00Z") });
+      if (index >= 20 && index < 40) await preferences.insertOne({ _id: phone, enabled: index < 30 ? false : "true" });
     }
     expect((await sendDueReturnReminders({ now: NOW }, deps)).sent).toBe(50);
     expect((await sendDueReturnReminders({ now: NOW }, deps)).sent).toBe(5);
     expect(deps.sendWhatsAppTemplate).toHaveBeenCalledTimes(55);
+    expect(new Set(deps.sendWhatsAppTemplate.mock.calls.map(([message]) => message.to)).size).toBe(55);
   });
 
   it("dry-run inspects due permission/cooldown without creating indexes, claims or history", async () => {

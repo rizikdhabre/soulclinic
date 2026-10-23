@@ -48,10 +48,48 @@ async function issueLink() {
 }
 
 describe("shared return reminder permission", () => {
-  it("defaults missing and malformed permission to off without creating data", async () => {
-    expect(await getReturnReminderPreference({ phone: "052-123-4567" }, deps)).toEqual({ enabled: false });
+  it("defaults missing permission on without creating a consent record, while malformed records stay off", async () => {
+    expect(await getReturnReminderPreference({ phone: "052-123-4567" }, deps)).toEqual({ enabled: true });
     expect(await preferences.countDocuments()).toBe(0);
-    await preferences.insertOne({ _id: PHONE, enabled: "true" });
+    for (const record of [{}, { enabled: false }, { enabled: "true" }, { enabled: null }]) {
+      await preferences.replaceOne({ _id: PHONE }, { _id: PHONE, ...record }, { upsert: true });
+      expect(await getReturnReminderPreference({ phone: PHONE }, deps)).toEqual({ enabled: false });
+    }
+  });
+
+  it.each(["admin", "unsubscribe_link", "whatsapp"])("applies renewed owner consent to a known earlier %s opt-out without rewriting its history", async (source) => {
+    const prior = { _id: PHONE, enabled: false, source, updatedAt: NOW, disabledAt: NOW };
+    await preferences.insertOne(prior);
+    expect(await getReturnReminderPreference({ phone: PHONE }, deps)).toEqual({ enabled: true });
+    expect(await preferences.findOne({ _id: PHONE })).toEqual(prior);
+  });
+
+  it.each([
+    ["at cutoff", { updatedAt: new Date("2026-10-23T15:27:08.000Z") }, true],
+    ["updated after cutoff", { updatedAt: new Date("2026-10-23T15:27:08.001Z") }, false],
+    ["disabled after cutoff", { disabledAt: new Date("2026-10-23T15:27:08.001Z") }, false],
+    ["unknown source", { source: "unknown" }, false],
+    ["malformed updated timestamp", { updatedAt: "2026-10-23T09:00:00Z" }, false],
+    ["unknown policy revision", { policyRevision: "unknown" }, false],
+  ])("bounds the one-time renewed consent: %s", async (_label, override, enabled) => {
+    await preferences.insertOne({ _id: PHONE, enabled: false, source: "whatsapp", updatedAt: NOW, disabledAt: NOW, ...override });
+    expect(await getReturnReminderPreference({ phone: PHONE }, deps)).toEqual({ enabled });
+  });
+
+  it("honors new explicit opt-outs even when their injected timestamp predates the renewed-consent cutoff", async () => {
+    await setReturnReminderPreference({ phone: PHONE, enabled: false, source: "admin", now: NOW }, deps);
+    expect(await getReturnReminderPreference({ phone: PHONE }, deps)).toEqual({ enabled: false });
+    expect((await preferences.findOne({ _id: PHONE })).policyRevision).toBe("owner-reconfirmed-2026-10-23");
+  });
+
+  it("keeps renewed consent on when a processed legacy STOP is replayed, while a new STOP opts out", async () => {
+    const prior = { _id: PHONE, enabled: false, source: "whatsapp", updatedAt: NOW, disabledAt: NOW, inboundOptOutMessageSids: [SID] };
+    await preferences.insertOne(prior);
+    expect(await optOutReturnRemindersByPhone({ phone: PHONE, messageSid: SID, now: NOW }, deps))
+      .toEqual({ success: true, unsubscribed: false });
+    expect(await preferences.findOne({ _id: PHONE })).toEqual(prior);
+    expect(await optOutReturnRemindersByPhone({ phone: PHONE, messageSid: `SM${"b".repeat(32)}`, now: NOW }, deps))
+      .toEqual({ success: true, unsubscribed: true });
     expect(await getReturnReminderPreference({ phone: PHONE }, deps)).toEqual({ enabled: false });
   });
 
@@ -121,9 +159,9 @@ describe("private unsubscribe tokens", () => {
     expect(await history.countDocuments()).toBe(1);
   });
 
-  it("GET defaults an unknown preference off without creating it", async () => {
+  it("GET shows a missing preference as subscribed without creating it", async () => {
     await issueLink();
-    expect(await getReturnReminderUnsubscribe({ token: TOKEN }, deps)).toEqual({ unsubscribed: true });
+    expect(await getReturnReminderUnsubscribe({ token: TOKEN }, deps)).toEqual({ unsubscribed: false });
     expect(await preferences.countDocuments()).toBe(0);
   });
 

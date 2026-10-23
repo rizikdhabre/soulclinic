@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { isIP } from "node:net";
+import { ObjectId } from "mongodb";
 import { normalizeIsraeliPhone } from "@/lib/phone";
 import { getClinicNowParts, isValidClinicDate, isValidClinicTime } from "@/lib/clinicTime";
 
@@ -70,6 +71,34 @@ async function ownedAppointment(users, record) {
   const appointment = user?.appointments?.[0];
   if (!appointment || !isValidClinicDate(appointment.date) || !isValidClinicTime(appointment.time)) return null;
   return { user, appointment };
+}
+
+async function claimFeedbackRecord(record, appointment, feedback, deps) {
+  if (!Object.hasOwn(appointment, "treatmentPlanId")) {
+    await feedback.insertOne(record, DURABLE_WRITE);
+    return true;
+  }
+  const planId = appointment.treatmentPlanId;
+  if (!(planId instanceof ObjectId) && !(typeof planId === "string" && /^[a-f0-9]{24}$/i.test(planId))) return false;
+  const getCollection = deps.getCollection || (await import("@/lib/db")).getCollection;
+  const plans = await getCollection("treatmentPlans");
+  const client = deps.client || await (await import("@/lib/db")).getMongoClient();
+  const session = client.startSession();
+  try {
+    return await session.withTransaction(async () => {
+      // Both claiming feedback and deleting a program write its parent document.
+      // A concurrent deletion must retry and include this claim, or win first and
+      // prevent the claim entirely. A read alone would allow orphaned feedback.
+      const parent = await plans.updateOne({
+        _id: new ObjectId(planId), userId: record.userId, "appointments._id": record.appointmentId,
+      }, { $inc: { feedbackClaimVersion: 1 } }, { session });
+      if (parent.matchedCount !== 1) return false;
+      await feedback.insertOne(record, { session });
+      return true;
+    }, { readConcern: { level: "snapshot" }, writeConcern: DURABLE_WRITE.writeConcern });
+  } finally {
+    await session.endSession();
+  }
 }
 
 async function authorizedRequest({ token, now }, deps) {
@@ -164,7 +193,10 @@ export async function sendDueFeedbackRequests({ now = new Date(), dryRun = false
     };
     try {
       // _id is the appointment ID, so the built-in unique index is a durable send claim.
-      await feedback.insertOne(record, DURABLE_WRITE);
+      if (!await claimFeedbackRecord(record, owned.appointment, feedback, deps)) {
+        result.skipped++;
+        continue;
+      }
     } catch (error) {
       if (error?.code !== 11000) throw error;
       result.skipped++;

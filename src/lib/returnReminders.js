@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import { ObjectId } from "mongodb";
 import { normalizeIsraeliPhone } from "@/lib/phone";
 import { getClinicNowParts, isValidClinicDate, isValidClinicTime } from "@/lib/clinicTime";
+import { isReturnReminderEnabled } from "@/lib/returnReminderPreferences";
 
 const COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
 const BATCH_SIZE = 50;
@@ -141,25 +142,28 @@ export async function sendDueReturnReminders({ now = new Date(), dryRun = false 
   const startedAt = clock.now().getTime();
   const currentTime = () => new Date(now.getTime() + Math.max(0, clock.now().getTime() - startedAt));
   const data = await resources(deps);
-  const { preferences, state, history } = data;
+  const { users, preferences, state, history } = data;
   const send = dryRun ? null : deps.sendWhatsAppTemplate || (await import("@/lib/whatsapp")).sendWhatsAppTemplate;
   if (!dryRun) {
     await history.createIndex({ tokenHash: 1 }, { name: "return_reminder_token_hash", unique: true,
       partialFilterExpression: { tokenHash: { $type: "string" } }, ...DURABLE_WRITE });
   }
-  // Stream permissions, not a limited page of customers: cooled, malformed,
-  // duplicate or ineligible records must never starve customers later in the run.
-  const candidates = preferences.find({ enabled: true }, { ...MAJORITY_READ, projection: { _id: 1 } }).sort({ _id: 1 }).batchSize(BATCH_SIZE);
+  // Missing preference rows are enabled by policy. Stream all customers and
+  // deduplicate normalized phones; skipped early rows must not starve later ones.
+  const candidates = users.find({}, { ...MAJORITY_READ, projection: { phone: 1 } }).sort({ _id: 1 }).batchSize(BATCH_SIZE);
+  const seenPhones = new Set();
   let dispatched = 0;
   try {
     for await (const candidate of candidates) {
       if (dispatched >= BATCH_SIZE) break;
-      const phone = normalizeIsraeliPhone(candidate._id);
-      if (!phone || phone !== candidate._id) continue;
+      if (typeof candidate.phone !== "string" && typeof candidate.phone !== "number") continue;
+      const phone = normalizeIsraeliPhone(candidate.phone);
+      if (!phone || seenPhones.has(phone)) continue;
+      seenPhones.add(phone);
       const previous = await state.findOne({ _id: phone }, MAJORITY_READ);
       if (previous && (!(previous.nextAttemptAt instanceof Date) || previous.nextAttemptAt > currentTime())) continue;
       const owned = await currentCustomer(phone, currentTime(), data);
-      if (!owned || (await preferences.findOne({ _id: phone }, MAJORITY_READ))?.enabled !== true) continue;
+      if (!owned || !isReturnReminderEnabled(await preferences.findOne({ _id: phone }, MAJORITY_READ))) continue;
       result.eligible++;
       if (dryRun) continue;
 
@@ -200,7 +204,7 @@ export async function sendDueReturnReminders({ now = new Date(), dryRun = false 
         $set: { dispatchStartedAt: dispatchAt },
       }, DURABLE_WRITE);
       // Permission is the final database read immediately before provider dispatch.
-      if (dispatchClaim.matchedCount !== 1 || (await preferences.findOne({ _id: phone }, MAJORITY_READ))?.enabled !== true) {
+      if (dispatchClaim.matchedCount !== 1 || !isReturnReminderEnabled(await preferences.findOne({ _id: phone }, MAJORITY_READ))) {
         await cancelAttempt(history, record, currentTime());
         result.skipped++;
         continue;

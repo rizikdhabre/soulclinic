@@ -55,8 +55,8 @@ export default function ReturnReminderPreference({ userId }) {
   }
 
   return <section dir="rtl" aria-labelledby="return-reminder-heading" className="rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-6">
-    <h2 id="return-reminder-heading" className="text-lg font-semibold">موافقة الزبون على تذكيرات العودة</h2>
-    <p className="mt-2 text-sm leading-7 text-muted-foreground">تسمح الموافقة بتذكير عبر واتساب بعد مرور ثلاثة أشهر دون زيارة، ثم مرة كل 30 يومًا ما دام لا يوجد موعد قادم. لا يغيّر هذا الإذن رسائل المواعيد.</p>
+    <h2 id="return-reminder-heading" className="text-lg font-semibold">تذكيرات العودة عبر واتساب</h2>
+    <p className="mt-2 text-sm leading-7 text-muted-foreground">تذكيرات العودة مفعّلة افتراضيًا حتى إلغاء الاشتراك. تُرسل عبر واتساب بعد مرور ثلاثة أشهر دون زيارة، ثم مرة كل 30 يومًا ما دام لا يوجد موعد قادم. لا يغيّر هذا الإعداد رسائل المواعيد.</p>
     {enabled === null && !loadError && <div role="status" className="mt-3">
       <span className="sr-only">جارٍ تحميل إعداد التذكيرات...</span>
       <div aria-hidden="true"><NeonLoader width={160} height={64} /></div>
@@ -66,7 +66,7 @@ export default function ReturnReminderPreference({ userId }) {
       <button type="button" onClick={() => { setLoadError(""); setRetry(value => value + 1); }} className="min-h-11 rounded-xl border border-border px-4 py-2 text-sm text-primary">إعادة المحاولة</button>
     </div>}
     {enabled !== null && <div className="mt-4 space-y-4" aria-busy={pending}>
-      <p role="status" className={`text-sm font-medium ${enabled ? "text-primary" : "text-muted-foreground"}`}>{enabled ? "موافقة الزبون مسجّلة لتلقي تذكيرات العودة." : "تذكيرات العودة متوقفة لهذا الرقم."}</p>
+      <p role="status" className={`text-sm font-medium ${enabled ? "text-primary" : "text-muted-foreground"}`}>{enabled ? "تذكيرات العودة مفعّلة لهذا الرقم." : "تذكيرات العودة متوقفة لهذا الرقم."}</p>
       {!enabled && <label className="flex items-start gap-3 text-sm leading-7">
         <input type="checkbox" checked={consentConfirmed} disabled={pending} onChange={event => setConsentConfirmed(event.target.checked)} className="mt-1.5 h-4 w-4 shrink-0 accent-primary" />
         <span>أؤكد أن الزبون وافق صراحةً على تلقي تذكيرات العودة عبر واتساب.</span>

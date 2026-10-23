@@ -1,8 +1,8 @@
 "use client";
 
 import axios from "axios";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarPlus, CheckCircle2, Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { CalendarPlus, CheckCircle2, ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { getScheduleTimes, isTimeSlotAvailable } from "@/lib/appointmentRules";
 import { getClinicNowParts } from "@/lib/clinicTime";
 
@@ -11,7 +11,7 @@ const newRow = () => ({ key: crypto.randomUUID(), treatmentId: "", serviceIndex:
 const selectedService = (row, treatments) => row.serviceIndex === "" ? null : treatments.find(treatment => String(treatment._id) === row.treatmentId)?.services?.[Number(row.serviceIndex)] || null;
 
 export function notificationMessage(status) {
-  if (status === "sent") return "تم إرسال المواعيد إلى الزبون في رسالة واحدة.";
+  if (status === "sent") return "تم طلب إرسال رسالة المواعيد؛ لم يتأكد تسليمها بعد.";
   if (status === "not_configured") return "لم تُرسل رسالة المواعيد لأن خدمة رسائل البرامج غير مفعّلة. المواعيد محفوظة.";
   if (status === "failed") return "تعذر إرسال رسالة المواعيد. المواعيد محفوظة؛ أبلغ الزبون بها.";
   if (status === "pending") return "المواعيد محفوظة، وإرسال الرسالة قيد المعالجة.";
@@ -33,6 +33,7 @@ function planErrorMessage(error) {
     TRANSACTIONS_REQUIRED: "حفظ البرامج غير متاح مؤقتًا. لم تُحفظ مواعيد؛ حاول لاحقًا أو راجع إعداد الخدمة.",
     BOOKING_INDEX_UNAVAILABLE: "حفظ البرامج غير متاح مؤقتًا. لم تُحفظ مواعيد؛ حاول لاحقًا.",
     REQUEST_ID_REUSED: "تعذر تأكيد هذا الطلب. حدّث الملف وتحقق من البرامج المحفوظة قبل إنشاء برنامج جديد.",
+    TREATMENT_PLAN_DELETED: "تم حذف هذا البرنامج بعد إلغاء مواعيده. حدّث الملف قبل إنشاء برنامج جديد.",
     USER_NOT_FOUND: "لم يتم العثور على الزبون.",
   };
   if (error.response?.status === 401 || error.response?.status === 403) return "انتهت الجلسة أو لا توجد صلاحية. سجّل الدخول بحساب الإدارة.";
@@ -105,6 +106,8 @@ function PlanRow({ row, index, rows, treatments, locked, refresh, clock, onPatch
 }
 
 export default function TreatmentPlanBuilder({ userId, customerName, onSaved }) {
+  const [expanded, setExpanded] = useState(true);
+  const contentId = useId();
   const [rows, setRows] = useState(() => [newRow()]);
   const [treatments, setTreatments] = useState([]);
   const [catalogStatus, setCatalogStatus] = useState("loading");
@@ -212,7 +215,16 @@ export default function TreatmentPlanBuilder({ userId, customerName, onSaved }) 
 
   return (
     <section aria-labelledby="treatment-plan-heading" className="min-w-0 rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-6">
-      <div className="mb-5 flex items-start gap-3"><CalendarPlus className="mt-1 h-5 w-5 shrink-0 text-primary" aria-hidden="true" /><div><h2 id="treatment-plan-heading" className="text-xl font-semibold">برنامج علاجي</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">حدد مواعيد {customerName}، ثم احفظ البرنامج لإرسال جميع المواعيد في رسالة واحدة.</p></div></div>
+      <div className="mb-5 flex items-start gap-3"><CalendarPlus className="mt-1 h-5 w-5 shrink-0 text-primary" aria-hidden="true" /><div>
+        <div className="flex items-center gap-2">
+          <h2 id="treatment-plan-heading" className="text-xl font-semibold">برنامج علاجي</h2>
+          <button type="button" onClick={() => setExpanded(value => !value)} aria-expanded={expanded} aria-controls={contentId} aria-label={`${expanded ? "طي" : "توسيع"} إعداد برنامج علاجي`} className="rounded-lg p-2 hover:bg-muted">
+            {expanded ? <ChevronUp className="h-5 w-5" aria-hidden="true" /> : <ChevronDown className="h-5 w-5" aria-hidden="true" />}
+          </button>
+        </div>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">حدد مواعيد {customerName}، ثم احفظ البرنامج لإرسال جميع المواعيد في رسالة واحدة.</p>
+      </div></div>
+      <div id={contentId} hidden={!expanded}>
       {receipt ? <div className="rounded-xl border border-primary/20 bg-primary/5 p-5">
         <div role="status"><p className="flex items-center gap-2 font-semibold text-primary"><CheckCircle2 className="h-5 w-5" aria-hidden="true" />تم حفظ البرنامج بنجاح</p><p className="mt-3 text-sm leading-7">{notificationMessage(receipt.notification?.status)}</p><p className="mt-2 text-sm text-muted-foreground">عدد المواعيد: {receipt.appointmentIds?.length || rows.length}</p></div>
         <button type="button" onClick={startNewPlan} className="mt-5 rounded-xl border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-muted">إنشاء برنامج جديد</button>
@@ -225,6 +237,7 @@ export default function TreatmentPlanBuilder({ userId, customerName, onSaved }) 
         {error && <p role="alert" className="rounded-xl bg-destructive/10 p-4 text-sm leading-7 text-destructive">{error}</p>}
         <div className="flex justify-end border-t border-border pt-5"><button type="submit" disabled={submitting || (!uncertain && (catalogStatus !== "ready" || !treatments.length))} className="w-full rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">{submitting ? "جارٍ حفظ البرنامج..." : uncertain ? "التحقق وإعادة المحاولة بأمان" : "حفظ البرنامج وإرسال المواعيد"}</button></div>
       </form>}
+      </div>
     </section>
   );
 }

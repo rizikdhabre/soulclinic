@@ -3,6 +3,22 @@ import { normalizeIsraeliPhone } from "@/lib/phone";
 
 const WRITE_CONCERN = { w: "majority", j: true, wtimeoutMS: 10_000 };
 const SOURCES = new Set(["admin", "unsubscribe_link", "whatsapp"]);
+const POLICY_REVISION = "owner-reconfirmed-2026-10-23";
+const OWNER_RECONFIRMED_AT = Date.parse("2026-10-23T15:27:08.000Z");
+
+export function isReturnReminderEnabled(preference) {
+  // The owner confirmed renewed permission for existing customers and the
+  // default for future customers. This policy does not manufacture consent rows.
+  if (preference == null || preference.enabled === true) return true;
+  if (preference.enabled !== false || Object.hasOwn(preference, "policyRevision") || !SOURCES.has(preference.source)) return false;
+
+  // Apply the one-time renewal only to identifiable old choices. Missing or
+  // malformed audit data must not hide a later opt-out. Every new choice carries
+  // a revision, so even an old injected clock cannot undo a new unsubscribe.
+  const timestamps = [preference.updatedAt, preference.disabledAt].filter((value) => value !== undefined);
+  if (!timestamps.length || timestamps.some((value) => !(value instanceof Date) || !Number.isFinite(value.getTime()))) return false;
+  return Math.max(...timestamps.map((value) => value.getTime())) <= OWNER_RECONFIRMED_AT;
+}
 
 function invalid(code) {
   return Object.assign(new Error(code), { code });
@@ -29,8 +45,10 @@ async function collection(name, deps) {
 export async function getReturnReminderPreference({ phone }, deps = {}) {
   const key = normalizedPhone(phone);
   const preferences = await collection("returnReminderPreferences", deps);
-  const preference = await preferences.findOne({ _id: key }, { projection: { enabled: 1 } });
-  return { enabled: preference?.enabled === true };
+  const preference = await preferences.findOne({ _id: key }, {
+    projection: { enabled: 1, source: 1, updatedAt: 1, disabledAt: 1, policyRevision: 1 },
+  });
+  return { enabled: isReturnReminderEnabled(preference) };
 }
 
 export async function setReturnReminderPreference({ phone, enabled, source, now = new Date(), adminId }, deps = {}) {
@@ -42,7 +60,7 @@ export async function setReturnReminderPreference({ phone, enabled, source, now 
   const preferences = await collection("returnReminderPreferences", deps);
   await preferences.updateOne({ _id: key }, {
     $set: {
-      enabled, source, updatedAt: now,
+      enabled, source, updatedAt: now, policyRevision: POLICY_REVISION,
       [enabled ? "enabledAt" : "disabledAt"]: now,
       adminId: source === "admin" && adminId != null ? String(adminId) : null,
     },
@@ -95,7 +113,7 @@ export async function optOutReturnRemindersByPhone({ phone, now = new Date(), me
     { $in: [messageSid, seen] },
     "$$ROOT",
     { $mergeObjects: ["$$ROOT", {
-      enabled: false, source: "whatsapp", updatedAt: now, disabledAt: now, adminId: null,
+      enabled: false, source: "whatsapp", updatedAt: now, disabledAt: now, adminId: null, policyRevision: POLICY_REVISION,
       createdAt: { $ifNull: ["$createdAt", now] },
       inboundOptOutMessageSids: { $concatArrays: [seen, [messageSid]] },
     }] },
@@ -110,5 +128,5 @@ export async function optOutReturnRemindersByPhone({ phone, now = new Date(), me
     result = await preferences.findOneAndUpdate({ _id: key }, update, options);
   }
   if (!result) throw invalid("RETURN_REMINDER_PREFERENCE_FAILED");
-  return { success: true, unsubscribed: result.enabled !== true };
+  return { success: true, unsubscribed: !isReturnReminderEnabled(result) };
 }

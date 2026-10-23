@@ -10,7 +10,7 @@ vi.mock("@/lib/whatsapp", () => ({
 }));
 
 import { sendDueReturnReminders } from "@/lib/returnReminders";
-import { getReturnReminderUnsubscribe, setReturnReminderPreference } from "@/lib/returnReminderPreferences";
+import { getReturnReminderUnsubscribe } from "@/lib/returnReminderPreferences";
 import { GET, POST } from "@/app/api/reminders/unsubscribe/[token]/route";
 import { POST as inbound } from "@/app/api/whatsapp/inbound/route";
 
@@ -61,12 +61,12 @@ beforeEach(async () => {
     _id: new ObjectId(), firstName: "زبون", lastName: "تجريبي", phone: "052-123-4567",
     appointments: [{ _id: new ObjectId(), date: "2026-07-23", time: "12:00", attended: true }],
   });
-  await setReturnReminderPreference({ phone: PHONE, enabled: true, source: "admin", now: NOW }, deps);
 });
 
 async function sendFirstReminder() {
   expect(await sendDueReturnReminders({ now: NOW }, deps)).toMatchObject({ sent: 1, failed: 0, unknown: 0 });
   expect(deps.sendWhatsAppTemplate).toHaveBeenCalledTimes(1);
+  expect(await db.collection("returnReminderPreferences").countDocuments()).toBe(0);
   const message = deps.sendWhatsAppTemplate.mock.calls[0][0];
   expect(message).toMatchObject({
     to: `whatsapp:${PHONE}`, templateSid: ENV.TWILIO_TEMPLATE_SOUL_RETURN,

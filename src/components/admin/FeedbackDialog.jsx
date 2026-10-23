@@ -4,10 +4,13 @@ import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
-export default function FeedbackDialog({ appointment, onClose }) {
+export default function FeedbackDialog({ appointment, kind = "feedback", onClose }) {
   const dialogRef = useRef(null);
   const closeRef = useRef(null);
   const titleId = useId();
+  const isBookingNote = kind === "bookingNote";
+  const title = isBookingNote ? "ملاحظة الحجز" : "تقييم العلاج";
+  const text = isBookingNote ? appointment.bookingNote : appointment.feedback?.text;
 
   useEffect(() => {
     const previousFocus = document.activeElement;
@@ -55,7 +58,7 @@ export default function FeedbackDialog({ appointment, onClose }) {
       <div className="flex max-h-[85dvh] min-h-0 flex-col">
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border p-5">
           <div className="min-w-0">
-            <h2 id={titleId} className="text-lg font-semibold">ملاحظة الزبون</h2>
+            <h2 id={titleId} className="text-lg font-semibold">{title}</h2>
             <p className="mt-1 break-words text-sm text-muted-foreground">{appointment.title}</p>
             <p className="mt-1 text-sm text-muted-foreground"><bdi>{appointment.date} · {appointment.time}</bdi></p>
           </div>
@@ -63,8 +66,8 @@ export default function FeedbackDialog({ appointment, onClose }) {
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
-        <div tabIndex={0} aria-label="نص الملاحظة" className="min-h-0 overflow-y-auto overscroll-contain p-5 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary">
-          <p data-feedback-text className="whitespace-pre-wrap text-sm leading-8 [overflow-wrap:anywhere]">{appointment.feedback.text}</p>
+        <div tabIndex={0} aria-label={`نص ${title}`} className="min-h-0 overflow-y-auto overscroll-contain p-5 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary">
+          <p data-feedback-text={isBookingNote ? undefined : ""} data-booking-note-text={isBookingNote ? "" : undefined} className="whitespace-pre-wrap text-sm leading-8 [overflow-wrap:anywhere]">{text}</p>
         </div>
       </div>
     </dialog>,
