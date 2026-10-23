@@ -44,7 +44,13 @@ export async function PUT(req) {
 
     const collection = await getCollection("treatments");
 
-    await collection.updateOne({ _id: new ObjectId(id) }, { $set: update });
+    const changedFields = Object.entries(update).map(([field, value]) => ({
+      [field]: { $ne: value },
+    }));
+    await collection.updateOne(
+      { _id: new ObjectId(id), $or: changedFields },
+      { $set: { ...update, updatedAt: new Date() } },
+    );
     await advanceTreatmentCatalogCacheGeneration().catch(() => false);
 
     return NextResponse.json(

@@ -20,7 +20,7 @@ const geistMono = Geist_Mono({
 
 export const metadata = {
   metadataBase: new URL(business.origin),
-  title: { default: business.name, template: "%s | SOUL Clinic" },
+  title: { default: business.name, template: `%s | ${business.name}` },
   icons: { icon: "/favicon.ico", apple: "/logo.PNG" },
   referrer: "strict-origin",
   robots: { index: process.env.VERCEL_ENV !== "preview" && process.env.SITE_NOINDEX !== "true", follow: true },

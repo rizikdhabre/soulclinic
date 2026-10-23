@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { Heart } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import { business } from "@/lib/seo/business";
 const Footer = () => {
   return (
@@ -63,6 +64,14 @@ const Footer = () => {
               </a>
             </div>
           </motion.div>
+          <nav aria-label="روابط العيادة" className="text-sm text-muted-foreground">
+            <h4 className="font-serif text-xl text-foreground mb-4">عيادة SOUL في دير حنا</h4>
+            <ul className="space-y-2">
+              <li><Link href="/dashboard" className="hover:text-foreground transition-colors">تصفّح العلاجات والأسعار</Link></li>
+              <li><Link href="/about" className="hover:text-foreground transition-colors">تعرّف على عيادة SOUL</Link></li>
+              <li><Link href="/contact" className="hover:text-foreground transition-colors">موقع العيادة والتواصل</Link></li>
+            </ul>
+          </nav>
         </div>
 
         {/* Bottom Bar */}

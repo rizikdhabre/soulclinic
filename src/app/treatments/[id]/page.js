@@ -5,6 +5,7 @@ import { treatmentPath } from "@/lib/catalogue/model";
 import { pageMetadata } from "@/lib/seo/metadata";
 import { treatmentSchema } from "@/lib/seo/schema";
 import JsonLd from "@/components/seo/JsonLd";
+import TreatmentBreadcrumbs from "@/components/seo/TreatmentBreadcrumbs";
 export const dynamic = "force-dynamic";
 async function resolve(params) {
   const { id } = await params;
@@ -18,5 +19,5 @@ export async function generateMetadata({ params }) {
 }
 export default async function Treatment({ params }) {
   const treatment = await resolve(params);
-  return <main><TreatmentClient treatment={treatment} /><JsonLd data={treatmentSchema(treatment)} /></main>;
+  return <main><TreatmentClient treatment={treatment}><TreatmentBreadcrumbs treatment={treatment} /></TreatmentClient><JsonLd data={treatmentSchema(treatment)} /></main>;
 }

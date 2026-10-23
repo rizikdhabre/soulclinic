@@ -5,9 +5,7 @@ export const businessSchema = {
   "@type": "LocalBusiness", "@id": absoluteUrl("/#business"), name: business.name,
   alternateName: business.alternateNames, url: business.origin, logo: absoluteUrl(business.logo),
   image: absoluteUrl(business.logo), telephone: business.phone,
-  address: { "@type": "PostalAddress", streetAddress: business.streetAddress, addressLocality: business.locality, addressCountry: "IL" },
-  geo: { "@type": "GeoCoordinates", latitude: business.latitude, longitude: business.longitude },
-  hasMap: business.mapUrl, sameAs: [business.instagram],
+  address: { "@type": "PostalAddress", addressLocality: business.locality, addressCountry: "IL" },
 };
 export const websiteSchema = {
   "@type": "WebSite", "@id": absoluteUrl("/#website"), name: business.name,

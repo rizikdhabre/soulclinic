@@ -19,6 +19,7 @@
 !/docs/
 /docs/*
 !/docs/SEO.md
+!/docs/SEO-MEDICAL-REVIEW.md
 !/tests/
 /tests/*
 !/tests/seo/

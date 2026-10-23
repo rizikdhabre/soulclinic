@@ -1,10 +1,19 @@
 import { describe, it, expect, vi } from "vitest";
 import { publicTreatment, treatmentPath } from "@/lib/catalogue/model";
-import { serializeJsonLd, treatmentSchema } from "@/lib/seo/schema";
+import { businessSchema, serializeJsonLd, treatmentSchema, websiteSchema } from "@/lib/seo/schema";
 import { pageMetadata } from "@/lib/seo/metadata";
 import robots from "@/app/robots";
 
 describe("public catalogue boundaries", () => {
+  it("publishes only owner-confirmed business identity and location in structured data", () => {
+    expect(businessSchema.name).toBe("SOUL");
+    expect(websiteSchema.name).toBe("SOUL");
+    expect(businessSchema.telephone).toBe("+972532286019");
+    expect(businessSchema.address).toEqual({ "@type": "PostalAddress", addressLocality: "دير حنا", addressCountry: "IL" });
+    for (const field of ["geo", "hasMap", "sameAs", "openingHours", "openingHoursSpecification", "employee", "areaServed"]) {
+      expect(businessSchema).not.toHaveProperty(field);
+    }
+  });
   it("keeps preview indexing policy separate from production defaults", () => {
     try {
       vi.stubEnv("VERCEL_ENV", "preview");
@@ -44,7 +53,7 @@ describe("public catalogue boundaries", () => {
     const meta = pageMetadata({ title: "اتصل بنا", description: "وصف", path: "/contact" });
     expect(meta.alternates.canonical).toBe("https://soulclinc.net/contact");
     expect(meta.openGraph.title).toBe(meta.twitter.title);
-    expect(meta.title.absolute).toBe("اتصل بنا | SOUL Clinic");
+    expect(meta.title.absolute).toBe("اتصل بنا | SOUL");
     expect(meta.openGraph.images[0].url).toBe("https://soulclinc.net/opengraph-image");
   });
 });

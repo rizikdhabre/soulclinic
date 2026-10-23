@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-export default function TreatmentDetails({ treatment }) {
+export default function TreatmentDetails({ treatment, children }) {
   const id = treatment._id;
   const router = useRouter();
   const HUJAMA_ID = "69dbaf697f07ea94b798a89f";
@@ -35,6 +35,7 @@ export default function TreatmentDetails({ treatment }) {
 
   return (
     <div className="container mx-auto px-6 py-24">
+      {children}
       {/* Header */}
       <div className="max-w-2xl mb-16">
         <h1 className="text-4xl font-serif mb-4">{treatment.title}</h1>

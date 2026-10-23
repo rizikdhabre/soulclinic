@@ -14,7 +14,7 @@ import HijriCuppingTable from "@/components/ui/HijriCuppingTable";
 
 
 
-const HomePage = ({ initialHeroImage }) => {
+const HomePage = ({ initialHeroImage, children }) => {
   const [loadingImg, setLoadingImg] = useState(true);
   const [heroImage, setHeroImage] = useState(initialHeroImage || null);
   const [bubblePhase, setBubblePhase] = useState("hero");
@@ -311,6 +311,7 @@ const HomePage = ({ initialHeroImage }) => {
               </motion.div>
             ))}
           </div>
+          {children}
         </div>
       </section>
     </div>
