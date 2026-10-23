@@ -10,6 +10,7 @@ import HujamahStatsCard from "@/components/admin/HujamahStatsCard";
 import IncomeStatsCard from "@/components/admin/IncomeStatsCard";
 import HeroImageUploader from "@/components/admin/HeroImageUploader";
 import MonthlyBlocker from "@/components/admin/MonthlyBlocker";
+import MonthlySchedulePlanner from "@/components/admin/MonthlySchedulePlanner";
 export default function AdminProfilePage() {
   const [openPassword, setOpenPassword] = useState(false);
 
@@ -40,6 +41,10 @@ export default function AdminProfilePage() {
 
         <section>
           <MonthlyBlocker />
+        </section>
+
+        <section>
+          <MonthlySchedulePlanner />
         </section>
 
         <section>

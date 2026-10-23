@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
+import { isValidClinicDate } from "@/lib/clinicTime";
 import {
   ChevronLeft,
   ChevronRight,
@@ -67,6 +68,7 @@ const DailyCalendar = () => {
   const [blockedTimes, setBlockedTimes] = useState([]);
   const [editedTimes, setEditedTimes] = useState([]);
   const [loadingDay, setLoadingDay] = useState(false);
+  const dayRequestRef = useRef(0);
   const [editMode, setEditMode] = useState(false);
   const [editingAppointmentId, setEditingAppointmentId] = useState(null);
   const [editingAppointmentTime, setEditingAppointmentTime] = useState("");
@@ -165,32 +167,53 @@ const DailyCalendar = () => {
 
   /* ---------- fetch ---------- */
 
-  const fetchDay = async () => {
+  const fetchDay = useCallback(async () => {
+    const requestId = ++dayRequestRef.current;
     try {
       setLoadingDay(true);
       const res = await axios.get("/api/appointments", {
         params: { date: selectedDateKey, admin: true },
       });
 
+      if (requestId !== dayRequestRef.current) return;
       setAppointments(res.data?.appointments || []);
       setBlockedTimes(res.data?.blockedTimes || []);
       setEditedTimes(res.data?.editedTimes || []);
     } catch (err) {
+      if (requestId !== dayRequestRef.current) return;
       console.error("Failed to fetch day data", err);
       setAppointments([]);
       setBlockedTimes([]);
       setEditedTimes([]);
     } finally {
-      setLoadingDay(false);
+      if (requestId === dayRequestRef.current) setLoadingDay(false);
     }
-  };
-
-  useEffect(() => {
-    fetchDay();
   }, [selectedDateKey]);
 
   useEffect(() => {
-    const handleAppointmentsChanged = () => {
+    fetchDay();
+    return () => { dayRequestRef.current += 1; };
+  }, [fetchDay]);
+
+  useEffect(() => {
+    const handleAppointmentsChanged = (event) => {
+      const appliedDates = Array.isArray(event.detail?.appliedDates)
+        ? event.detail.appliedDates.filter(isValidClinicDate)
+        : [];
+      if (appliedDates.length) {
+        const target = appliedDates.includes(selectedDateKey) ? selectedDateKey : appliedDates[0];
+        const date = new Date(`${target}T12:00:00`);
+        setCurrentMonth(date);
+        setEditMode(false);
+        setDraftTimeByIndex({});
+        setBaseEditedTimes([]);
+        setDraftEditedTimes([]);
+        setEditingAppointmentId(null);
+        if (target !== selectedDateKey) {
+          setSelectedDate(date);
+          return;
+        }
+      }
       fetchDay();
     };
 
@@ -202,7 +225,7 @@ const DailyCalendar = () => {
         handleAppointmentsChanged,
       );
     };
-  }, [selectedDateKey]);
+  }, [selectedDateKey, fetchDay]);
 
   useEffect(() => {
     setEditingAppointmentId(null);

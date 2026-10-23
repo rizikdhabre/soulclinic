@@ -172,6 +172,12 @@ export default function BookForCustomer() {
   }, []);
 
   useEffect(() => {
+    const refreshAvailability = () => setAvailabilityRefreshKey((current) => current + 1);
+    window.addEventListener("appointments:changed", refreshAvailability);
+    return () => window.removeEventListener("appointments:changed", refreshAvailability);
+  }, []);
+
+  useEffect(() => {
     setForm((current) =>
       current.time ? { ...current, time: "" } : current,
     );

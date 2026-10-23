@@ -10,6 +10,8 @@ Quick navigation: [owner rule](#1-owner-rule-for-all-future-updates), [booking](
 
 **Monthly return reminders:** eligibility, booking pauses, attendance resets, shared permission, both unsubscribe methods, durable send claims, cron integration and manual setup are explained in [RETURN_REMINDERS.md](RETURN_REMINDERS.md). Read that file for the new behavior; it is not duplicated in this baseline audit.
 
+**Separate monthly schedule planner:** the new weekday-group editor below the unchanged monthly blocker, its preview/apply workflow, booking preservation and retry handling are explained in [MONTHLY_SCHEDULE_PLANNER.md](MONTHLY_SCHEDULE_PLANNER.md). Read that file for this addition; the old blocker description below remains the baseline.
+
 ## 1. Owner rule for all future updates
 
 **Keep this project's existing languages, stack, conventions, and behavior unless the owner explicitly requests a change.**
