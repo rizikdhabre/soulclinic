@@ -1,39 +1,10 @@
-import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
-import { ObjectId } from "mongodb";
-
+import { getPublicTreatment } from "@/lib/catalogue/public";
 export async function GET(req) {
   try {
-    const { searchParams } = new URL(req.url);
-    const id = searchParams.get("id");
-
-    if (!id) {
-      return NextResponse.json(
-        { message: "Missing treatment id" },
-        { status: 400 }
-      );
-    }
-
-    const collection = await getCollection("treatments");
-
-
-    const treatment = await collection.findOne({
-      _id: new ObjectId(id),
-    });
-
-    if (!treatment) {
-      return NextResponse.json(
-        { message: "Treatment not found" },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json(treatment, { status: 200 });
-  } catch (error) {
-    console.error("Error fetching treatment", error);
-    return NextResponse.json(
-      { message: "Failed to fetch treatment" },
-      { status: 500 }
-    );
+    const record = await getPublicTreatment(new URL(req.url).searchParams.get("id"));
+    return NextResponse.json(record || { message: "Treatment not found" }, { status: record ? 200 : 404, headers: { "Cache-Control": "no-store", "X-Robots-Tag": "noindex" } });
+  } catch {
+    return NextResponse.json({ message: "Catalogue temporarily unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
 }

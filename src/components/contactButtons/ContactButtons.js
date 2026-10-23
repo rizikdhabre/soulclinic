@@ -1,10 +1,11 @@
 "use client";
+import { business } from "@/lib/seo/business";
 import { useState } from "react";
 import { FaWhatsapp, FaInstagram, FaPhoneAlt, FaMinus } from "react-icons/fa";
-const WHATSAPP_URL = "https://wa.me/972532286019";
+const WHATSAPP_URL = business.whatsapp;
 const INSTAGRAM_PERSONAL_URL = "https://www.instagram.com/sqr_dagash";
-const INSTAGRAM_CLINIC_URL = "https://www.instagram.com/soul_clinica";
-const PHONE_URL = "tel:+972532286019";
+const INSTAGRAM_CLINIC_URL = business.instagram;
+const PHONE_URL = `tel:${business.phone}`;
 
 export default function ContactButtons() {
   const [open, setOpen] = useState(false);

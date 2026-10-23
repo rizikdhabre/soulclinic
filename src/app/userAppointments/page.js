@@ -1,3 +1,5 @@
+import { privateMetadata } from "@/lib/seo/metadata";
+export const metadata = privateMetadata;
 import { Suspense } from "react";
 import UserAppointmentsClient from "./UserAppointmentsClient";
 

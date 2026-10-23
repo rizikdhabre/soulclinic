@@ -4,6 +4,9 @@ import Header from "@/components/Header/page";
 import Footer from "@/components/Footer/page";
 import ContactButtonsWrapper from "@/components/contactButtons/ContactButtonsWrapper";
 import { Toaster } from "sonner";
+import { business } from "@/lib/seo/business";
+import { businessSchema } from "@/lib/seo/schema";
+import JsonLd from "@/components/seo/JsonLd";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -16,60 +19,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  metadataBase: new URL("https://soulclinc.net"),
-
-  title: {
-    default: "عيادة SOUL |  للعلاج الطبيعي وتخفيف الآلام",
-    template: "%s | SoulClinc",
-  },
-
-  description:
-    "عيادة SOUL هي وجهتك المتكاملة للعلاجات الطبيعية المتخصصة، حيث نقدم الحجامة، الإبر الصينية، المساج الطبي، والعلاج الطبيعي بأساليب احترافية تهدف إلى استعادة توازن الطاقة في الجسم، تخفيف الآلام الجسدية، وتعزيز الراحة النفسية والجسدية ضمن بيئة هادئة وآمنة تهتم بصحتك الشاملة وجودة حياتك",
-
-  keywords: [
-    "عيادة سول",
-    "علاجات طبيعية",
-    "حجامة",
-    "إبر صينية",
-    "مساج طبي",
-    "علاج بالطاقة",
-    "دير حنا",
-    "SoulClinc",
-    "Natural Healing",
-    "Cupping Therapy",
-    "Acupuncture",
-    "Medical Massage",
-    "Holistic Wellness",
-  ],
-
-  alternates: {
-    canonical: "/",
-  },
-
-  icons: {
-    icon: "/favicon.ico",
-  },
-
-  openGraph: {
-    title: "عيادة SOUL |  للعلاج الطبيعي وتخفيف الآلام",
-    description:
-      "علاجات طبيعية تشمل الحجامة، الإبر الصينية، والمساج الطبي لتعزيز الصحة واستعادة توازن الجسم",
-    url: "https://soulclinc.net",
-    siteName: "SoulClinc",
-    locale: "ar_AR",
-    type: "website",
-  },
-
-  twitter: {
-    card: "summary",
-    title: "عيادة SOUL",
-    description: "علاجات طبيعية متخصصة لاستعادة التوازن الجسدي والنفسي.",
-  },
-
-  robots: {
-    index: true,
-    follow: true,
-  },
+  metadataBase: new URL(business.origin),
+  title: { default: business.name, template: "%s | SOUL Clinic" },
+  icons: { icon: "/favicon.ico", apple: "/logo.PNG" },
+  referrer: "strict-origin",
+  robots: { index: process.env.VERCEL_ENV !== "preview" && process.env.SITE_NOINDEX !== "true", follow: true },
 };
 
 export default function RootLayout({ children }) {
@@ -78,18 +32,7 @@ export default function RootLayout({ children }) {
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify({
-              "@context": "https://schema.org",
-              "@type": "Organization",
-              name: "SoulClinc",
-              url: "https://soulclinc.net",
-              logo: "https://soulclinc.net/logo.png",
-            }),
-          }}
-        />
+        <JsonLd data={businessSchema} />
         <Header />
         {children}
         <ContactButtonsWrapper />

@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import ForwardBackButton from "../ui/ForwardBackButton";
 
 const TreatmentCard = ({ id, title, description, index }) => {
@@ -46,9 +47,9 @@ const TreatmentCard = ({ id, title, description, index }) => {
       </div>
 
       {/* Title */}
-      <h3 className="font-serif text-xl md:text-2xl text-foreground mb-3 group-hover:text-primary transition-colors">
-        {title}
-      </h3>
+      <h2 className="font-serif text-xl md:text-2xl text-foreground mb-3 group-hover:text-primary transition-colors">
+        <Link href={`/treatments/${id}`} onClick={(event) => event.stopPropagation()}>{title}</Link>
+      </h2>
 
       {/* Description */}
       <p className="text-subtle text-sm md:text-base leading-relaxed">

@@ -9,14 +9,14 @@ export default function NotFound() {
         </h1>
 
         <p className="mb-6 text-xl text-muted-foreground">
-          Oops! Page not found.
+          الصفحة غير موجودة أو لم تعد متاحة.
         </p>
 
         <Link
           href="/"
           className="text-primary underline underline-offset-4 hover:text-primary/90"
         >
-          Return to Home
+          العودة إلى الرئيسية
         </Link>
       </div>
     </div>

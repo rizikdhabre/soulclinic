@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { Heart } from "lucide-react";
 import Image from "next/image";
+import { business } from "@/lib/seo/business";
 const Footer = () => {
   return (
     <footer className="bg-card border-t border-border">
@@ -55,10 +56,10 @@ const Footer = () => {
               <p>ديرحنا</p>
 
               <a
-                href="tel:0507456258"
+                href={`tel:${business.phone}`}
                 className="hover:text-foreground transition-colors"
               >
-                0507456258
+                <bdi>{business.displayPhone}</bdi>
               </a>
             </div>
           </motion.div>

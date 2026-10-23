@@ -16,6 +16,13 @@
 
 # local development documentation
 /docs/
+!/docs/
+/docs/*
+!/docs/SEO.md
+!/tests/
+/tests/*
+!/tests/seo/
+/tests/seo/artifacts/
 
 # next.js
 /.next/
