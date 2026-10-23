@@ -10,6 +10,7 @@ import {
 import { UserAvatar } from "./UserAvatar";
 import { Button } from "@/components/ui/button";
 import axios from "axios";
+import Link from "next/link";
 
 const USERS_PER_PAGE = 10;
 
@@ -170,9 +171,9 @@ export const UsersTable = ({ users, onViewAppointments }) => {
                         </div>
                       ) : (
                         <>
-                          <p className="font-medium truncate">
+                          <Link href={`/admin/users/${encodeURIComponent(user._id)}`} className="block font-medium truncate text-primary underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
                             {user.firstName} {user.lastName}
-                          </p>
+                          </Link>
                           <p className="text-xs text-muted-foreground truncate">
                             {user.phone}
                           </p>
@@ -238,9 +239,9 @@ export const UsersTable = ({ users, onViewAppointments }) => {
                   size="sm"
                 />
                 <div>
-                  <p className="font-medium text-sm">
+                  <Link href={`/admin/users/${encodeURIComponent(user._id)}`} className="font-medium text-sm text-primary underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
                     {user.firstName} {user.lastName}
-                  </p>
+                  </Link>
                   <p className="text-xs text-muted-foreground">{user.phone}</p>
                 </div>
               </div>

@@ -1,6 +1,8 @@
 import { getCollection } from "@/lib/db";
 import { sendWhatsAppTemplate } from "@/lib/whatsapp";
 import { normalizeIsraeliPhone } from "@/lib/phone";
+import { sendDueFeedbackRequests } from "@/lib/appointmentFeedback";
+import { sendDueReturnReminders } from "@/lib/returnReminders";
 
 const TZ = "Asia/Jerusalem";
 const WINDOW_MINUTES = 10;
@@ -63,7 +65,10 @@ export async function GET(req) {
   try {
     // Protect endpoint
     const secret = req.headers.get("x-cron-secret");
-    if (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
+    const feedbackEnabled = process.env.FEEDBACK_REQUESTS_ENABLED === "true";
+    const returnRemindersEnabled = process.env.RETURN_REMINDERS_ENABLED === "true";
+    if (((feedbackEnabled || returnRemindersEnabled) && !process.env.CRON_SECRET?.trim()) ||
+      (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET)) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -90,25 +95,12 @@ export async function GET(req) {
       { projection: { appointments: 1 } },
     );
 
-    if (!day?.appointments?.length) {
-      return Response.json({
-        success: true,
-        date: queryDate,
-        israelNow: `${israel.date} ${String(israel.hour).padStart(2, "0")}:${String(israel.minute).padStart(2, "0")}`,
-        sent: 0,
-        window: {
-          from: minutesToTime(windowStart),
-          to: minutesToTime(windowEnd),
-        },
-      });
-    }
-
     let sent = 0;
     let failed = 0;
     const debug = [];
     const errors = [];
 
-    for (const apt of day.appointments) {
+    for (const apt of day?.appointments || []) {
       if (apt?.reminderSent === true) continue;
 
       const aptMinutes = timeToMinutes(apt.time);
@@ -175,6 +167,26 @@ export async function GET(req) {
       }
     }
 
+    // Feedback always uses the real clock: the reminder's testTime must not trigger early sends.
+    let feedback;
+    if (feedbackEnabled) {
+      try {
+        feedback = await sendDueFeedbackRequests({ dryRun });
+      } catch {
+        feedback = { status: "failed" };
+      }
+    }
+
+    // A simulated appointment-reminder clock must never advance monthly sends.
+    let returnReminders;
+    if (returnRemindersEnabled) {
+      try {
+        returnReminders = await sendDueReturnReminders({ dryRun });
+      } catch {
+        returnReminders = { status: "failed" };
+      }
+    }
+
     return Response.json({
       success: true,
       date: queryDate,
@@ -185,6 +197,8 @@ export async function GET(req) {
       },
       sent,
       failed,
+      ...(feedback ? { feedback } : {}),
+      ...(returnReminders ? { returnReminders } : {}),
       ...(debug.length ? { debug } : {}),
       ...(errors.length ? { errors } : {}),
     });
