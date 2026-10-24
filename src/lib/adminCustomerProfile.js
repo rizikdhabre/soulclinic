@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 import { compareAppointmentToNow, isValidClinicDate, isValidClinicTime } from "@/lib/clinicTime";
 import { projectTreatmentPlanComments } from "@/lib/treatmentPlanComments";
+import { isValidPainRelief } from "@/lib/feedbackRating";
 
 const string = (value) => typeof value === "string" ? value : "";
 const id = (value) => value instanceof ObjectId ? value.toHexString() : typeof value === "string" && /^[a-f\d]{24}$/i.test(value) ? value.toLowerCase() : null;
@@ -58,7 +59,10 @@ export function projectCustomerProfile({ user, feedbackRecords = [], plans = [],
     .map((a) => ({ _id: a._id, date: day.date, time: a.time }))));
   const feedback = new Map(array(feedbackRecords)
     .filter((record) => record && id(record.userId) === userId && id(record.appointmentId) && typeof record.feedback?.text === "string")
-    .map((record) => [id(record.appointmentId), { text: record.feedback.text, submittedAt: iso(record.feedback.submittedAt) }]));
+    .map((record) => [id(record.appointmentId), {
+      text: record.feedback.text, submittedAt: iso(record.feedback.submittedAt),
+      ...(isValidPainRelief(record.feedback.painRelief) ? { painRelief: record.feedback.painRelief } : {}),
+    }]));
 
   // Legacy booking notes have no appointment ID. Only the current live slot is
   // a supported match; guessing from an old plan slot can attach an orphan note.

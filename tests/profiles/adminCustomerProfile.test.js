@@ -59,6 +59,28 @@ describe("protected customer profile projection", () => {
     expect(JSON.stringify(result)).not.toContain("other customer");
   });
 
+  it.each([1, 8, 10])("preserves a valid pain relief score of %i with the matching appointment feedback", (painRelief) => {
+    const result = profile.projectCustomerProfile({ user, now, feedbackRecords: [
+      { userId, appointmentId: pastId, feedback: { text: "تحسن بعد الجلسة", painRelief, submittedAt: now } },
+      { userId, appointmentId: futureId, feedback: { text: "تقييم قديم", submittedAt: now } },
+    ] });
+    expect(result.appointments.find((a) => a._id === String(pastId)).feedback).toEqual({
+      text: "تحسن بعد الجلسة", painRelief, submittedAt: "2026-10-23T11:00:00.000Z",
+    });
+    expect(result.appointments.find((a) => a._id === String(futureId)).feedback).toEqual({
+      text: "تقييم قديم", submittedAt: "2026-10-23T11:00:00.000Z",
+    });
+  });
+
+  it.each([undefined, null, 0, 11, -1, 1.5, "8", true, NaN, Infinity])("preserves feedback text while omitting invalid or absent pain relief %s", (painRelief) => {
+    const result = profile.projectCustomerProfile({ user, now, feedbackRecords: [
+      { userId, appointmentId: pastId, feedback: { text: "تقييم محفوظ", painRelief, submittedAt: now } },
+    ] });
+    expect(result.appointments.find((a) => a._id === String(pastId)).feedback).toEqual({
+      text: "تقييم محفوظ", submittedAt: "2026-10-23T11:00:00.000Z",
+    });
+  });
+
   it("projects plan status without exposing provider IDs, hashes or raw internal fields", () => {
     expect(profile.projectCustomerProfile).toBeTypeOf("function");
     const result = profile.projectCustomerProfile({ user, now, feedbackRecords: [], plans: [{
@@ -105,9 +127,10 @@ describe("protected customer profile projection", () => {
   it("retains all canceled sessions and previously submitted feedback without calling them upcoming", () => {
     const result = profile.projectCustomerProfile({ user: { ...user, appointments: [] }, now,
       plans: [makePlan([canceled])],
-      feedbackRecords: [{ userId, appointmentId: canceledId, feedback: { text: "ملاحظة محفوظة", submittedAt: now } }] });
+      feedbackRecords: [{ userId, appointmentId: canceledId, feedback: { text: "ملاحظة محفوظة", painRelief: 8, submittedAt: now } }] });
     expect(result.plans[0]).toMatchObject({ status: "canceled", counts: { total: 1, canceled: 1, upcoming: 0 } });
-    expect(result.appointments[0]).toMatchObject({ status: "canceled", feedback: { text: "ملاحظة محفوظة" } });
+    expect(result.appointments[0]).toMatchObject({ status: "canceled", feedback: { text: "ملاحظة محفوظة", painRelief: 8 } });
+    expect(result.plans[0].appointments[0].feedback).toEqual(result.appointments[0].feedback);
   });
 
   it.each([

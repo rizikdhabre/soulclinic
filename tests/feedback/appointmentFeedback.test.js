@@ -207,7 +207,7 @@ describe("feedback eligibility and durable dispatch", () => {
     client.on("commandStarted", listener);
     try {
       const { token } = await issue();
-      await submitAppointmentFeedback({ token, text: "durable", now: NOW }, deps);
+      await submitAppointmentFeedback({ token, text: "durable", painRelief: 8, now: NOW }, deps);
       expect(writes).toHaveLength(3);
       for (const command of writes) expect(command.writeConcern?.w).toBe("majority");
     } finally {
@@ -265,25 +265,30 @@ describe("feedback eligibility and durable dispatch", () => {
 });
 
 describe("private immutable feedback", () => {
-  it("reveals only one appointment and submission state, never profile or submitted text", async () => {
+  it("stores the comment and score but reveals only appointment and submission state", async () => {
     const { token } = await issue();
     expect(await getFeedbackRequest({ token, now: NOW }, deps)).toEqual({
       appointment: { title: "حجامة", date: "2026-10-16", time: "12:00" }, submitted: false,
     });
-    await submitAppointmentFeedback({ token, text: "ممتاز\n<script>plain text</script>", now: NOW }, deps);
+    await submitAppointmentFeedback({ token, text: "ممتاز\n<script>plain text</script>", painRelief: 8, now: NOW }, deps);
     const publicResult = await getFeedbackRequest({ token, now: NOW }, deps);
     expect(publicResult).toEqual({ appointment: { title: "حجامة", date: "2026-10-16", time: "12:00" }, submitted: true });
-    expect(JSON.stringify(publicResult)).not.toMatch(/ممتاز|phone|firstName|lastName|userId|972|private note/);
-    expect((await feedback.findOne({})).feedback.text).toBe("ممتاز\n<script>plain text</script>");
+    expect(JSON.stringify(publicResult)).not.toMatch(/ممتاز|painRelief|phone|firstName|lastName|userId|972|private note/);
+    expect((await feedback.findOne({})).feedback).toEqual({
+      text: "ممتاز\n<script>plain text</script>", painRelief: 8, submittedAt: NOW,
+    });
   });
 
   it("rejects tampered, malformed, and expired bearer links", async () => {
     const { token } = await issue();
     for (const invalid of ["bad", `${token.slice(0, -1)}${token.endsWith("A") ? "B" : "A"}`, null]) {
-      await expect(getFeedbackRequest({ token: invalid, now: NOW }, deps)).rejects.toMatchObject({ status: 404, code: "FEEDBACK_UNAVAILABLE" });
+      for (const action of [getFeedbackRequest, submitAppointmentFeedback]) {
+        await expect(action({ token: invalid, text: "tampered", painRelief: 8, now: NOW }, deps))
+          .rejects.toMatchObject({ status: 404, code: "FEEDBACK_UNAVAILABLE" });
+      }
     }
     for (const action of [getFeedbackRequest, submitAppointmentFeedback]) {
-      await expect(action({ token, text: "expired", now: new Date("2026-11-22T09:00:00Z") }, deps))
+      await expect(action({ token, text: "expired", painRelief: 8, now: new Date("2026-11-22T09:00:00Z") }, deps))
         .rejects.toMatchObject({ status: 404 });
     }
     expect((await feedback.findOne({})).feedback).toBeUndefined();
@@ -298,27 +303,64 @@ describe("private immutable feedback", () => {
       await users.insertOne({ ...user, _id: new ObjectId() });
     }
     await expect(getFeedbackRequest({ token, now: NOW }, deps)).rejects.toMatchObject({ status: 404 });
-    await expect(submitAppointmentFeedback({ token, now: NOW, text: "revoked" }, deps)).rejects.toMatchObject({ status: 404 });
+    await expect(submitAppointmentFeedback({ token, now: NOW, text: "revoked", painRelief: 8 }, deps)).rejects.toMatchObject({ status: 404 });
     expect((await feedback.findOne({})).feedback).toBeUndefined();
   });
 
-  it("accepts 10,000 plain-text characters and rejects empty, non-string, and oversized text", async () => {
+  it.each([
+    ["50 words with Arabic, English, and varied whitespace", `  ${Array.from({ length: 25 }, () => "ممتاز\tgood").join("\n\u00a0")}  `],
+    ["1,000 characters in one word", "أ".repeat(1_000)],
+  ])("accepts %s and preserves the exact text and score", async (_label, text) => {
     const { token } = await issue();
-    for (const text of ["", "  \n  ", null, 2, {}, "أ".repeat(10_001)]) {
-      await expect(submitAppointmentFeedback({ token, text, now: NOW }, deps)).rejects.toMatchObject({ status: 400 });
-    }
-    expect(await submitAppointmentFeedback({ token, text: "أ".repeat(10_000), now: NOW }, deps)).toEqual({ success: true });
-    expect((await feedback.findOne({})).feedback.text).toHaveLength(10_000);
+    expect(await submitAppointmentFeedback({ token, text, painRelief: 8, now: NOW }, deps)).toEqual({ success: true });
+    expect((await feedback.findOne({})).feedback).toEqual({ text, painRelief: 8, submittedAt: NOW });
   });
 
-  it("concurrent and repeated submissions preserve exactly one immutable response", async () => {
+  it.each([
+    ["empty", ""], ["whitespace-only", " \t\n\u00a0 "],
+    ["undefined", undefined], ["null", null], ["number", 2], ["object", {}], ["array", ["good"]],
+    ["51 short Arabic words", Array(51).fill("نعم").join(" ")],
+    ["51 words separated by repeated spaces, tabs, and newlines", Array(51).fill("good").join(" \t\n ")],
+    ["51 mixed-language words separated by non-breaking spaces", Array.from({ length: 51 }, (_, index) => index % 2 ? "good" : "ممتاز").join("\u00a0")],
+    ["1,001 characters in one word", "أ".repeat(1_001)],
+  ])("rejects %s text without saving the comment or score", async (_label, text) => {
     const { token } = await issue();
-    const results = await Promise.allSettled(["first", "second", "third"].map((text) =>
-      submitAppointmentFeedback({ token, text, now: NOW }, deps)));
+    await expect(submitAppointmentFeedback({ token, text, painRelief: 8, now: NOW }, deps))
+      .rejects.toMatchObject({ status: 400, code: "INVALID_FEEDBACK" });
+    expect((await feedback.findOne({})).feedback).toBeUndefined();
+  });
+
+  it.each([1, 10])("accepts the inclusive pain relief boundary %s", async (painRelief) => {
+    const { token } = await issue();
+    expect(await submitAppointmentFeedback({ token, text: "boundary", painRelief, now: NOW }, deps)).toEqual({ success: true });
+    expect((await feedback.findOne({})).feedback).toEqual({ text: "boundary", painRelief, submittedAt: NOW });
+  });
+
+  it.each([
+    ["missing", {}], ["undefined", { painRelief: undefined }], ["null", { painRelief: null }],
+    ["numeric string", { painRelief: "8" }], ["fraction", { painRelief: 8.5 }],
+    ["true", { painRelief: true }], ["false", { painRelief: false }],
+    ["zero", { painRelief: 0 }], ["negative", { painRelief: -1 }], ["above maximum", { painRelief: 11 }],
+    ["array", { painRelief: [8] }], ["object", { painRelief: {} }],
+    ["NaN", { painRelief: NaN }], ["infinity", { painRelief: Infinity }], ["negative infinity", { painRelief: -Infinity }],
+  ])("rejects a %s rating without saving the comment or score", async (_label, rating) => {
+    const { token } = await issue();
+    await expect(submitAppointmentFeedback({ token, text: "must not save", now: NOW, ...rating }, deps))
+      .rejects.toMatchObject({ code: "INVALID_FEEDBACK", status: 400 });
+    expect((await feedback.findOne({})).feedback).toBeUndefined();
+  });
+
+  it("concurrent and repeated submissions preserve one complete immutable comment and score pair", async () => {
+    const { token } = await issue();
+    const submissions = [{ text: "first", painRelief: 1 }, { text: "second", painRelief: 5 }, { text: "third", painRelief: 10 }];
+    const results = await Promise.allSettled(submissions.map((submission) =>
+      submitAppointmentFeedback({ token, ...submission, now: NOW }, deps)));
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((r) => r.status === "rejected").every((r) => r.reason.code === "ALREADY_SUBMITTED")).toBe(true);
     const before = (await feedback.findOne({})).feedback;
-    await expect(submitAppointmentFeedback({ token, text: "overwrite", now: NOW }, deps)).rejects.toMatchObject({ status: 409 });
+    const winner = submissions[results.findIndex((result) => result.status === "fulfilled")];
+    expect(before).toEqual({ ...winner, submittedAt: NOW });
+    await expect(submitAppointmentFeedback({ token, text: "overwrite", painRelief: 7, now: NOW }, deps)).rejects.toMatchObject({ status: 409 });
     expect((await feedback.findOne({})).feedback).toEqual(before);
   });
 });

@@ -39,21 +39,72 @@ describe("private feedback HTTP boundary", () => {
     expect(external.getFeedbackRequest).toHaveBeenCalledWith({ token: TOKEN });
   });
 
-  it("accepts only text and never forwards caller-supplied appointment or user identifiers", async () => {
+  it.each([1, 8, 10])("forwards valid score %s and text without caller-supplied appointment or user identifiers", async (painRelief) => {
     external.submitAppointmentFeedback.mockResolvedValue({ success: true });
     const result = await feedbackPost(request(`/api/feedback/${TOKEN}`, {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text: "feedback", userId: "other", appointmentId: "other" }),
+      body: JSON.stringify({ text: "feedback", painRelief, userId: "other", appointmentId: "other" }),
     }), context);
     expect(result.status).toBe(200);
-    expect(external.submitAppointmentFeedback).toHaveBeenCalledWith({ token: TOKEN, text: "feedback" });
+    expect(external.submitAppointmentFeedback).toHaveBeenCalledWith({ token: TOKEN, text: "feedback", painRelief });
   });
 
-  it("rejects malformed and oversized bodies before submitting", async () => {
-    for (const body of ["{broken", "null", JSON.stringify({ text: "x".repeat(10_001) })]) {
+  it.each([
+    ["50 words with Arabic, English, and varied whitespace", `  ${Array.from({ length: 25 }, () => "ممتاز\tgood").join("\n\u00a0")}  `],
+    ["1,000 characters in one word", "أ".repeat(1_000)],
+  ])("accepts %s and forwards the exact text and score", async (_label, text) => {
+    external.submitAppointmentFeedback.mockResolvedValue({ success: true });
+    const result = await feedbackPost(request(`/api/feedback/${TOKEN}`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text, painRelief: 8 }),
+    }), context);
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual({ success: true });
+    expect(external.submitAppointmentFeedback).toHaveBeenCalledExactlyOnceWith({ token: TOKEN, text, painRelief: 8 });
+  });
+
+  it("rejects malformed bodies before submitting", async () => {
+    for (const body of ["{broken", "null"]) {
       const result = await feedbackPost(request("/api/feedback/token", { method: "POST", body }), context);
       expect(result.status).toBe(400);
+      expect(await result.json()).toEqual({ error: "INVALID_FEEDBACK" });
     }
+    expect(external.submitAppointmentFeedback).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["empty", ""], ["whitespace-only", " \t\n\u00a0 "],
+    ["missing", undefined], ["null", null], ["number", 2], ["object", {}], ["array", ["good"]],
+    ["51 short Arabic words", Array(51).fill("نعم").join(" ")],
+    ["51 words separated by repeated spaces, tabs, and newlines", Array(51).fill("good").join(" \t\n ")],
+    ["51 mixed-language words separated by non-breaking spaces", Array.from({ length: 51 }, (_, index) => index % 2 ? "good" : "ممتاز").join("\u00a0")],
+    ["1,001 characters in one word", "أ".repeat(1_001)],
+  ])("rejects %s text at the HTTP boundary before submitting", async (_label, text) => {
+    external.submitAppointmentFeedback.mockResolvedValue({ success: true });
+    const result = await feedbackPost(request(`/api/feedback/${TOKEN}`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text, painRelief: 8 }),
+    }), context);
+    expect(result.status).toBe(400);
+    expect(await result.json()).toEqual({ error: "INVALID_FEEDBACK" });
+    expect(result.headers.get("cache-control")).toContain("no-store");
+    expect(external.submitAppointmentFeedback).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing", {}], ["null", { painRelief: null }], ["numeric string", { painRelief: "8" }],
+    ["fraction", { painRelief: 8.5 }], ["true", { painRelief: true }], ["false", { painRelief: false }],
+    ["zero", { painRelief: 0 }], ["negative", { painRelief: -1 }], ["above maximum", { painRelief: 11 }],
+    ["array", { painRelief: [8] }], ["object", { painRelief: {} }],
+  ])("rejects a %s rating at the HTTP boundary before submitting", async (_label, rating) => {
+    external.submitAppointmentFeedback.mockResolvedValue({ success: true });
+    const result = await feedbackPost(request(`/api/feedback/${TOKEN}`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "feedback", ...rating }),
+    }), context);
+    expect(result.status).toBe(400);
+    expect(await result.json()).toEqual({ error: "INVALID_FEEDBACK" });
+    expect(result.headers.get("cache-control")).toContain("no-store");
     expect(external.submitAppointmentFeedback).not.toHaveBeenCalled();
   });
 

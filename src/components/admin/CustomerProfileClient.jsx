@@ -8,6 +8,7 @@ import { ArrowRight, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Chevr
 import NeonLoader from "@/components/ui/loading";
 import { getWhatsAppLink } from "@/lib/phone";
 import FeedbackDialog from "./FeedbackDialog";
+import PainReliefBadge from "./PainReliefBadge";
 import TreatmentPlanBuilder, { notificationMessage } from "./TreatmentPlanBuilder";
 import ReturnReminderPreference from "./ReturnReminderPreference";
 import TreatmentPlanComments, { getCommentSession } from "./TreatmentPlanComments";
@@ -72,7 +73,7 @@ function AppointmentList({ appointments, onOpen }) {
               <td className="p-4 align-top"><bdi>{appointment.price} ₪</bdi></td>
               <td className="p-4 align-top"><StatusBadge status={appointment.status} /></td>
               <td className="p-4 align-top"><NotePreview appointment={appointment} kind="bookingNote" onOpen={onOpen} /></td>
-              <td className="p-4 align-top"><NotePreview appointment={appointment} onOpen={onOpen} /></td>
+              <td className="space-y-2 p-4 align-top"><PainReliefBadge value={appointment.feedback?.painRelief} /><NotePreview appointment={appointment} onOpen={onOpen} /></td>
             </tr>)}</tbody>
           </table>
         </div>
@@ -83,7 +84,7 @@ function AppointmentList({ appointments, onOpen }) {
             <div><dt className="mb-1 text-xs text-muted-foreground">التاريخ والساعة</dt><dd><bdi>{appointment.date} · {appointment.time}</bdi></dd></div>
             <div><dt className="mb-1 text-xs text-muted-foreground">السعر</dt><dd><bdi>{appointment.price} ₪</bdi></dd></div>
             <div className="col-span-2 min-w-0"><dt className="mb-2 font-medium">ملاحظة الحجز</dt><dd><NotePreview appointment={appointment} kind="bookingNote" onOpen={onOpen} /></dd></div>
-            <div className="col-span-2 min-w-0"><dt className="mb-2 font-medium">تقييم العلاج</dt><dd><NotePreview appointment={appointment} onOpen={onOpen} /></dd></div>
+            <div className="col-span-2 min-w-0"><dt className="mb-2 flex flex-wrap items-center gap-2 font-medium"><span>تقييم العلاج</span><PainReliefBadge value={appointment.feedback?.painRelief} /></dt><dd><NotePreview appointment={appointment} onOpen={onOpen} /></dd></div>
           </dl>
         </article>)}</div>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border p-4 text-sm">

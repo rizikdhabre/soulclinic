@@ -27,6 +27,10 @@
 !/tests/returnReminders/
 /tests/returnReminders/*
 !/tests/returnReminders/*.test.js
+!/tests/adminReports/
+/tests/adminReports/*
+!/tests/adminReports/*.test.js
+!/docs/ADMIN-DAILY-REPORTS.md
 !/tests/e2e/
 /tests/e2e/*
 !/tests/e2e/returnReminders/

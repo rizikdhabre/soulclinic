@@ -15,7 +15,7 @@ const profile = {
   user: { _id: 'customer-one', firstName: 'ليلى', lastName: 'أحمد', phone: '0500000000' },
   appointments: [
     { _id: 'older', title: 'جلسة أقدم', date: '2026-08-01', time: '10:00', price: 100, attended: false, bookingNote: '', feedback: null, isPast: true, status: 'not_attended' },
-    { _id: 'recent', title: 'جلسة حديثة', date: '2026-09-20', time: '11:00', price: 150, attended: true, bookingNote, feedback: { text: feedback, submittedAt: '2026-09-28T12:00:00Z' }, isPast: true, status: 'attended' },
+    { _id: 'recent', title: 'جلسة حديثة', date: '2026-09-20', time: '11:00', price: 150, attended: true, bookingNote, feedback: { text: feedback, painRelief: 8, submittedAt: '2026-09-28T12:00:00Z' }, isPast: true, status: 'attended' },
     { _id: 'future', title: 'جلسة قادمة', date: '2030-01-15', time: '14:00', price: 170, attended: false, bookingNote: 'يفضل الاتصال قبل الموعد', feedback: null, isPast: false, status: 'upcoming' },
     { _id: 'canceled', title: 'جلسة ملغاة', date: '2030-01-16', time: '15:00', price: 180, attended: false, bookingNote: '', feedback: null, isPast: false, status: 'canceled' },
     { _id: 'unverified', title: 'جلسة غير مؤكدة', date: '2030-01-17', time: '16:00', price: 190, attended: false, bookingNote: '', feedback: null, isPast: false, status: 'unknown' },
@@ -445,6 +445,10 @@ test('all appointments are latest first with distinct read-only states and booki
   await expect(history.getByText('تقييم العلاج', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   await expect(history.getByText('لا توجد ملاحظة حجز').filter({ visible: true }).first()).toBeVisible();
   await expect(history.getByText('لا يوجد تقييم للعلاج').filter({ visible: true }).first()).toBeVisible();
+  const ratedAppointment = history.locator('tr, article').filter({ hasText: 'جلسة حديثة' }).filter({ visible: true });
+  const ratingLocation = testInfo.project.name === 'desktop' ? ratedAppointment.getByRole('cell').nth(5) : ratedAppointment.locator('dt').filter({ hasText: 'تقييم العلاج' });
+  await expect(ratingLocation).toContainText(/درجة التحسّن:\s*8\/10/);
+  await expect(history.getByText('درجة التحسّن:', { exact: true }).filter({ visible: true })).toHaveCount(1);
   if (testInfo.project.name === 'desktop') await expect(history.getByRole('columnheader')).toHaveCount(6);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('customer-profile.png'), fullPage: true });
@@ -458,6 +462,7 @@ test('long treatment feedback remains plain text, scrollable and keyboard access
   await opener.click();
   const dialog = page.getByRole('dialog', { name: 'تقييم العلاج' });
   await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'تقييم العلاج' }).locator('..')).toContainText(/درجة التحسّن:\s*8\/10/);
   expect(await dialog.locator('[data-feedback-text]').textContent()).toBe(feedback);
   expect(await dialog.locator('img').count()).toBe(0);
   expect(await dialog.getByLabel('نص تقييم العلاج').evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
@@ -490,6 +495,7 @@ test('long booking note opens separately from treatment feedback with safe text 
   const dialog = page.getByRole('dialog', { name: 'ملاحظة الحجز' });
   const content = dialog.getByLabel('نص ملاحظة الحجز');
   await expect(dialog).toBeVisible();
+  await expect(dialog).not.toContainText('درجة التحسّن');
   expect(await content.textContent()).toBe(bookingNote);
   expect(await dialog.locator('script, img').count()).toBe(0);
   expect(await dialog.locator('[data-feedback-text]').count()).toBe(0);
@@ -1077,18 +1083,36 @@ test('conflicting row is identified and can be changed without losing other appo
   await expect(second.getByLabel('التاريخ', { exact: true })).toBeEnabled();
 });
 
-test('public feedback sends long plain text once and shows immutable confirmation', async ({ page }, testInfo) => {
+test('public feedback requires a rating, limits comments to 50 words and shows immutable confirmation', async ({ page }, testInfo) => {
   const calls = await mockApi(page);
   await page.goto('/feedback/private-token');
   const input = page.getByRole('textbox', { name: 'ملاحظتك', exact: true });
-  await input.fill(feedback);
-  await expect(input).toHaveAttribute('maxlength', '10000');
+  const submit = page.getByRole('button', { name: 'إرسال الملاحظة' });
+  const fiftyWords = Array.from({ length: 50 }, (_, index) => `ملاحظة${index + 1}`).join(' ');
+  await expect(page.getByRole('radio', { checked: true })).toHaveCount(0);
+  await expect(page.locator('#feedback-count')).toContainText('0 / 50');
+  await input.fill(fiftyWords);
+  await expect(page.locator('#feedback-count')).toContainText('50 / 50');
+  await expect(submit).toBeDisabled();
+  await page.getByRole('radio', { name: '8 من 10', exact: true }).check();
+  await expect(submit).toBeEnabled();
+  await input.fill(`${fiftyWords}\n\tزيادة`);
+  await expect(input).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByRole('alert')).toContainText('50 كلمة');
+  await expect(page.locator('#feedback-count')).toContainText('51 / 50');
+  await expect(submit).toBeDisabled();
+  expect(calls.filter(call => call.method === 'POST')).toHaveLength(0);
+  await input.fill(fiftyWords);
+  await expect(input).not.toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(input).toHaveAttribute('maxlength', '1000');
+  await expect(submit).toBeEnabled();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('public-feedback.png'), fullPage: true });
-  await page.getByRole('button', { name: 'إرسال الملاحظة' }).click();
+  await submit.click();
   await expect(page.getByRole('status')).toContainText('شكرًا');
   await expect(input).toBeHidden();
-  expect(calls.filter(call => call.method === 'POST').map(call => call.body)).toEqual([{ text: feedback }]);
+  expect(calls.filter(call => call.method === 'POST').map(call => call.body)).toEqual([{ text: fiftyWords, painRelief: 8 }]);
 });
 
 test('used or unavailable feedback links expose no editable form or customer identity', async ({ page }) => {

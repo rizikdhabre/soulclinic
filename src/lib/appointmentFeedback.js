@@ -3,6 +3,8 @@ import { isIP } from "node:net";
 import { ObjectId } from "mongodb";
 import { normalizeIsraeliPhone } from "@/lib/phone";
 import { getClinicNowParts, isValidClinicDate, isValidClinicTime } from "@/lib/clinicTime";
+import { isValidPainRelief } from "@/lib/feedbackRating";
+import { isValidFeedbackText } from "@/lib/feedbackText";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const BATCH_SIZE = 50;
@@ -119,15 +121,15 @@ export async function getFeedbackRequest({ token, now = new Date() }, deps = {})
   };
 }
 
-export async function submitAppointmentFeedback({ token, text, now = new Date() }, deps = {}) {
-  if (typeof text !== "string" || !text.trim() || text.length > 10_000) {
+export async function submitAppointmentFeedback({ token, text, painRelief, now = new Date() }, deps = {}) {
+  if (!isValidFeedbackText(text) || !isValidPainRelief(painRelief)) {
     throw new FeedbackError("INVALID_FEEDBACK", 400);
   }
   const { record, feedback } = await authorizedRequest({ token, now }, deps);
   // The conditional write is the submission lock: concurrent requests cannot replace feedback.
   const result = await feedback.updateOne({
     _id: record._id, tokenHash: record.tokenHash, expiresAt: { $gt: now }, feedback: { $exists: false },
-  }, { $set: { feedback: { text, submittedAt: now } } }, DURABLE_WRITE);
+  }, { $set: { feedback: { text, painRelief, submittedAt: now } } }, DURABLE_WRITE);
   if (result.modifiedCount !== 1) throw new FeedbackError("ALREADY_SUBMITTED", 409);
   return { success: true };
 }
