@@ -10,7 +10,7 @@ Quick navigation: [owner rule](#1-owner-rule-for-all-future-updates), [booking](
 
 **Monthly return reminders:** eligibility, booking pauses, attendance resets, shared permission, both unsubscribe methods, durable send claims, cron integration and manual setup are explained in [RETURN_REMINDERS.md](RETURN_REMINDERS.md). Read that file for the new behavior; it is not duplicated in this baseline audit.
 
-**Separate monthly schedule planner:** the new weekday-group editor below the unchanged monthly blocker, its preview/apply workflow, booking preservation and retry handling are explained in [MONTHLY_SCHEDULE_PLANNER.md](MONTHLY_SCHEDULE_PLANNER.md). Read that file for this addition; the old blocker description below remains the baseline.
+**Monthly schedule planner:** the weekday-group editor, its preview/apply workflow, booking preservation and retry handling are explained in [MONTHLY_SCHEDULE_PLANNER.md](MONTHLY_SCHEDULE_PLANNER.md). That document also records removal of the obsolete monthly blocker; read it for current monthly scheduling behavior.
 
 ## 1. Owner rule for all future updates
 
@@ -102,7 +102,7 @@ Repository navigation:
 | `/about` | Static clinic/about content. |
 | `/contact` | Static contact details, WhatsApp/Instagram links and embedded map; no contact-submission backend. |
 | `/admin` | Admin navigation hub. |
-| `/admin/profile` | Operational admin dashboard: daily calendar, manual booking, month blocking, income/cups statistics, hero upload and password controls. |
+| `/admin/profile` | Operational admin dashboard: daily calendar, manual booking, monthly schedule planning, income/cups statistics, hero upload and password controls. |
 | `/admin/users` | Customer list, attendance overview, appointment history/actions and notes. |
 | `/admin/treatments` | Treatment category and service management. |
 | `/admin/perfumes` | Retained perfume category/product management. |
@@ -239,9 +239,8 @@ These are different operations and must not be conflated:
 | Clear day blocks: `POST /api/appointments/unblockAll` | `{date}` sets `blockedTimes: []`; preserves bookings and custom times. |
 | Edit offered start times: `POST /api/appointments/edit` | `{date,editedTimes}` replaces the offered-start array. Does not move existing bookings. The handler ignores the extra `blockedTimes` sent by the current UI. |
 | Replace a blocked string: `POST /api/appointments/replaceBlockedTime` | `{date,oldTime,newTime}` maps matching strings in `blockedTimes`. Does not modify the offered schedule, move a booking, or deduplicate the resulting array. |
-| Block starts across a month: `POST /api/appointments/block-month` | `{month: 'YYYY-MM', times: [...]}` loops every calendar day and adds those starts to `blockedTimes`, excluding exact booked starts. Existing unrelated blocks stay. This is a set of daily writes, not a recurrence rule or one atomic month operation. |
 
-**Access caveat:** the seven schedule/block/time-edit POST handlers in this table currently have no endpoint admin check. `/admin` page protection does not protect these API URLs. This observation is recorded for future work; nothing was changed during the audit.
+**Access caveat:** the six remaining schedule/block/time-edit POST handlers in this table have no endpoint admin check. `/admin` page protection does not protect these API URLs. This observation is recorded for future work; nothing was changed during the audit. The separate monthly planner uses authenticated endpoints described in its linked document.
 
 Moving an appointment updates neither its booking note's date/time nor `reminderSent`, sends no reschedule message and has no cross-date move parameter. The customer-history write can match zero rows without being treated as a failure. Any reschedule feature must explicitly address these consumers rather than changing only the displayed time.
 
@@ -249,7 +248,7 @@ Admin cancellation can return 500 after successful database deletion if its What
 
 ## 10. The operational dashboard and its controls
 
-`/admin` is the navigation hub. Its Logout action posts `/api/logoutAdmin` and redirects home. `src/app/admin/layout.js` supplies Home, Profile, Treatments, Users and Perfumes links through a collapsible desktop sidebar and mobile drawer. `/admin/profile` composes identity/password, hero uploader, month blocker, manual booking, then the daily calendar alongside cups/income cards. Each widget generally owns its own fetch and local state.
+`/admin` is the navigation hub. Its Logout action posts `/api/logoutAdmin` and redirects home. `src/app/admin/layout.js` supplies Home, Profile, Treatments, Users and Perfumes links through a collapsible desktop sidebar and mobile drawer. `/admin/profile` composes identity/password, hero uploader, monthly schedule planner, manual booking, then the daily calendar alongside cups/income cards. Each widget generally owns its own fetch and local state.
 
 ### Daily calendar
 
@@ -271,15 +270,15 @@ The calendar does not toggle attendance or cancel a booking. Its optional `sched
 
 Important current synchronization behavior:
 
-- Manual booking refreshes the calendar through a browser event. Monthly blocking, income and cups cards have no shared refresh coordinator.
-- Month blocking does not refetch this calendar or the manual form's availability. There are no WebSockets, polling, cross-tab events or server-side appointment cache invalidations.
+- Manual booking and the monthly schedule planner refresh the calendar through a browser event. Income and cups cards have no shared refresh coordinator.
+- Monthly apply also refreshes the manual booking form's selected-day availability; see the planner document for synchronization details. There are no WebSockets, polling, cross-tab events or server-side appointment cache invalidations.
 - Bulk schedule save sends remapped `blockedTimes`, but the backend saves only `editedTimes`. The next read restores the server's unchanged block list.
 - Changing selected date resets the appointment-time editor, but not bulk edit mode/base drafts. An unsaved draft can therefore be submitted for a different date.
 - Day fetching has no stale-response guard. A slower old-date response can replace a newer selection's data. Read failures clear arrays, leaving a free-looking default schedule.
 
-### Month blocking and manual booking widgets
+### Monthly scheduling and manual booking widgets
 
-`MonthlyBlocker.jsx` has a month input and 20 selectable half-hour start buttons. It adds chosen blocks to every day of that month, leaves the selection after saving and displays a temporary success message. It does not show the month's existing blocks, select weekdays, or provide an unblock-month action.
+The monthly schedule editor is explained in [MONTHLY_SCHEDULE_PLANNER.md](MONTHLY_SCHEDULE_PLANNER.md).
 
 `BookForCustomer.jsx` combines phone lookup, category/service selection, date/time selection and an optional note. The service is selected by array index; duration/price are displayed from that service, and cups are shown for the hardcoded Hujama category. Changing service/date clears the selected time. Its date input has no minimum/maximum and it does not filter elapsed dates/times. A booking conflict refreshes availability; ordinary block changes elsewhere do not. Availability-fetch errors are shown but also clear occupancy data, so the server's write-time check is essential.
 
@@ -619,7 +618,7 @@ These are source observations, **not changes made by this audit**. They are grou
 | --- | --- |
 | Booking experience | `AppointmentsClient.js`, `AppointmentForm.jsx`, `bookingFormFlow.js`, calendar/picker; read existing booking UX/OTP docs first. |
 | Appointment creation or new booking fields | `appointmentBooking.js`, both create routes, both Mongo representations, public/admin input mapping, notification variables and customer/public projections. |
-| Hours, duration, breaks or availability | `appointmentRules.js`, `appointmentConcurrency.js`, `TimeSlotPicker.jsx`, `BookForCustomer.jsx`, `DailyCalendar.jsx`, `MonthlyBlocker.jsx`, block/blockAll/month/edit routes. Account for duplicated schedule builders. |
+| Hours, duration, breaks or availability | `appointmentRules.js`, `appointmentConcurrency.js`, `TimeSlotPicker.jsx`, `BookForCustomer.jsx`, `DailyCalendar.jsx`, `MonthlySchedulePlanner.jsx`, `monthlySchedule*.js`, block/blockAll/edit and admin monthly-schedule routes. Account for duplicated schedule builders. |
 | Rescheduling or cancellation policy | `update-time/route.js`, main appointment DELETE, `customerAppointments.js`, customer cancellation route, users modal and customer page; include notes, attendance, reminder state and notifications. |
 | Users or attendance | `admin/users/page.js`, `UsersTable`, `AppointmentsModal`, `AttendanceChart`, three lists, admin users/attendance/notes APIs and `utils.mergeUniqueAppointments`. |
 | Income/cups reporting | Statistics cards and aggregation routes, historical appointment value types, attendance definitions and `settings` manual adjustments. |
