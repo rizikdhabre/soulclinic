@@ -24,6 +24,14 @@
 /tests/*
 !/tests/seo/
 /tests/seo/artifacts/
+!/tests/returnReminders/
+/tests/returnReminders/*
+!/tests/returnReminders/*.test.js
+!/tests/e2e/
+/tests/e2e/*
+!/tests/e2e/returnReminders/
+/tests/e2e/returnReminders/*
+!/tests/e2e/returnReminders/*.spec.cjs
 
 # next.js
 /.next/

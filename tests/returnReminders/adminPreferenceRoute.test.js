@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ verify: vi.fn(), collection: vi.fn(), findOne: vi.fn(), get: vi.fn(), set: vi.fn() }));
+const mocks = vi.hoisted(() => ({ verify: vi.fn(), collection: vi.fn(), findOne: vi.fn(), get: vi.fn(), set: vi.fn(), getSettings: vi.fn() }));
 vi.mock("@/lib/jwt", () => ({ verifyToken: mocks.verify }));
 vi.mock("@/lib/db", () => ({ getCollection: mocks.collection }));
 vi.mock("@/lib/returnReminderPreferences", () => ({ getReturnReminderPreference: mocks.get, setReturnReminderPreference: mocks.set }));
+vi.mock("@/lib/returnReminderSettings", () => ({ getReturnReminderSettings: mocks.getSettings }));
 const route = await import("@/app/api/admin/users/[userId]/return-reminders/route");
 const userId = "000000000000000000000011";
 const context = (id = userId) => ({ params: Promise.resolve({ userId: id }) });
@@ -15,6 +16,7 @@ beforeEach(() => {
   mocks.collection.mockResolvedValue({ findOne: mocks.findOne });
   mocks.findOne.mockResolvedValue({ phone: "0501234567" });
   mocks.get.mockResolvedValue({ enabled: false });
+  mocks.getSettings.mockResolvedValue({ schedule: { mode: "default" }, scheduleRevision: 0 });
   mocks.set.mockImplementation(async ({ enabled }) => ({ enabled }));
 });
 
@@ -36,7 +38,7 @@ describe("admin return reminder preferences", () => {
     expect(route.GET).toBeTypeOf("function");
     const response = await route.GET(request(), context());
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ enabled: false });
+    expect(await response.json()).toEqual({ enabled: false, schedule: { mode: "default" }, scheduleRevision: 0 });
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(mocks.collection).toHaveBeenCalledWith("usersData");
     expect(mocks.findOne.mock.calls[0][0]._id.toHexString()).toBe(userId);

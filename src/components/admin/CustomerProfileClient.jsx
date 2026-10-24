@@ -198,6 +198,7 @@ function CustomerProfileContent({ userId }) {
   const [deleteError, setDeleteError] = useState(null);
   const [deleteNotice, setDeleteNotice] = useState("");
   const [refreshReason, setRefreshReason] = useState("save");
+  const [reminderStatusVersion, setReminderStatusVersion] = useState(0);
   const profileVersion = useRef(null);
   const plansRequestPending = useRef(false);
   const deleteRequest = useRef(null);
@@ -225,6 +226,8 @@ function CustomerProfileContent({ userId }) {
 
   const refreshProfile = useCallback(async (reason = "save") => {
     if (!profileVersion.current) return;
+    // A booking is already committed even if refreshing the profile later fails.
+    setReminderStatusVersion(value => value + 1);
     // A fresh profile replaces the visible page and invalidates any older page request.
     const version = Symbol();
     profileVersion.current = version;
@@ -337,7 +340,7 @@ function CustomerProfileContent({ userId }) {
           <a href={getWhatsAppLink(profile.user.phone)} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-full border px-4 py-1.5 text-sm font-medium text-green-600 transition hover:bg-green-50">واتساب</a>
         </div>
       </header>
-      <ReturnReminderPreference key={userId} userId={userId} />
+      <ReturnReminderPreference key={userId} userId={userId} statusRefreshVersion={reminderStatusVersion} />
       <AppointmentList appointments={appointments} onOpen={setSelectedNote} />
       <TreatmentPlanBuilder userId={userId} customerName={`${profile.user.firstName} ${profile.user.lastName}`} onSaved={refreshAfterSave} />
       {deleteNotice && <p role="status" className="rounded-xl border border-border bg-card p-4 text-sm">{deleteNotice}</p>}

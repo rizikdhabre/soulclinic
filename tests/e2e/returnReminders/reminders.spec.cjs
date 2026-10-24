@@ -10,8 +10,9 @@ async function mockApi(page, handle = () => null) {
     if (!url.pathname.startsWith('/api/')) return route.continue();
     const call = { path: url.pathname, method: request.method(), body: request.postData() ? request.postDataJSON() : null };
     calls.push(call);
-    const response = await handle(call);
-    const body = response?.body ?? (url.pathname.startsWith('/api/admin/') ? { enabled: call.body?.enabled ?? true } : request.method() === 'GET' ? { unsubscribed: false } : { success: true, unsubscribed: true });
+    const response = call.path.endsWith('/return-reminders/comments') ? { body: { comments: [], commentsVersion: 0 } } : call.path.endsWith('/return-reminders/status') ? { body: { lastAttended: null, lastAttemptAt: null, nextReminderAt: null, status: 'no_attendance' } } : await handle(call);
+    let body = response?.body ?? (url.pathname.startsWith('/api/admin/') ? { enabled: call.body?.enabled ?? true } : request.method() === 'GET' ? { unsubscribed: false } : { success: true, unsubscribed: true });
+    if (call.path.endsWith('/return-reminders') && typeof body.enabled === 'boolean' && call.method === 'GET') body = { ...body, schedule: { mode: 'default' }, scheduleRevision: 0 };
     await route.fulfill({ status: response?.status ?? 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
   return calls;
@@ -94,7 +95,7 @@ test('an explicitly disabled admin preference requires attestation, guards pendi
   release();
   await expect(page.getByRole('status')).toContainText('تذكيرات العودة مفعّلة');
   expect(calls.find(call => call.method === 'PATCH').body).toEqual({ enabled: true, consentConfirmed: true });
-  await page.getByRole('button', { name: 'إيقاف تذكيرات العودة', exact: true }).click();
+  await page.getByRole('checkbox', { name: 'تفعيل تذكيرات العودة', exact: true }).click();
   await expect(enable).toBeDisabled();
   await expect(consent).not.toBeChecked();
   expect(calls.filter(call => call.method === 'PATCH')[1].body).toEqual({ enabled: false });
@@ -114,7 +115,7 @@ test('admin load retry and failed save do not report permission as saved', async
   await expect(page.getByRole('checkbox')).toHaveCount(0);
   failRead = false;
   await page.getByRole('button', { name: 'إعادة المحاولة', exact: true }).click();
-  await page.getByRole('checkbox').check();
+  await page.getByRole('checkbox', { name: 'أؤكد أن الزبون وافق صراحةً على تلقي تذكيرات العودة عبر واتساب.' }).check();
   await page.getByRole('button', { name: 'تسجيل موافقة الزبون', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('تعذر');
   await expect(page.getByRole('status')).toContainText('متوقفة');
@@ -130,9 +131,9 @@ test('a default-enabled preference explains unsubscribe without claiming consent
   await expect(page.getByRole('status')).toContainText('تذكيرات العودة مفعّلة');
   await expect(card).toContainText('مفعّلة افتراضيًا حتى إلغاء الاشتراك');
   await expect(card).not.toContainText('موافقة الزبون مسجّلة');
-  await expect(page.getByRole('checkbox')).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: 'تفعيل تذكيرات العودة', exact: true })).toBeChecked();
   expect(calls.every(call => call.method === 'GET')).toBe(true);
-  await page.getByRole('button', { name: 'إيقاف تذكيرات العودة', exact: true }).click();
+  await page.getByRole('checkbox', { name: 'تفعيل تذكيرات العودة', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('متوقفة');
   expect(calls.filter(call => call.method === 'PATCH').map(call => call.body)).toEqual([{ enabled: false }]);
 });
@@ -148,13 +149,13 @@ test('permission and consent reset when the profile changes to another customer'
   });
   await page.goto('/profile-switch');
   const card = page.getByRole('region', { name: 'تذكيرات العودة عبر واتساب', exact: true });
-  await card.getByRole('checkbox').check();
+  await card.getByRole('checkbox', { name: 'أؤكد أن الزبون وافق صراحةً على تلقي تذكيرات العودة عبر واتساب.' }).check();
   await expect(card.getByRole('button', { name: 'تسجيل موافقة الزبون' })).toBeEnabled();
   await page.getByRole('button', { name: 'عرض الزبون التالي' }).click();
   await expect(card.getByRole('checkbox')).toHaveCount(0);
   await expect(card.getByRole('status')).toContainText('جارٍ تحميل');
   release();
-  await expect(card.getByRole('checkbox')).not.toBeChecked();
+  await expect(card.getByRole('checkbox', { name: 'أؤكد أن الزبون وافق صراحةً على تلقي تذكيرات العودة عبر واتساب.' })).not.toBeChecked();
   await expect(card.getByRole('button', { name: 'تسجيل موافقة الزبون' })).toBeDisabled();
   expect(calls.every(call => call.method === 'GET')).toBe(true);
 });

@@ -57,6 +57,22 @@ function intercept(collectionName, method, replacement) {
 }
 
 describe("calendar eligibility", () => {
+  it.each([14, 23, 25])("a custom %i-day rule replaces the three-month wait", value => {
+    const schedule = { mode: "custom", value, unit: "days" };
+    const history = [appointment({ date: "2026-10-01", time: "12:00" })];
+    const day = String(1 + value).padStart(2, "0");
+    expect(getReturnReminderEligibility({ appointments: history, schedule, now: new Date(`2026-10-${day}T08:59:00Z`) }).eligible).toBe(false);
+    // DST ends October25: local noon becomes10UTC rather than09UTC.
+    const hour = value >= 24 ? "10" : "09";
+    expect(getReturnReminderEligibility({ appointments: history, schedule, now: new Date(`2026-10-${day}T${hour}:00:00Z`) }).eligible).toBe(true);
+  });
+
+  it("custom months clamp month-end instead of using 30 days", () => {
+    const schedule = { mode: "custom", value: 1, unit: "months" };
+    const history = [appointment({ date: "2026-01-31", time: "12:00" })];
+    expect(getReturnReminderEligibility({ appointments: history, schedule, now: new Date("2026-02-28T09:59:00Z") }).eligible).toBe(false);
+    expect(getReturnReminderEligibility({ appointments: history, schedule, now: new Date("2026-02-28T10:00:00Z") }).eligible).toBe(true);
+  });
   it.each([
     ["2026-07-23", "12:00", "2026-10-23T08:59:59Z", false],
     ["2026-07-23", "12:00", "2026-10-23T09:00:00Z", true],
@@ -101,6 +117,106 @@ describe("calendar eligibility", () => {
 });
 
 describe("durable monthly return dispatch", () => {
+  it("stops a slow candidate before claiming and leaves it available to resume", async () => {
+    await customer();
+    let elapsed = 0;
+    deps.clock = { now: () => new Date(NOW.getTime() + elapsed) };
+    deps.shouldStop = () => elapsed >= 240000;
+    intercept("returnReminderSettings", "findOne", async (collection, args) => {
+      const result = await collection.findOne(...args);
+      elapsed = 301000;
+      return result;
+    });
+    expect(await sendDueReturnReminders({ now: NOW, scanProgress: true }, deps)).toMatchObject({ sent: 0, scan: { hasMore: true, cursor: null } });
+    expect(await state.countDocuments()).toBe(0);
+    expect(deps.sendWhatsAppTemplate).not.toHaveBeenCalled();
+  });
+
+  it("keeps a durable canceled claim if its time budget expires before dispatch", async () => {
+    await customer();
+    let elapsed = 0;
+    deps.clock = { now: () => new Date(NOW.getTime() + elapsed) };
+    deps.shouldStop = () => elapsed >= 240000;
+    intercept("returnReminderHistory", "insertOne", async (collection, args) => {
+      const result = await collection.insertOne(...args);
+      elapsed = 301000;
+      return result;
+    });
+    expect(await sendDueReturnReminders({ now: NOW, scanProgress: true }, deps)).toMatchObject({ sent: 0, skipped: 1, scan: { hasMore: true } });
+    expect((await history.findOne({})).dispatch.status).toBe("canceled");
+    expect(await state.countDocuments()).toBe(1);
+    expect(deps.sendWhatsAppTemplate).not.toHaveBeenCalled();
+  });
+
+  it("uses a custom25day rule and recalculates a completed legacy cooldown", async () => {
+    await customer([appointment({ date: "2026-07-01" })]);
+    await sendDueReturnReminders({ now: NOW }, deps);
+    await db.collection("returnReminderSettings").insertOne({ _id: PHONE,
+      schedule: { mode: "custom", value: 25, unit: "days" }, scheduleRevision: 1 });
+    const due = new Date("2026-11-17T10:00:00Z");
+    expect((await sendDueReturnReminders({ now: new Date(due.getTime() - 1) }, deps)).sent).toBe(0);
+    expect((await sendDueReturnReminders({ now: due }, deps)).sent).toBe(1);
+    expect((await sendDueReturnReminders({ now: due }, deps)).sent).toBe(0);
+    expect(await history.countDocuments()).toBe(2);
+  });
+
+  it("returning to default keeps last contact and restores three-month eligibility", async () => {
+    await customer([appointment({ date: "2026-10-01" })]);
+    const settings = db.collection("returnReminderSettings");
+    await settings.insertOne({ _id: PHONE, schedule: { mode: "custom", value: 14, unit: "days" }, scheduleRevision: 1 });
+    expect((await sendDueReturnReminders({ now: NOW }, deps)).sent).toBe(1);
+    await settings.updateOne({ _id: PHONE }, { $set: { schedule: { mode: "default" }, scheduleRevision: 2 } });
+    expect((await sendDueReturnReminders({ now: new Date("2026-11-23T10:00:00Z") }, deps)).sent).toBe(0);
+    expect((await sendDueReturnReminders({ now: new Date("2027-01-01T10:00:00Z") }, deps)).sent).toBe(1);
+  });
+
+  it("a rule change after claiming prevents dispatch under the stale rule", async () => {
+    await customer();
+    intercept("returnReminderHistory", "insertOne", async (collection, args) => {
+      const result = await collection.insertOne(...args);
+      await db.collection("returnReminderSettings").insertOne({ _id: PHONE,
+        schedule: { mode: "custom", value: 12, unit: "months" }, scheduleRevision: 1 });
+      return result;
+    });
+    const result = await sendDueReturnReminders({ now: NOW }, deps);
+    expect(result.sent).toBe(0);
+    expect(deps.sendWhatsAppTemplate).not.toHaveBeenCalled();
+    expect((await history.findOne({})).dispatch.status).toBe("canceled");
+  });
+
+  it("an unresolved legacy claim keeps its reservation after shortening the interval", async () => {
+    await customer();
+    await state.insertOne({ _id: PHONE, attemptId: new ObjectId(), claimedAt: NOW,
+      nextAttemptAt: new Date("2026-11-22T09:00:00Z") });
+    await db.collection("returnReminderSettings").insertOne({ _id: PHONE,
+      schedule: { mode: "custom", value: 1, unit: "days" }, scheduleRevision: 1 });
+    expect((await sendDueReturnReminders({ now: new Date("2026-11-01T10:00:00Z") }, deps)).sent).toBe(0);
+    expect(deps.sendWhatsAppTemplate).not.toHaveBeenCalled();
+  });
+
+  it("concurrent runs can claim a shortened completed cooldown only once", async () => {
+    await customer();
+    await sendDueReturnReminders({ now: NOW }, deps);
+    await db.collection("returnReminderSettings").insertOne({ _id: PHONE,
+      schedule: { mode: "custom", value: 14, unit: "days" }, scheduleRevision: 1 });
+    const next = new Date("2026-11-06T10:00:00Z");
+    const results = await Promise.all(Array.from({ length: 4 }, () => sendDueReturnReminders({ now: next }, deps)));
+    expect(results.reduce((sum, result) => sum + result.sent, 0)).toBe(1);
+    expect(deps.sendWhatsAppTemplate).toHaveBeenCalledTimes(2);
+  });
+
+  it("a rule changed during provider delivery governs the following completed attempt", async () => {
+    await customer();
+    deps.sendWhatsAppTemplate.mockImplementationOnce(async () => {
+      await db.collection("returnReminderSettings").insertOne({ _id: PHONE,
+        schedule: { mode: "custom", value: 2, unit: "months" }, scheduleRevision: 1 });
+      return { sid: "SMinflight" };
+    });
+    await sendDueReturnReminders({ now: NOW }, deps);
+    expect((await sendDueReturnReminders({ now: new Date("2026-11-22T09:00:00Z") }, deps)).sent).toBe(0);
+    expect((await sendDueReturnReminders({ now: new Date("2026-12-23T10:00:00Z") }, deps)).sent).toBe(1);
+  });
+
   it("sends to existing and newly added eligible customers by default without fabricating consent records", async () => {
     await customer();
     expect((await sendDueReturnReminders({ now: NOW }, deps)).sent).toBe(1);
@@ -136,16 +252,15 @@ describe("durable monthly return dispatch", () => {
     expect(await state.countDocuments()).toBe(0);
   });
 
-  it("sends four variables, stores only an opaque token digest and retains immutable attempt history", async () => {
+  it("sends five CTA variables, stores only an opaque token digest and retains immutable attempt history", async () => {
     const user = await enabledCustomer(undefined, { firstName: "اسم\nأول" });
     const result = await sendDueReturnReminders({ now: NOW }, deps);
     expect(result).toMatchObject({ status: "completed", sent: 1, unknown: 0 });
     const message = deps.sendWhatsAppTemplate.mock.calls[0][0];
     expect(message).toMatchObject({ to: `whatsapp:${PHONE}`, templateSid: ENV.TWILIO_TEMPLATE_SOUL_RETURN,
-      variables: { 1: "اسم أول تجريبي", 2: "2026-07-23", 3: "https://clinic.example/dashboard" } });
-    expect(Object.keys(message.variables)).toHaveLength(4);
-    const token = message.variables[4].split("/").pop();
-    expect(message.variables[4]).toBe(`https://clinic.example/reminders/unsubscribe/${token}`);
+      variables: { 1: "اسم أول تجريبي", 2: "3 شهور", 3: "2026-07-23", 4: "https://clinic.example/dashboard" } });
+    expect(Object.keys(message.variables)).toHaveLength(5);
+    const token = message.variables[5];
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
     const saved = await history.findOne({});
     expect(saved).toMatchObject({ phone: PHONE, userId: user._id, tokenHash: createHash("sha256").update(token).digest("hex"), claimedAt: NOW,
@@ -153,6 +268,27 @@ describe("durable monthly return dispatch", () => {
     expect(saved._id).toBeInstanceOf(ObjectId);
     expect(JSON.stringify({ saved, result, state: await state.findOne({}) })).not.toContain(token);
     expect(saved.expiresAt).toBeUndefined();
+  });
+
+  it.each([
+    [{ mode: "default" }, "3 شهور"],
+    [{ mode: "custom", value: 1, unit: "months" }, "شهر واحد"],
+    [{ mode: "custom", value: 2, unit: "months" }, "شهرين"],
+    [{ mode: "custom", value: 3, unit: "months" }, "3 شهور"],
+    [{ mode: "custom", value: 12, unit: "months" }, "12 شهر"],
+    [{ mode: "custom", value: 1, unit: "days" }, "يوم واحد"],
+    [{ mode: "custom", value: 2, unit: "days" }, "يومين"],
+    [{ mode: "custom", value: 3, unit: "days" }, "3 أيام"],
+    [{ mode: "custom", value: 10, unit: "days" }, "10 أيام"],
+    [{ mode: "custom", value: 11, unit: "days" }, "11 يوم"],
+    [{ mode: "custom", value: 25, unit: "days" }, "25 يوم"],
+  ])("uses the configured Arabic interval for %j, not the elapsed treatment age", async (schedule, label) => {
+    await customer([appointment({ date: "2010-01-01" })]);
+    await db.collection("returnReminderSettings").insertOne({ _id: PHONE, schedule, scheduleRevision: 1 });
+    expect((await sendDueReturnReminders({ now: NOW }, deps)).sent).toBe(1);
+    const { variables } = deps.sendWhatsAppTemplate.mock.calls[0][0];
+    expect(variables[2]).toBe(label);
+    expect(variables[3]).toBe("2010-01-01");
   });
 
   it("enforces exactly thirty elapsed days across DST and has no fixed repeat cap", async () => {
@@ -165,6 +301,7 @@ describe("durable monthly return dispatch", () => {
     }
     expect(await history.countDocuments()).toBe(5);
     expect(new Set((await history.find().toArray()).map((entry) => entry.tokenHash)).size).toBe(5);
+    expect(deps.sendWhatsAppTemplate.mock.calls.map(([message]) => message.variables[2])).toEqual(Array(5).fill("3 شهور"));
   });
 
   it("coalesces concurrent workers and differently formatted duplicate customer phones", async () => {
@@ -288,7 +425,7 @@ describe("durable monthly return dispatch", () => {
 
   it.each([undefined, 408, 500, 400])("consumes cooldown on provider outcome %s without leaking errors or retrying", async (status) => {
     await enabledCustomer();
-    deps.sendWhatsAppTemplate.mockImplementation(async ({ variables }) => { throw Object.assign(new Error(`secret ${variables[4]}`), { status }); });
+    deps.sendWhatsAppTemplate.mockImplementation(async ({ variables }) => { throw Object.assign(new Error(`secret ${variables[5]}`), { status }); });
     const result = await sendDueReturnReminders({ now: NOW }, deps);
     expect(result[status === 400 ? "failed" : "unknown"]).toBe(1);
     await sendDueReturnReminders({ now: NOW }, deps);

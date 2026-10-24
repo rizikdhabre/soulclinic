@@ -50,7 +50,9 @@ async function mockApi(page, overrides = {}) {
     const fulfill = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
     if (overrides.handle && await overrides.handle({ route, request, url, fulfill, calls })) return;
     if (url.pathname === '/api/admin/users/customer-one') return fulfill(profile);
-    if (url.pathname === '/api/admin/users/customer-one/return-reminders') return fulfill({ enabled: false });
+    if (url.pathname === '/api/admin/users/customer-one/return-reminders') return fulfill({ enabled: false, schedule: { mode: 'default' }, scheduleRevision: 0 });
+    if (url.pathname === '/api/admin/users/customer-one/return-reminders/comments') return fulfill({ comments: [], commentsVersion: 0 });
+    if (url.pathname === '/api/admin/users/customer-one/return-reminders/status') return fulfill({ lastAttended: null, lastAttemptAt: null, nextReminderAt: null, status: 'no_attendance' });
     if (url.pathname === '/api/admin/treatments') return fulfill(catalog);
     if (url.pathname === '/api/appointments') {
       expect(url.searchParams.get('admin')).toBe('true');
@@ -107,7 +109,7 @@ async function mockComments(page, { initial = [firstComment, secondComment], pla
 }
 
 function programComments(page) {
-  return page.getByRole('region', { name: 'تعليقات الإدارة', exact: true }).first();
+  return page.getByRole('region', { name: 'البرامج المحفوظة', exact: true }).getByRole('region', { name: 'تعليقات الإدارة', exact: true }).first();
 }
 
 test('program comments add multiple private entries and edit or delete one using icon actions', async ({ page }) => {
@@ -977,6 +979,39 @@ test('successful provider acceptance does not claim message delivery after savin
   await expect(saved).toContainText('تم طلب إرسال رسالة المواعيد؛ لم يتأكد تسليمها بعد.');
   await expect(saved).not.toContainText('تم إرسال المواعيد إلى الزبون');
 });
+
+for (const failProfileRefresh of [false, true]) {
+  test(`saved booking refreshes reminder status while preserving private drafts when profile refresh fails=${failProfileRefresh}`, async ({ page }) => {
+    let saved = false;
+    const calls = await mockApi(page, { handle: async ({ url, request, fulfill }) => {
+      if (url.pathname.endsWith('/treatment-plans') && request.method() === 'POST') {
+        saved = true;
+        await fulfill({ success: true, planId: 'plan-new', appointmentIds: ['new-one'], notification: { status: 'not_configured' } }); return true;
+      }
+      if (url.pathname === '/api/admin/users/customer-one' && saved && failProfileRefresh) { await fulfill({ error: 'UNAVAILABLE' }, 503); return true; }
+      if (url.pathname.endsWith('/return-reminders')) { await fulfill({ enabled: true, schedule: { mode: 'custom', value: 25, unit: 'days' }, scheduleRevision: 2 }); return true; }
+      if (url.pathname.endsWith('/return-reminders/status')) {
+        await fulfill({ lastAttended: { date: '2026-10-01', time: '14:00' }, lastAttemptAt: null, nextReminderAt: saved ? null : '2026-10-26T17:00:00.000Z', status: saved ? 'upcoming' : 'scheduled' }); return true;
+      }
+      return false;
+    } });
+    await page.goto('/profile');
+    const reminder = page.getByRole('region', { name: 'تذكيرات العودة عبر واتساب', exact: true });
+    const details = reminder.getByRole('group', { name: 'حالة تذكير العودة', exact: true });
+    await expect(details).toContainText('26/10/2026');
+    await reminder.getByRole('spinbutton').fill('12');
+    await reminder.getByLabel('إضافة تعليق', { exact: true }).fill('مسودة متابعة قبل الحجز');
+    await fillRow(page, 0, '10:00');
+    await page.getByRole('button', { name: 'حفظ البرنامج وإرسال المواعيد' }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'تم حفظ البرنامج' })).toBeVisible();
+    await expect(details).toContainText('متوقف لوجود موعد قادم');
+    await expect(details).not.toContainText('26/10/2026');
+    await expect(reminder.getByRole('spinbutton')).toHaveValue('12');
+    await expect(reminder.getByLabel('إضافة تعليق', { exact: true })).toHaveValue('مسودة متابعة قبل الحجز');
+    expect(calls.filter(call => call.path.endsWith('/return-reminders/status')).length).toBeGreaterThanOrEqual(2);
+    if (failProfileRefresh) await expect(page.getByText('تعذر تحديث قائمة المواعيد. البرنامج محفوظ.')).toBeVisible();
+  });
+}
 
 test('plan uses preselected customer and excludes local duration overlap; notification failure leaves saved plan protected', async ({ page }) => {
   const calls = await mockApi(page);

@@ -70,11 +70,13 @@ async function sendFirstReminder() {
   const message = deps.sendWhatsAppTemplate.mock.calls[0][0];
   expect(message).toMatchObject({
     to: `whatsapp:${PHONE}`, templateSid: ENV.TWILIO_TEMPLATE_SOUL_RETURN,
-    variables: { 1: "زبون تجريبي", 2: "2026-07-23", 3: "https://clinic.example/dashboard" },
+    variables: { 1: "زبون تجريبي", 2: "3 شهور", 3: "2026-07-23", 4: "https://clinic.example/dashboard" },
   });
-  expect(Object.keys(message.variables)).toHaveLength(4);
-  expect(message.variables[4]).toMatch(/^https:\/\/clinic\.example\/reminders\/unsubscribe\/[A-Za-z0-9_-]{43}$/);
-  const token = new URL(message.variables[4]).pathname.split("/").pop();
+  expect(Object.keys(message.variables)).toHaveLength(5);
+  expect(message.variables[5]).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  // Match the fixed URL prefix and dynamic suffix configured in the CTA template.
+  const buttonUrl = new URL(`https://clinic.example/reminders/unsubscribe/${message.variables[5]}`);
+  const token = buttonUrl.pathname.split("/").pop();
   expect((await db.collection("returnReminderState").findOne({ _id: PHONE })).nextAttemptAt).toEqual(NEXT_MONTH);
   return {
     token, context: { params: Promise.resolve({ token }) },

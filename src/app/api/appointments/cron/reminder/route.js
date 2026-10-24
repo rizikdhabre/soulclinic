@@ -2,7 +2,6 @@ import { getCollection } from "@/lib/db";
 import { sendWhatsAppTemplate } from "@/lib/whatsapp";
 import { normalizeIsraeliPhone } from "@/lib/phone";
 import { sendDueFeedbackRequests } from "@/lib/appointmentFeedback";
-import { sendDueReturnReminders } from "@/lib/returnReminders";
 
 const TZ = "Asia/Jerusalem";
 const WINDOW_MINUTES = 10;
@@ -177,16 +176,6 @@ export async function GET(req) {
       }
     }
 
-    // A simulated appointment-reminder clock must never advance monthly sends.
-    let returnReminders;
-    if (returnRemindersEnabled) {
-      try {
-        returnReminders = await sendDueReturnReminders({ dryRun });
-      } catch {
-        returnReminders = { status: "failed" };
-      }
-    }
-
     return Response.json({
       success: true,
       date: queryDate,
@@ -198,7 +187,6 @@ export async function GET(req) {
       sent,
       failed,
       ...(feedback ? { feedback } : {}),
-      ...(returnReminders ? { returnReminders } : {}),
       ...(debug.length ? { debug } : {}),
       ...(errors.length ? { errors } : {}),
     });

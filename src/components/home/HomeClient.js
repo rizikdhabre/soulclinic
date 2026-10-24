@@ -45,7 +45,7 @@ const HomePage = ({ initialHeroImage, children }) => {
     <div className="min-h-screen">
         {/* <Error /> */}
       {/* Hero Section */}
-      <section className="relative min-h-screen flex items-center justify-center overflow-hidden wellness-gradient">
+      <section className="relative min-h-screen flex items-start md:items-center justify-center overflow-hidden wellness-gradient pt-20 md:pt-0">
         {/* Floating Elements */}
         <motion.div
           animate={{ y: [-10, 10, -10] }}
@@ -63,16 +63,16 @@ const HomePage = ({ initialHeroImage, children }) => {
           className="absolute top-1/3 right-[30%] w-16 h-16 rounded-full bg-primary/15 blur-xl"
         />
 
-        <div className="container mx-auto px-6 pb-12 relative z-10">
+        <div className="w-full md:container mx-auto px-6 pb-12 relative z-10">
           <div className="max-w-4xl mx-auto text-center">
             <motion.div
               initial={{ opacity: 0, y: -12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
-              className="w-full relative mb-10"
+              className="-mx-6 w-[calc(100%+3rem)] md:mx-0 md:w-full relative mb-10"
             >
 
-              <div className="relative w-full h-[45vh] md:h-[70vh] overflow-hidden">
+              <div className="relative w-full aspect-[3/2] md:aspect-auto md:h-[70vh] overflow-hidden">
                 {/* Loader */}
                 {(loadingImg || !heroImage) && (
                   <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/70 backdrop-blur-sm transition-opacity duration-500">
@@ -276,21 +276,21 @@ const HomePage = ({ initialHeroImage, children }) => {
             {[
               {
                 icon: Leaf,
-                title: "العلاجات الطبيعية",
+                title: "علاجات الطبيعية",
                 description:
-                  "جميع العلاجات تستخدم مكونات عضوية ومصدرها مستدام لتحقيق شفاء نقي.",
+                  "نعتمد في جلساتنا على العلاج الطبيعي لتحقيق شفاء نقي خالٍ من الكيماويات وبمواد طبيعية فقط",
               },
               {
                 icon: Heart,
-                title: "أخصائيين مختصين",
+                title: "خبراء معتمدون",
                 description:
-                  "يقدّم ممارسونا المعتمدون سنواتٍ من الخبرة والرعاية الصادق",
+                  "نضع بين أيديكم خبرة سنوات طويلة من الممارسة والرعاية الاحترافية",
               },
               {
                 icon: Sparkles,
-                title: "نتائج مُغيِّرة للحياة",
+                title: "تغيير في حياتك الصحية",
                 description:
-                  "اختبر فوائد دائمة تمتد إلى ما هو أبعد بكثير من زيارتك",
+                  "استمتع بفوائد علاجية عميقة ومستدامة تمتد أثرها لكل لحظة في يومك",
               },
             ].map((feature, index) => (
               <motion.div

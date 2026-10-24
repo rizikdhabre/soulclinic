@@ -18,7 +18,9 @@ async function openBuilder(page) {
     if (!url.pathname.startsWith('/api/')) return route.continue();
     const fulfill = body => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     if (url.pathname === '/api/admin/users/customer-one') return fulfill(profile);
-    if (url.pathname.endsWith('/return-reminders')) return fulfill({ enabled: false });
+    if (url.pathname.endsWith('/return-reminders')) return fulfill({ enabled: false, schedule: { mode: 'default' }, scheduleRevision: 0 });
+    if (url.pathname.endsWith('/return-reminders/comments')) return fulfill({ comments: [], commentsVersion: 0 });
+    if (url.pathname.endsWith('/return-reminders/status')) return fulfill({ lastAttended: null, lastAttemptAt: null, nextReminderAt: null, status: 'no_attendance' });
     if (url.pathname === '/api/admin/treatments') return fulfill([{ _id: 'treatment-one', title: 'العلاج الطبيعي', services: [{ title: 'جلسة كاملة', duration: 60, price: 150 }] }]);
     if (url.pathname === '/api/appointments') return fulfill({ appointments: [], blockedTimes: [], editedTimes: [] });
     if (url.pathname.endsWith('/treatment-plans') && request.method() === 'POST') {

@@ -25,23 +25,23 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllEnvs());
 
-describe("monthly return reminders in the existing cron", () => {
-  it("runs on days without upcoming appointments and exposes the new job result", async () => {
+describe("appointment and feedback cron after separating return reminders", () => {
+  it("never scans return reminders from the ten-minute endpoint", async () => {
     const response = await GET(request());
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ success: true, sent: 0, returnReminders: { status: "completed", sent: 1 } });
-    expect(external.sendDueReturnReminders).toHaveBeenCalledWith({ dryRun: false });
+    expect(await response.json()).not.toHaveProperty("returnReminders");
+    expect(external.sendDueReturnReminders).not.toHaveBeenCalled();
   });
 
   it("passes dry-run intent but never sends a simulated clock to the new job", async () => {
     const response = await GET(request("?dryRun=1&testTime=2040-01-01T00:00:00Z"));
     expect(response.status).toBe(200);
-    expect(external.sendDueReturnReminders).toHaveBeenCalledExactlyOnceWith({ dryRun: true });
+    expect(external.sendDueReturnReminders).not.toHaveBeenCalled();
   });
 
   it("ignores the legacy test clock for actual monthly sends", async () => {
     await GET(request("?testTime=2040-01-01T00:00:00Z"));
-    expect(external.sendDueReturnReminders).toHaveBeenCalledExactlyOnceWith({ dryRun: false });
+    expect(external.sendDueReturnReminders).not.toHaveBeenCalled();
   });
 
   it.each(["", "   "])("requires a configured nonblank cron secret when enabled (%j)", async secret => {
@@ -67,21 +67,24 @@ describe("monthly return reminders in the existing cron", () => {
     expect(external.sendDueReturnReminders).not.toHaveBeenCalled();
   });
 
-  it("continues return reminders after a weekly-feedback failure without exposing errors", async () => {
+  it("reports a feedback failure without running unrelated return reminders", async () => {
     vi.stubEnv("FEEDBACK_REQUESTS_ENABLED", "true");
     external.sendDueFeedbackRequests.mockRejectedValueOnce(new Error("private feedback provider details"));
     const response = await GET(request());
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ feedback: { status: "failed" }, returnReminders: { status: "completed", sent: 1 } });
+    expect(await response.json()).toMatchObject({ feedback: { status: "failed" } });
+    expect(external.sendDueReturnReminders).not.toHaveBeenCalled();
   });
 
-  it("isolates a return-reminder failure from completed weekly feedback", async () => {
+  it("retains weekly feedback processing", async () => {
     vi.stubEnv("FEEDBACK_REQUESTS_ENABLED", "true");
     external.sendDueReturnReminders.mockRejectedValueOnce(new Error("private monthly provider details"));
     const response = await GET(request());
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body).toMatchObject({ feedback: { status: "completed", sent: 2 }, returnReminders: { status: "failed" } });
+    expect(body).toMatchObject({ feedback: { status: "completed", sent: 2 } });
+    expect(body).not.toHaveProperty("returnReminders");
+    expect(external.sendDueReturnReminders).not.toHaveBeenCalled();
     expect(JSON.stringify(body)).not.toContain("private monthly");
   });
 });
