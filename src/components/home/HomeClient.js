@@ -106,8 +106,8 @@ const HomePage = ({ initialHeroImage, children }) => {
               transition={{ duration: 0.7, delay: 0.1 }}
               className="heading-display text-foreground mb-6"
             >
-              اكتشف طريقك إلى{" "}
-              <span className="text-primary">السلام الداخلي</span>
+              لـ حياة بلا آلام..{" "}
+              <span className="text-primary">وطاقة وسلام</span>
             </motion.h1>
             <p className="text-sm text-muted-foreground mb-6">
               عيادة SOUL للحجامة والمساج والإبر الصينية في دير حنا
