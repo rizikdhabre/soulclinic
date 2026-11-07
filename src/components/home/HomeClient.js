@@ -110,7 +110,7 @@ const HomePage = ({ initialHeroImage, children }) => {
               <span className="text-primary">وطاقة وسلام</span>
             </motion.h1>
             <p className="text-sm text-muted-foreground mb-6">
-              عيادة SOUL للحجامة والمساج والإبر الصينية في دير حنا
+              اSOUL Clinic | مركز للعلاج الطبيعي (حجامة*ابر صينية*مساج علاجي) ديرحنا 📍
             </p>
 
             <motion.div
