@@ -30,6 +30,11 @@
 !/tests/adminReports/
 /tests/adminReports/*
 !/tests/adminReports/*.test.js
+!/tests/treatmentOrdering/
+/tests/treatmentOrdering/*
+!/tests/treatmentOrdering/*.test.js
+!/tests/treatmentOrdering/*.cjs
+!/tests/treatmentOrdering/*.jsx
 !/docs/ADMIN-DAILY-REPORTS.md
 !/tests/e2e/
 /tests/e2e/*

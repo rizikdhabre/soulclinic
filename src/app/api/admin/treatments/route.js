@@ -2,19 +2,26 @@ import { getCollection } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { getStorageBucket } from "@/lib/cloudStorage";
+import { AdminAuthError, requireAdmin } from "@/lib/adminAuth";
+import { applyTreatmentOrder, ensureTreatmentServiceIds, getTreatmentOrder } from "@/lib/treatmentOrdering";
 import {
   advanceTreatmentCatalogCacheGeneration,
-  getTreatmentCatalogWithCache,
 } from "@/lib/cache/redisReadCache";
-export async function GET() {
+export async function GET(req) {
   try {
-    const treatments = await getTreatmentCatalogWithCache(async () => {
-      const collection = await getCollection("treatments");
-      return collection.find({}).toArray();
-    });
+    const admin = requireAdmin(req);
+    const collection = await getCollection("treatments");
+    // Read the authoritative list so a reconnect cannot restore stale ordering
+    // from the catalogue cache. Legacy services receive stable IDs once.
+    const records = await collection.find({}).sort({ createdAt: 1, _id: 1 }).toArray();
+    const treatments = (await Promise.all(records.map(record => ensureTreatmentServiceIds(record, collection)))).filter(Boolean);
 
-    return NextResponse.json(treatments, { status: 200 });
-  } catch {
+    return NextResponse.json(applyTreatmentOrder(treatments, await getTreatmentOrder()), {
+      status: 200,
+      headers: { "Cache-Control": "private, no-store", "x-treatment-order-owner": String(admin.adminId) },
+    });
+  } catch (error) {
+    if (error instanceof AdminAuthError) return NextResponse.json({ message: error.message }, { status: error.status });
     console.error("Error in fetching treatments");
     return NextResponse.json(
       { message: "Failed to fetch treatments" },
@@ -83,7 +90,7 @@ export async function POST(req) {
     const newTreatment = {
       title,
       description,
-      services: Array.isArray(services) ? services : [],
+      services: Array.isArray(services) ? services.map(service => ({ ...service, _id: new ObjectId().toHexString() })) : [],
       createdAt: new Date(),
       updatedAt: new Date(),
     };

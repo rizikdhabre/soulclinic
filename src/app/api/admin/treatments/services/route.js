@@ -15,6 +15,14 @@ function parseServiceIndex(value) {
   return Number.isSafeInteger(index) && index >= 0 ? index : null;
 }
 
+const validServiceId = (value) => typeof value === "string" && value.length > 0 && value.length <= 128;
+
+function findService(treatment, serviceId, serviceIndex) {
+  return serviceId !== undefined
+    ? treatment?.services?.find((service) => String(service?._id) === serviceId)
+    : treatment?.services?.[parseServiceIndex(serviceIndex)];
+}
+
 /* =========================
    POST – add sub-treatment
 ========================= */
@@ -31,17 +39,19 @@ export async function POST(req) {
 
     const collection = await getCollection("treatments");
 
-    await collection.updateOne(
+    const newService = { ...service, _id: new ObjectId().toHexString() };
+    const result = await collection.updateOne(
       { _id: new ObjectId(treatmentId) },
       {
-        $push: { services: service },
+        $push: { services: newService },
         $set: { updatedAt: new Date() },
       }
     );
+    if (!result.matchedCount) return NextResponse.json({ message: "Treatment not found" }, { status: 404 });
     await advanceTreatmentCatalogCacheGeneration().catch(() => false);
 
     return NextResponse.json(
-      { message: "Service added successfully" },
+      { message: "Service added successfully", service: newService },
       { status: 201 }
     );
   } catch {
@@ -55,12 +65,12 @@ export async function POST(req) {
 
 export async function PUT(req) {
   try {
-    const { treatmentId, serviceIndex, service } = await req.json();
+    const { treatmentId, serviceId, serviceIndex, service } = await req.json();
 
     if (
       !treatmentId ||
-      serviceIndex === undefined ||
-      typeof service !== "object"
+      (serviceId !== undefined ? !validServiceId(serviceId) : parseServiceIndex(serviceIndex) === null) ||
+      !service || typeof service !== "object" || Array.isArray(service)
     ) {
       return NextResponse.json(
         { message: "Invalid request data" },
@@ -74,21 +84,27 @@ export async function PUT(req) {
       _id: new ObjectId(treatmentId),
     });
 
-    const oldService = treatment?.services?.[serviceIndex];
+    const oldService = findService(treatment, serviceId, serviceIndex);
+    if (!oldService) return NextResponse.json({ message: "Service not found" }, { status: 404 });
     const oldImagePath = oldService?.imagePath;
 
     const updateFields = {};
+    const fieldPrefix = serviceId !== undefined ? "services.$[target]" : `services.${parseServiceIndex(serviceIndex)}`;
     Object.keys(service).forEach((key) => {
-      updateFields[`services.${serviceIndex}.${key}`] = service[key];
+      if (key !== "_id" && key !== "__key") updateFields[`${fieldPrefix}.${key}`] = service[key];
     });
 
-    await collection.updateOne(
-      { _id: new ObjectId(treatmentId) },
+    const result = await collection.updateOne(
+      { _id: new ObjectId(treatmentId), ...(serviceId !== undefined
+        ? { "services._id": oldService._id }
+        : { services: treatment.services }) },
       {
         $set: updateFields,
         $currentDate: { updatedAt: true },
-      }
+      },
+      serviceId !== undefined ? { arrayFilters: [{ "target._id": oldService._id }] } : {},
     );
+    if (!result.matchedCount) return NextResponse.json({ message: "Service changed; reload and retry" }, { status: 409 });
     await advanceTreatmentCatalogCacheGeneration().catch(() => false);
 
     if (
@@ -119,10 +135,10 @@ export async function PUT(req) {
 
 export async function DELETE(req) {
   try {
-    const { treatmentId, serviceIndex } = await req.json();
+    const { treatmentId, serviceId, serviceIndex } = await req.json();
     const targetServiceIndex = parseServiceIndex(serviceIndex);
 
-    if (!treatmentId || targetServiceIndex === null) {
+    if (!treatmentId || (serviceId !== undefined ? !validServiceId(serviceId) : targetServiceIndex === null)) {
       return NextResponse.json(
         { message: "Invalid request data" },
         { status: 400 }
@@ -135,41 +151,19 @@ export async function DELETE(req) {
       _id: new ObjectId(treatmentId),
     });
 
-    const service = treatment?.services?.[targetServiceIndex];
+    const service = findService(treatment, serviceId, targetServiceIndex);
+    if (!service) return NextResponse.json({ message: "Service not found" }, { status: 404 });
     const imagePath = service?.imagePath;
 
-    await collection.updateOne(
-      { _id: new ObjectId(treatmentId) },
-      [
-        {
-          $set: {
-            services: {
-              $let: {
-                vars: { services: { $ifNull: ["$services", []] } },
-                in: {
-                  $map: {
-                    input: {
-                      $filter: {
-                        input: { $range: [0, { $size: "$$services" }] },
-                        as: "serviceIndex",
-                        cond: {
-                          $ne: ["$$serviceIndex", targetServiceIndex],
-                        },
-                      },
-                    },
-                    as: "serviceIndex",
-                    in: {
-                      $arrayElemAt: ["$$services", "$$serviceIndex"],
-                    },
-                  },
-                },
-              },
-            },
-            updatedAt: "$$NOW",
-          },
-        },
-      ]
+    const result = await collection.updateOne(
+      { _id: new ObjectId(treatmentId), ...(serviceId !== undefined
+        ? { "services._id": service._id }
+        : { services: treatment.services }) },
+      serviceId !== undefined
+        ? { $pull: { services: { _id: service._id } }, $currentDate: { updatedAt: true } }
+        : { $set: { services: treatment.services.filter((_, index) => index !== targetServiceIndex) }, $currentDate: { updatedAt: true } },
     );
+    if (!result.matchedCount) return NextResponse.json({ message: "Service changed; reload and retry" }, { status: 409 });
     await advanceTreatmentCatalogCacheGeneration().catch(() => false);
 
     if (imagePath) {

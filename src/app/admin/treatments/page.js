@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import { motion, AnimatePresence } from "framer-motion";
 import NeonLoader from "@/components/ui/loading";
@@ -18,6 +18,8 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { createTreatmentOrderQueue } from "@/lib/treatmentOrderQueue";
+import { applyPendingTreatmentOrders } from "@/lib/treatmentOrderView";
 
 const emptyService = {
   title: "",
@@ -41,7 +43,7 @@ const ensureServiceKeys = (treatments) =>
     ...t,
     services: (t.services || []).map((s) => ({
       ...s,
-      __key: s.__key || s._id || s.imagePath || makeKey(),
+      __key: s._id || s.__key || makeKey(),
     })),
   }));
 
@@ -60,9 +62,9 @@ function SortableHandleCell({ listeners, attributes }) {
   );
 }
 
-function SortableRow({ id, children }) {
+function SortableRow({ id, children, disabled }) {
   const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({ id });
+    useSortable({ id, disabled });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -77,9 +79,9 @@ function SortableRow({ id, children }) {
   );
 }
 
-function SortableCard({ id, children }) {
+function SortableCard({ id, children, disabled }) {
   const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({ id });
+    useSortable({ id, disabled });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -95,6 +97,7 @@ function SortableCard({ id, children }) {
       <div className="flex items-center gap-3">
         <button
           type="button"
+          disabled={disabled}
           className="shrink-0 cursor-grab active:cursor-grabbing select-none touch-none border border-border rounded-lg px-2 py-1"
           {...attributes}
           {...listeners}
@@ -104,6 +107,19 @@ function SortableCard({ id, children }) {
         </button>
         <div className="flex-1">{children}</div>
       </div>
+    </div>
+  );
+}
+
+function SortableTreatment({ id, title, disabled, children }) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id, disabled });
+  return (
+    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }}
+      className="relative border border-border rounded-2xl bg-background">
+      <button type="button" disabled={disabled} aria-label={`ترتيب ${title}`}
+        className="absolute top-1 right-1 px-2 cursor-grab active:cursor-grabbing select-none touch-none"
+        {...attributes} {...listeners}>⋮⋮</button>
+      {children}
     </div>
   );
 }
@@ -121,15 +137,15 @@ export default function AdminTreatmentsPage() {
   /* ===================== STATE ===================== */
 
   const [treatments, setTreatments] = useState([]);
-  const [openIndex, setOpenIndex] = useState(null);
-  const [menuIndex, setMenuIndex] = useState(null);
+  const [openId, setOpenId] = useState(null);
+  const [menuId, setMenuId] = useState(null);
   const [serviceMenu, setServiceMenu] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const [editedTitle, setEditedTitle] = useState("");
   const [editedDescription, setEditedDescription] = useState("");
-  const [editingIndex, setEditingIndex] = useState(null);
+  const [editingId, setEditingId] = useState(null);
 
   const [serviceEdit, setServiceEdit] = useState(null);
   const [serviceForm, setServiceForm] = useState(emptyService);
@@ -148,22 +164,73 @@ export default function AdminTreatmentsPage() {
   });
 
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const orderQueue = useRef(null);
+  const orderOwner = useRef(null);
+  const fetchGeneration = useRef(0);
+  const [isDesktop, setIsDesktop] = useState(false);
+  const [orderingReady, setOrderingReady] = useState(false);
+  const invalidateFetch = useCallback(() => { fetchGeneration.current++; }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 768px)");
+    const update = () => setIsDesktop(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   /* ===================== FETCH ===================== */
 
   const fetchTreatments = useCallback(async () => {
+    const generation = ++fetchGeneration.current;
     setLoading(true);
     try {
       const res = await axios.get("/api/admin/treatments");
-      setTreatments(ensureServiceKeys(res.data));
+      if (generation !== fetchGeneration.current) return;
+      const owner = res.headers["x-treatment-order-owner"];
+      if (owner && owner !== orderOwner.current) {
+        orderQueue.current?.dispose();
+        orderOwner.current = owner;
+        let storage;
+        try { storage = window.localStorage; } catch { storage = null; }
+        orderQueue.current = createTreatmentOrderQueue({
+          storage,
+          storageKey: `soul:treatment-order:${owner}`,
+          isOnline: () => navigator.onLine,
+          send: (payload, key, metadata) => axios.put(
+            key === "main" ? "/api/admin/treatments/reorder" : "/api/admin/treatments/services/reorder",
+            { ...payload, ...metadata, owner },
+            { timeout: 15_000 },
+          ),
+          onChange: pending => setTreatments(current => applyPendingTreatmentOrders(current, pending)),
+        });
+      }
+      setTreatments(applyPendingTreatmentOrders(ensureServiceKeys(res.data), orderQueue.current?.getPending()));
+      setOrderingReady(Boolean(orderQueue.current));
+      orderQueue.current?.resume();
+    } catch (error) {
+      if (generation === fetchGeneration.current) console.error("Failed to load treatments:", error);
     } finally {
-      setLoading(false);
+      if (generation === fetchGeneration.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     fetchTreatments();
-  }, [fetchTreatments]);
+    const resume = () => orderQueue.current ? orderQueue.current.resume() : fetchTreatments();
+    window.addEventListener("online", resume);
+    window.addEventListener("focus", resume);
+    window.addEventListener("storage", resume);
+    return () => {
+      invalidateFetch();
+      window.removeEventListener("online", resume);
+      window.removeEventListener("focus", resume);
+      window.removeEventListener("storage", resume);
+      orderQueue.current?.dispose();
+      orderQueue.current = null;
+      orderOwner.current = null;
+    };
+  }, [fetchTreatments, invalidateFetch]);
 
   /* ===================== ADD TREATMENT ===================== */
 
@@ -216,7 +283,7 @@ export default function AdminTreatmentsPage() {
         ),
       );
 
-      setEditingIndex(null);
+      setEditingId(null);
       setIsSaving(true);
 
       try {
@@ -304,7 +371,7 @@ export default function AdminTreatmentsPage() {
 
         if (serviceEdit.index === null) {
           // server
-          await axios.post("/api/admin/treatments/services", {
+          const response = await axios.post("/api/admin/treatments/services", {
             treatmentId,
             service: stripClientKeys([payload])[0],
           });
@@ -313,7 +380,7 @@ export default function AdminTreatmentsPage() {
           setTreatments((prev) =>
             prev.map((t) =>
               t._id === treatmentId
-                ? { ...t, services: [...(t.services || []), payload] }
+                ? { ...t, services: [...(t.services || []), { ...response.data.service, __key: response.data.service._id }] }
                 : t,
             ),
           );
@@ -321,6 +388,7 @@ export default function AdminTreatmentsPage() {
           await axios.put("/api/admin/treatments/services", {
             treatmentId,
             serviceIndex: serviceEdit.index,
+            serviceId: serviceEdit.serviceId,
             service: stripClientKeys([payload])[0],
           });
 
@@ -329,8 +397,8 @@ export default function AdminTreatmentsPage() {
               t._id === treatmentId
                 ? {
                     ...t,
-                    services: (t.services || []).map((s, i) =>
-                      i === serviceEdit.index ? payload : s,
+                      services: (t.services || []).map((s) =>
+                      s._id === serviceEdit.serviceId ? { ...s, ...payload } : s,
                     ),
                   }
                 : t,
@@ -355,12 +423,12 @@ export default function AdminTreatmentsPage() {
 
   const confirmDeleteService = useCallback(async () => {
     if (isDeleting) return;
-    const { treatmentId, serviceIndex } = confirmDelete || {};
+    const { treatmentId, serviceIndex, serviceId } = confirmDelete || {};
     if (!treatmentId && treatmentId !== "") return;
     if (serviceIndex === null || serviceIndex === undefined) return;
 
     const treatment = treatments.find((t) => t._id === treatmentId);
-    const backup = treatment?.services?.[serviceIndex];
+    const backup = treatment?.services?.find(service => service._id === serviceId);
 
     // optimistic
     setTreatments((prev) =>
@@ -368,7 +436,7 @@ export default function AdminTreatmentsPage() {
         t._id === treatmentId
           ? {
               ...t,
-              services: (t.services || []).filter((_, i) => i !== serviceIndex),
+              services: (t.services || []).filter(service => service._id !== serviceId),
             }
           : t,
       ),
@@ -379,7 +447,7 @@ export default function AdminTreatmentsPage() {
 
     try {
       await axios.delete("/api/admin/treatments/services", {
-        data: { treatmentId, serviceIndex },
+        data: { treatmentId, serviceIndex, serviceId },
       });
     } catch (err) {
       console.error("Failed to delete service:", err);
@@ -399,7 +467,8 @@ export default function AdminTreatmentsPage() {
   /* ===================== SERVICE REORDER (DRAG) ===================== */
 
   const handleServiceDragEnd = useCallback(
-    async (event, treatment) => {
+    (event, treatment) => {
+      if (!orderQueue.current) return;
       const { active, over } = event;
       if (!over || active.id === over.id) return;
 
@@ -417,19 +486,24 @@ export default function AdminTreatmentsPage() {
         ),
       );
 
-      try {
-        await axios.put("/api/admin/treatments/services/reorder", {
-          treatmentId: treatment._id,
-          services: stripClientKeys(reorderedServices),
-        });
-      } catch (err) {
-        console.error("Failed to reorder services:", err);
-        // rollback by refetching just in case
-        fetchTreatments();
-      }
+      orderQueue.current.enqueue(treatment._id, {
+        treatmentId: treatment._id,
+        order: reorderedServices.map(service => String(service._id)),
+      });
     },
-    [fetchTreatments],
+    [],
   );
+
+  const handleTreatmentDragEnd = ({ active, over }) => {
+    if (!orderQueue.current || !over || active.id === over.id) return;
+    const from = treatments.findIndex(treatment => treatment._id === active.id);
+    const to = treatments.findIndex(treatment => treatment._id === over.id);
+    if (from < 0 || to < 0) return;
+    const reordered = arrayMove(treatments, from, to);
+    setTreatments(reordered);
+    orderQueue.current.enqueue("main", { order: reordered.map(treatment => treatment._id) });
+  };
+  const dragDisabled = !orderingReady || isSaving || isAdding || isDeleting || Boolean(serviceEdit) || Boolean(confirmDelete);
 
   /* ===================== RENDER ===================== */
 
@@ -454,20 +528,24 @@ export default function AdminTreatmentsPage() {
         </button>
       </div>
 
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleTreatmentDragEnd}>
+      <SortableContext items={treatments.map(treatment => treatment._id)} strategy={verticalListSortingStrategy}>
       <div className="space-y-6">
-        {treatments.map((treatment, index) => {
-          const isOpen = openIndex === index;
+        {treatments.map((treatment) => {
+          const isOpen = openId === treatment._id;
           const hujama = isHujama(treatment);
 
           const sortableItems = (treatment.services || []).map((s) => s.__key);
 
           return (
-            <div
+            <SortableTreatment
               key={treatment._id}
-              className="border border-border rounded-2xl bg-background"
+              id={treatment._id}
+              title={treatment.title}
+              disabled={dragDisabled}
             >
               <div className="flex justify-between items-start p-6">
-                {editingIndex === index ? (
+                {editingId === treatment._id ? (
                   <div className="flex flex-col gap-3 w-full mr-4">
                     <div className="flex gap-2">
                       <input
@@ -504,7 +582,7 @@ export default function AdminTreatmentsPage() {
                       className={`
                   text-foreground/70 mt-1
                   [overflow-wrap:anywhere]
-                  ${expandedDesc === index ? "" : "line-clamp-3"}
+                  ${expandedDesc === treatment._id ? "" : "line-clamp-3"}
                   md:line-clamp-none
                 `}
                     >
@@ -515,11 +593,11 @@ export default function AdminTreatmentsPage() {
                     {treatment.description?.length > 120 && (
                       <button
                         onClick={() =>
-                          setExpandedDesc(expandedDesc === index ? null : index)
+                          setExpandedDesc(expandedDesc === treatment._id ? null : treatment._id)
                         }
                         className="md:hidden mt-2 text-sm text-primary underline"
                       >
-                        {expandedDesc === index ? "إظهار أقل" : "اقرأ المزيد"}
+                        {expandedDesc === treatment._id ? "إظهار أقل" : "اقرأ المزيد"}
                       </button>
                     )}
                   </div>
@@ -528,7 +606,7 @@ export default function AdminTreatmentsPage() {
                 <div className="relative z-50 ml-4">
                   <button
                     onClick={() =>
-                      setMenuIndex(menuIndex === index ? null : index)
+                      setMenuId(menuId === treatment._id ? null : treatment._id)
                     }
                     className="p-2 border border-border rounded-lg"
                   >
@@ -536,7 +614,7 @@ export default function AdminTreatmentsPage() {
                   </button>
 
                   <AnimatePresence>
-                    {menuIndex === index && (
+                    {menuId === treatment._id && (
                       <motion.div
                         initial={{ opacity: 0, y: -5 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -545,10 +623,10 @@ export default function AdminTreatmentsPage() {
                       >
                         <button
                           onClick={() => {
-                            setEditingIndex(index);
+                            setEditingId(treatment._id);
                             setEditedTitle(treatment.title);
                             setEditedDescription(treatment.description);
-                            setMenuIndex(null);
+                            setMenuId(null);
                           }}
                           className="w-full text-left px-4 py-2 hover:bg-muted"
                         >
@@ -557,8 +635,8 @@ export default function AdminTreatmentsPage() {
 
                         <button
                           onClick={() => {
-                            setOpenIndex(isOpen ? null : index);
-                            setMenuIndex(null);
+                            setOpenId(isOpen ? null : treatment._id);
+                            setMenuId(null);
                           }}
                           className="w-full text-left px-4 py-2 hover:bg-muted"
                         >
@@ -573,7 +651,7 @@ export default function AdminTreatmentsPage() {
                               type: "treatment",
                               id: treatment._id,
                             });
-                            setMenuIndex(null);
+                            setMenuId(null);
                           }}
                           className="w-full text-left px-4 py-2 text-destructive hover:bg-destructive/10"
                         >
@@ -623,7 +701,7 @@ export default function AdminTreatmentsPage() {
                         strategy={verticalListSortingStrategy}
                       >
                         {/* ===== Desktop / Tablet: Table ===== */}
-                        <div className="hidden md:block">
+                        {isDesktop ? <div>
                           <div className="relative w-full overflow-x-auto rounded-xl border border-border">
                             <table className="w-full min-w-[900px] border-collapse bg-background">
                               <thead className="border-b border-border">
@@ -655,7 +733,7 @@ export default function AdminTreatmentsPage() {
 
                               <tbody>
                                 {(treatment.services || []).map((s, i) => (
-                                  <SortableRow key={s.__key} id={s.__key}>
+                                  <SortableRow key={s.__key} id={s.__key} disabled={dragDisabled}>
                                     <td className="py-3 px-2 border border-border whitespace-nowrap">
                                       {s.title}
                                     </td>
@@ -707,9 +785,9 @@ export default function AdminTreatmentsPage() {
                                         <button
                                           onClick={() =>
                                             setServiceMenu(
-                                              serviceMenu === `${index}-${i}`
+                                              serviceMenu === s._id
                                                 ? null
-                                                : `${index}-${i}`,
+                                                : s._id,
                                             )
                                           }
                                           className="p-2 border border-border rounded-lg"
@@ -718,7 +796,7 @@ export default function AdminTreatmentsPage() {
                                         </button>
 
                                         <AnimatePresence>
-                                          {serviceMenu === `${index}-${i}` && (
+                                          {serviceMenu === s._id && (
                                             <motion.div
                                               initial={{ opacity: 0, y: -5 }}
                                               animate={{ opacity: 1, y: 0 }}
@@ -730,6 +808,7 @@ export default function AdminTreatmentsPage() {
                                                   setServiceEdit({
                                                     treatmentId: treatment._id,
                                                     index: i,
+                                                    serviceId: s._id,
                                                     isHujama: hujama,
                                                   });
                                                   setServiceForm({
@@ -765,6 +844,7 @@ export default function AdminTreatmentsPage() {
                                                     type: "service",
                                                     treatmentId: treatment._id,
                                                     serviceIndex: i,
+                                                    serviceId: s._id,
                                                   });
                                                   setServiceMenu(null);
                                                 }}
@@ -782,12 +862,10 @@ export default function AdminTreatmentsPage() {
                               </tbody>
                             </table>
                           </div>
-                        </div>
-
-                        {/* ===== Mobile: Cards (no overflow, fully readable) ===== */}
-                        <div className="md:hidden space-y-3">
+                        </div> :
+                        <div className="space-y-3">
                           {(treatment.services || []).map((s, i) => (
-                            <SortableCard key={s.__key} id={s.__key}>
+                            <SortableCard key={s.__key} id={s.__key} disabled={dragDisabled}>
                               <div className="flex items-start gap-3">
                                 <div className="flex-1">
                                   <div className="flex items-start justify-between gap-2">
@@ -809,9 +887,9 @@ export default function AdminTreatmentsPage() {
                                     <button
                                       onClick={() =>
                                         setServiceMenu(
-                                          serviceMenu === `${index}-${i}`
+                                          serviceMenu === s._id
                                             ? null
-                                            : `${index}-${i}`,
+                                            : s._id,
                                         )
                                       }
                                       className="p-2 border border-border rounded-lg shrink-0"
@@ -861,7 +939,7 @@ export default function AdminTreatmentsPage() {
                                   </div>
 
                                   <AnimatePresence>
-                                    {serviceMenu === `${index}-${i}` && (
+                                    {serviceMenu === s._id && (
                                       <motion.div
                                         initial={{ opacity: 0, y: -5 }}
                                         animate={{ opacity: 1, y: 0 }}
@@ -873,6 +951,7 @@ export default function AdminTreatmentsPage() {
                                             setServiceEdit({
                                               treatmentId: treatment._id,
                                               index: i,
+                                              serviceId: s._id,
                                               isHujama: hujama,
                                             });
                                             setServiceForm({
@@ -905,6 +984,7 @@ export default function AdminTreatmentsPage() {
                                               type: "service",
                                               treatmentId: treatment._id,
                                               serviceIndex: i,
+                                              serviceId: s._id,
                                             });
                                             setServiceMenu(null);
                                           }}
@@ -919,16 +999,18 @@ export default function AdminTreatmentsPage() {
                               </div>
                             </SortableCard>
                           ))}
-                        </div>
+                        </div>}
                       </SortableContext>
                     </DndContext>
                   </motion.div>
                 )}
               </AnimatePresence>
-            </div>
+            </SortableTreatment>
           );
         })}
       </div>
+      </SortableContext>
+      </DndContext>
 
       {/* ===== Preview Image ===== */}
       {previewImage && (
@@ -1085,6 +1167,7 @@ export default function AdminTreatmentsPage() {
                       {
                         treatmentId: serviceEdit.treatmentId,
                         serviceIndex: serviceEdit.index,
+                        serviceId: serviceEdit.serviceId,
                       },
                     );
 
