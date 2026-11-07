@@ -42,7 +42,8 @@
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.4.0",
     "three": "^0.182.0",
-    "twilio": "^5.12.0"
+    "twilio": "^5.12.0",
+    "workflow": "5.4.0"
   },
   "overrides": {
     "firebase-admin": {

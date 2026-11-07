@@ -16,7 +16,11 @@ export async function GET(req) {
     const records = await collection.find({}).sort({ createdAt: 1, _id: 1 }).toArray();
     const treatments = (await Promise.all(records.map(record => ensureTreatmentServiceIds(record, collection)))).filter(Boolean);
 
-    return NextResponse.json(applyTreatmentOrder(treatments, await getTreatmentOrder()), {
+    const visibleTreatments = treatments.map(treatment => ({
+      ...treatment,
+      services: applyTreatmentOrder(treatment.services || [], treatment.pendingOrder?.order),
+    }));
+    return NextResponse.json(applyTreatmentOrder(visibleTreatments, await getTreatmentOrder({ includePending: true })), {
       status: 200,
       headers: { "Cache-Control": "private, no-store", "x-treatment-order-owner": String(admin.adminId) },
     });

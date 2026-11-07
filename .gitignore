@@ -44,6 +44,7 @@
 
 # next.js
 /.next/
+/.workflow-data/
 /out/
 
 # production

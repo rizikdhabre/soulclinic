@@ -46,7 +46,7 @@ async function main() {
         if (req.method() === 'GET') return route.fulfill({ json: rows, headers: { 'x-treatment-order-owner': 'test-admin' } });
         calls.push({ path: url.pathname, body: req.postDataJSON() });
         if (failSaves) return route.abort('internetdisconnected');
-        return route.fulfill({ json: { message: 'saved' } });
+        return route.fulfill({ status: 202, json: { accepted: true } });
       });
       await page.goto(origin);
       const handles = page.getByRole('button', { name: /^ترتيب / });
@@ -71,7 +71,7 @@ async function main() {
       }
       await drag(handles.first(), handles.last());
       await expect(handles.first()).toHaveAttribute('aria-label', 'ترتيب مساج');
-      assert.equal(calls.length, 0, 'no immediate backend request');
+      await expect.poll(() => calls.length).toBeGreaterThan(0);
       // Open the cupping category; the moved category retains the correct actions.
       const category = page.getByRole('button', { name: 'ترتيب حجامة', exact: true }).locator('..');
       await category.getByRole('button', { name: '⋮', exact: true }).click();
@@ -92,7 +92,7 @@ async function main() {
       assert(calls.some(call => call.path.endsWith('/services/reorder') && call.body.order.join() === 's2,s1'));
       assert(calls.some(call => call.path === '/api/admin/treatments/reorder' && call.body.order[0] === rows[1]._id));
       assert(calls.every(call => call.body.clientId && call.body.sequence > 0 && call.body.owner === 'test-admin'));
-      console.log(`${mobile ? 'Mobile touch' : 'Desktop'}: instant drag, delayed save, failure/reload/reconnect passed`);
+      console.log(`${mobile ? 'Mobile touch' : 'Desktop'}: instant drag, immediate server handoff, failure/reload/reconnect passed`);
       await context.close();
     }
   } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

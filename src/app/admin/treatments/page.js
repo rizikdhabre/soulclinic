@@ -19,6 +19,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { createTreatmentOrderQueue } from "@/lib/treatmentOrderQueue";
+import { sendTreatmentOrder } from "@/lib/sendTreatmentOrder";
 import { applyPendingTreatmentOrders } from "@/lib/treatmentOrderView";
 
 const emptyService = {
@@ -197,11 +198,7 @@ export default function AdminTreatmentsPage() {
           storage,
           storageKey: `soul:treatment-order:${owner}`,
           isOnline: () => navigator.onLine,
-          send: (payload, key, metadata) => axios.put(
-            key === "main" ? "/api/admin/treatments/reorder" : "/api/admin/treatments/services/reorder",
-            { ...payload, ...metadata, owner },
-            { timeout: 15_000 },
-          ),
+          send: (payload, key, metadata) => sendTreatmentOrder(payload, key, metadata, owner),
           onChange: pending => setTreatments(current => applyPendingTreatmentOrders(current, pending)),
         });
       }
@@ -218,14 +215,19 @@ export default function AdminTreatmentsPage() {
   useEffect(() => {
     fetchTreatments();
     const resume = () => orderQueue.current ? orderQueue.current.resume() : fetchTreatments();
+    const flushOnExit = () => orderQueue.current?.flushOnExit();
     window.addEventListener("online", resume);
     window.addEventListener("focus", resume);
     window.addEventListener("storage", resume);
+    window.addEventListener("pageshow", resume);
+    window.addEventListener("pagehide", flushOnExit);
     return () => {
       invalidateFetch();
       window.removeEventListener("online", resume);
       window.removeEventListener("focus", resume);
       window.removeEventListener("storage", resume);
+      window.removeEventListener("pageshow", resume);
+      window.removeEventListener("pagehide", flushOnExit);
       orderQueue.current?.dispose();
       orderQueue.current = null;
       orderOwner.current = null;

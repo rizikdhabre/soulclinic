@@ -15,7 +15,7 @@ function validateOrder(order) {
 
 function validateRequest(request) {
   if (request == null) return;
-  if (!/^[a-zA-Z0-9_-]{1,80}$/.test(request.clientId || "") || !Number.isSafeInteger(request.sequence) || request.sequence < 1) {
+  if (typeof request.clientId !== "string" || !/^[a-zA-Z0-9_-]{1,80}$/.test(request.clientId) || !Number.isSafeInteger(request.sequence) || request.sequence < 1) {
     throw new TreatmentOrderError("Invalid ordering request");
   }
 }
@@ -34,7 +34,8 @@ export function applyTreatmentOrder(records, order = []) {
 }
 
 export async function getTreatmentOrder(deps = {}) {
-  return (await (await collection("treatmentOrdering", deps)).findOne({ _id: "main" }))?.order || [];
+  const record = await (await collection("treatmentOrdering", deps)).findOne({ _id: "main" });
+  return (deps.includePending ? record?.pendingOrder?.order : undefined) || record?.order || [];
 }
 
 // Existing services predate IDs. Assign each one a durable identity once, using
@@ -72,45 +73,65 @@ function snapshotField(record, field) {
   return Object.hasOwn(record, field) ? record[field] : { $exists: false };
 }
 
-export async function saveMainTreatmentOrder(order, deps = {}) {
+async function queueOrder(resourceKey, order, deps) {
   validateOrder(order);
   validateRequest(deps.request);
-  const treatments = await collection("treatments", deps);
-  const ordering = await collection("treatmentOrdering", deps);
+  const main = resourceKey === "main";
+  if (!main && (typeof resourceKey !== "string" || !/^[a-f0-9]{24}$/i.test(resourceKey))) throw new TreatmentOrderError("Invalid treatment ID");
+  const records = await collection(main ? "treatmentOrdering" : "treatments", deps);
+  const _id = main ? "main" : new ObjectId(resourceKey);
+  const sequenceField = main ? "requestSequences" : "serviceOrderSequences";
+  const now = deps.now ? new Date(deps.now) : new Date();
+  const pendingOrder = { token: new ObjectId().toHexString(), order, dueAt: new Date(now.getTime() + 5000) };
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const previous = await ordering.findOne({ _id: "main" });
-    if (stale(deps.request, previous?.requestSequences)) return;
-    const current = await treatments.find({}, { projection: { _id: 1 } }).sort({ createdAt: 1, _id: 1 }).toArray();
-    const record = { order: applyTreatmentOrder(current, order).map(t => String(t._id)), updatedAt: new Date(), requestSequences: nextSequences(deps.request, previous?.requestSequences) };
+    const previous = await records.findOne({ _id });
+    if (!main && !previous) throw new TreatmentOrderError("Treatment not found", 404);
+    // A retry still starts a durable job, but must not extend the five-second
+    // deadline or resurrect an order already superseded/applied.
+    if (stale(deps.request, previous?.[sequenceField])) return String(_id);
+    const update = { pendingOrder, [sequenceField]: nextSequences(deps.request, previous?.[sequenceField]) };
     if (!previous) {
-      try { await ordering.insertOne({ _id: "main", ...record }, WRITE); return; }
+      try { await records.insertOne({ _id, order: [], ...update }, WRITE); return String(_id); }
       catch (error) { if (error.code !== 11000) throw error; }
     } else {
-      const result = await ordering.updateOne({ _id: "main", order: previous.order, requestSequences: snapshotField(previous, "requestSequences") }, { $set: record }, WRITE);
-      if (result.matchedCount) return;
+      const result = await records.updateOne({ _id, pendingOrder: snapshotField(previous, "pendingOrder"), [sequenceField]: snapshotField(previous, sequenceField) }, { $set: update }, WRITE);
+      if (result.matchedCount) return String(_id);
     }
   }
-  throw new TreatmentOrderError("Order changed; retry saving", 409);
+  throw new TreatmentOrderError("Order changed; retry queuing", 409);
 }
 
-export async function saveServiceOrder(treatmentId, order, deps = {}) {
-  validateOrder(order);
-  validateRequest(deps.request);
-  if (typeof treatmentId !== "string" || !/^[a-f0-9]{24}$/i.test(treatmentId)) throw new TreatmentOrderError("Invalid treatment ID");
-  const treatments = await collection("treatments", deps);
-  const _id = new ObjectId(treatmentId);
+export function queueTreatmentOrder(order, deps = {}) { return queueOrder("main", order, deps); }
+export function queueServiceOrder(treatmentId, order, deps = {}) { return queueOrder(treatmentId, order, deps); }
+
+export async function processPendingTreatmentOrder(resourceKey, deps = {}) {
+  const main = resourceKey === "main";
+  if (!main && (typeof resourceKey !== "string" || !/^[a-f0-9]{24}$/i.test(resourceKey))) throw new TreatmentOrderError("Invalid treatment ID");
+  const records = await collection(main ? "treatmentOrdering" : "treatments", deps);
+  const _id = main ? "main" : new ObjectId(resourceKey);
+  const now = deps.now ? new Date(deps.now) : new Date();
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    let record = await treatments.findOne({ _id });
-    if (!record) throw new TreatmentOrderError("Treatment not found", 404);
-    if (stale(deps.request, record.serviceOrderSequences)) return;
-    record = await ensureTreatmentServiceIds(record, treatments);
-    if (!record) throw new TreatmentOrderError("Treatment not found", 404);
-    if (stale(deps.request, record.serviceOrderSequences)) return;
-    const services = applyTreatmentOrder(record.services || [], order);
-    const result = await treatments.updateOne({ _id, services: snapshotField(record, "services"), serviceOrderSequences: snapshotField(record, "serviceOrderSequences") }, {
-      $set: { services, updatedAt: new Date(), serviceOrderSequences: nextSequences(deps.request, record.serviceOrderSequences) },
+    let record = await records.findOne({ _id });
+    if (!record?.pendingOrder) return { status: "idle" };
+    if (record.pendingOrder.dueAt > now) return { status: "waiting", dueAt: record.pendingOrder.dueAt.toISOString() };
+    if (!main) {
+      record = await ensureTreatmentServiceIds(record, records);
+      // Backfilling IDs can reread a newer pending intent after a lost CAS.
+      if (!record?.pendingOrder) return { status: "idle" };
+      if (record.pendingOrder.dueAt > now) return { status: "waiting", dueAt: record.pendingOrder.dueAt.toISOString() };
+    }
+    const pending = record.pendingOrder;
+    const current = main
+      ? await (await collection("treatments", deps)).find({}, { projection: { _id: 1 } }).sort({ createdAt: 1, _id: 1 }).toArray()
+      : record.services || [];
+    const ordered = applyTreatmentOrder(current, pending.order);
+    // Clearing the exact pending token and changing the committed order happen
+    // in one atomic write. A newer drag or service edit makes this CAS retry.
+    const result = await records.updateOne({ _id, "pendingOrder.token": pending.token, ...(main ? {} : { services: snapshotField(record, "services") }) }, {
+      $set: { [main ? "order" : "services"]: main ? ordered.map(t => String(t._id)) : ordered, updatedAt: new Date() },
+      $unset: { pendingOrder: "" },
     }, WRITE);
-    if (result.matchedCount) return;
+    if (result.matchedCount) return { status: "applied" };
   }
-  throw new TreatmentOrderError("Treatment changed; retry ordering", 409);
+  return { status: "waiting", dueAt: new Date(now.getTime() + 500).toISOString() };
 }

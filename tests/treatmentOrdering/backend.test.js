@@ -4,6 +4,14 @@ import { MongoMemoryServer } from "mongodb-memory-server-core";
 
 vi.mock("@/lib/db", () => ({ getCollection: () => { throw new Error("Live database access forbidden"); } }));
 const ordering = await import("@/lib/treatmentOrdering").catch(() => ({}));
+const persistMain = async (order, deps) => {
+  const key = await ordering.queueTreatmentOrder(order, deps);
+  return ordering.processPendingTreatmentOrder(key, { ...deps, now: new Date(Date.now() + 6000) });
+};
+const persistService = async (treatmentId, order, deps) => {
+  const key = await ordering.queueServiceOrder(treatmentId, order, deps);
+  return ordering.processPendingTreatmentOrder(key, { ...deps, now: new Date(Date.now() + 6000) });
+};
 let server, client, db, deps;
 const id = n => new ObjectId(n.toString(16).padStart(24, "0"));
 
@@ -27,8 +35,8 @@ describe("durable treatment ordering", () => {
   it("persists main order idempotently without altering treatment content", async () => {
     await db.collection("treatments").insertMany([1, 2, 3].map(n => ({ _id: id(n), title: `T${n}`, services: [{ title: "keep", price: 95 }] })));
     const before = await db.collection("treatments").find({}).toArray();
-    await ordering.saveMainTreatmentOrder([String(id(2)), String(id(9)), String(id(1))], deps);
-    await ordering.saveMainTreatmentOrder([String(id(2)), String(id(9)), String(id(1))], deps);
+    await persistMain([String(id(2)), String(id(9)), String(id(1))], deps);
+    await persistMain([String(id(2)), String(id(9)), String(id(1))], deps);
     expect(await ordering.getTreatmentOrder(deps)).toEqual([String(id(2)), String(id(1)), String(id(3))]);
     expect(await db.collection("treatments").find({}).toArray()).toEqual(before);
   });
@@ -56,8 +64,8 @@ describe("durable treatment ordering", () => {
     await db.collection("treatments").insertOne({ _id: id(1), title: "parent", services: [
       { _id: "a", title: "edited", price: 90 }, { _id: "b", title: "B", imagePath: "keep" }, { _id: "new", title: "new" },
     ] });
-    await ordering.saveServiceOrder(String(id(1)), ["b", "deleted", "a"], deps);
-    await ordering.saveServiceOrder(String(id(1)), ["b", "deleted", "a"], deps);
+    await persistService(String(id(1)), ["b", "deleted", "a"], deps);
+    await persistService(String(id(1)), ["b", "deleted", "a"], deps);
     const record = await db.collection("treatments").findOne({ _id: id(1) });
     expect(record.title).toBe("parent");
     expect(record.services).toEqual([{ _id: "b", title: "B", imagePath: "keep" }, { _id: "a", title: "edited", price: 90 }, { _id: "new", title: "new" }]);
@@ -74,16 +82,16 @@ describe("durable treatment ordering", () => {
         return collection.updateOne(...args);
       },
     };
-    await ordering.saveServiceOrder(String(id(1)), ["b", "a"], { getCollection: async () => wrapped });
+    await persistService(String(id(1)), ["b", "a"], { getCollection: async () => wrapped });
     expect((await collection.findOne({ _id: id(1) })).services).toEqual([{ _id: "b", price: 20 }, { _id: "a", price: 99 }]);
   });
 
   it("rejects malformed orders and missing parents without reporting a successful save", async () => {
     for (const invalid of [undefined, null, {}, ["a", "a"], [null], [""]]) {
-      await expect(ordering.saveMainTreatmentOrder(invalid, deps)).rejects.toMatchObject({ status: 400 });
+      await expect(persistMain(invalid, deps)).rejects.toMatchObject({ status: 400 });
     }
-    await expect(ordering.saveServiceOrder("bad", [], deps)).rejects.toMatchObject({ status: 400 });
-    await expect(ordering.saveServiceOrder(String(id(1)), [], deps)).rejects.toMatchObject({ status: 404 });
+    await expect(persistService("bad", [], deps)).rejects.toMatchObject({ status: 400 });
+    await expect(persistService(String(id(1)), [], deps)).rejects.toMatchObject({ status: 404 });
   });
 
   it("acknowledges older retried requests without undoing newer main or service ordering", async () => {
@@ -91,17 +99,17 @@ describe("durable treatment ordering", () => {
       { _id: id(1), services: [{ _id: "a" }, { _id: "b" }] }, { _id: id(2), services: [] },
     ]);
     const request = (clientId, sequence) => ({ ...deps, request: { clientId, sequence } });
-    await ordering.saveMainTreatmentOrder([String(id(2)), String(id(1))], request("browser-a", 2));
-    await ordering.saveMainTreatmentOrder([String(id(2)), String(id(1))], request("browser-b", 1));
-    await ordering.saveMainTreatmentOrder([String(id(1)), String(id(2))], request("browser-a", 1));
+    await persistMain([String(id(2)), String(id(1))], request("browser-a", 2));
+    await persistMain([String(id(2)), String(id(1))], request("browser-b", 1));
+    await persistMain([String(id(1)), String(id(2))], request("browser-a", 1));
     expect(await ordering.getTreatmentOrder(deps)).toEqual([String(id(2)), String(id(1))]);
-    await ordering.saveServiceOrder(String(id(1)), ["b", "a"], request("browser-a", 2));
-    await ordering.saveServiceOrder(String(id(1)), ["b", "a"], request("browser-b", 1));
-    await ordering.saveServiceOrder(String(id(1)), ["a", "b"], request("browser-a", 1));
+    await persistService(String(id(1)), ["b", "a"], request("browser-a", 2));
+    await persistService(String(id(1)), ["b", "a"], request("browser-b", 1));
+    await persistService(String(id(1)), ["a", "b"], request("browser-a", 1));
     expect((await db.collection("treatments").findOne({ _id: id(1) })).services.map(s => s._id)).toEqual(["b", "a"]);
   });
 
-  it("rechecks retry sequence after legacy ID backfill rereads a newer save", async () => {
+  it("rejects stale intent when a concurrent request advances the accepted sequence", async () => {
     const treatments = db.collection("treatments");
     await treatments.insertOne({ _id: id(1), services: [{ _id: "a" }, { _id: "b" }, { title: "legacy" }] });
     let intercepted = false;
@@ -118,7 +126,7 @@ describe("durable treatment ordering", () => {
         return treatments.updateOne(...args);
       },
     };
-    await ordering.saveServiceOrder(String(id(1)), ["a", "b"], {
+    await persistService(String(id(1)), ["a", "b"], {
       getCollection: async () => wrapped, request: { clientId: "browser", sequence: 1 },
     });
     const saved = await treatments.findOne({ _id: id(1) });
