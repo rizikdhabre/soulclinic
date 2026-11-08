@@ -35,6 +35,11 @@
 !/tests/treatmentOrdering/*.test.js
 !/tests/treatmentOrdering/*.cjs
 !/tests/treatmentOrdering/*.jsx
+!/tests/hijriCalendar/
+/tests/hijriCalendar/*
+!/tests/hijriCalendar/*.test.js
+!/tests/hijriCalendar/*.cjs
+!/tests/hijriCalendar/*.jsx
 !/docs/ADMIN-DAILY-REPORTS.md
 !/tests/e2e/
 /tests/e2e/*

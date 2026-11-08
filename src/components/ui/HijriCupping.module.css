@@ -1,0 +1,81 @@
+.scope {
+  --hijri-gold: #88631c;
+  --hijri-outline: #b8a06a;
+  --hijri-panel: #f5f0e4;
+  --hijri-card: #faf7ef;
+  --hijri-ink: hsl(var(--foreground));
+  --hijri-muted: hsl(var(--muted-foreground));
+  --hijri-highlight: #ede2bf;
+}
+:global(.dark) .scope {
+  --hijri-gold: #d4bb7f;
+  --hijri-outline: #776a45;
+  --hijri-panel: #17281e;
+  --hijri-card: #13221a;
+  --hijri-muted: #b4b9a9;
+  --hijri-highlight: #203125;
+}
+.section { width:100%; max-width:42rem; margin:2.5rem auto 0; padding:1.5rem 1rem 1.25rem; }
+.heading { margin:0; color:var(--hijri-ink); text-align:center; font-size:clamp(1.25rem,3vw,1.9rem); line-height:1.5; font-weight:500; }
+.ornament { display:flex; align-items:center; justify-content:center; gap:12px; margin:12px 0 34px; }
+.ornament::before,.ornament::after { content:""; width:48px; height:1px; background:linear-gradient(90deg,transparent,var(--hijri-outline)); }
+.ornament::after { transform:rotate(180deg); }
+.ornament span { width:4px; height:4px; background:var(--hijri-gold); transform:rotate(45deg); }
+.todayPanel { position:relative; display:grid; grid-template-columns:minmax(0,1fr) 44px minmax(0,1fr); align-items:center; gap:14px; padding:32px 18px 26px; border:1px solid var(--hijri-outline); border-radius:24px; background:radial-gradient(ellipse at 50% 0,#bc9e5314,transparent 80%),var(--hijri-panel); }
+.todayBadge { position:absolute; top:-15px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:8px; border:1px solid var(--hijri-outline); border-radius:20px; padding:3px 22px; background:var(--hijri-panel); color:var(--hijri-gold); font-size:1rem; line-height:1.5; }
+.todayBadge::before { content:""; width:5px; height:5px; background:var(--hijri-gold); border-radius:50%; }
+.dateGroup { min-width:0; text-align:center; }
+.caption { margin:0 0 9px; font-size:.875rem; line-height:1.5; color:var(--hijri-muted); }
+.currentHijri { color:var(--hijri-gold); font-size:clamp(1.15rem,3vw,1.8rem); line-height:1.5; font-weight:500; }
+.currentGregorian { color:var(--hijri-ink); font-size:clamp(1.1rem,3vw,1.65rem); line-height:1.65; font-variant-numeric:tabular-nums; }
+.dateDetail { margin:4px 0 0; color:var(--hijri-muted); font-size:.875rem; line-height:1.5; }
+.dateDivider { display:flex; flex-direction:column; align-items:center; gap:11px; color:var(--hijri-gold); }
+.dateDivider::before,.dateDivider::after { content:""; width:1px; height:20px; background:linear-gradient(0deg,var(--hijri-outline),transparent); }
+.dateDivider::after { transform:rotate(180deg); }
+.moon { display:grid; place-items:center; width:37px; height:37px; border:1px solid var(--hijri-outline); border-radius:50%; background:var(--hijri-highlight); }
+.nextHeading { display:flex; align-items:center; gap:13px; margin:27px 2px 33px; color:var(--hijri-gold); font-size:1rem; line-height:1.5; font-weight:400; }
+.nextHeading::after { content:""; flex:1; height:1px; background:linear-gradient(90deg,transparent,var(--hijri-outline)); }
+.cards { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:13px; align-items:stretch; min-height:180px; }
+.dateCard { min-width:0; position:relative; display:flex; flex-direction:column; align-items:center; padding:26px 12px 18px; border:1px solid var(--hijri-outline); border-radius:27px; background:var(--hijri-card); text-align:center; }
+.nearest { margin-top:-9px; margin-bottom:-9px; padding-top:35px; padding-bottom:27px; border:1.5px solid var(--hijri-gold); background:radial-gradient(ellipse at top,#b19a5514,transparent 65%),var(--hijri-card); box-shadow:0 0 22px #b19a550b; }
+.nearestBadge { position:absolute; top:-16px; left:50%; transform:translateX(-50%); padding:5px 14px; border-radius:20px; background:linear-gradient(125deg,#ead8a6,#c8ac69); color:#26331e; white-space:nowrap; font-size:.875rem; line-height:1.5; }
+.dayNumber { font-size:2.75rem; line-height:1.2; font-weight:400; color:var(--hijri-ink); }
+.nearest .dayNumber { color:var(--hijri-gold); }
+.hijriMonth { margin:10px 0 0; font-size:1.2rem; line-height:1.4; font-weight:400; color:var(--hijri-ink); }
+.hijriYear { margin:4px 0 15px; font-size:.875rem; line-height:1.5; color:var(--hijri-muted); }
+.cardDivider { width:26px; height:1px; margin-bottom:15px; background:var(--hijri-outline); }
+.gregorian { color:var(--hijri-ink); font-size:1rem; line-height:1.5; font-variant-numeric:tabular-nums; }
+.weekday { margin:6px 0 0; font-size:.875rem; line-height:1.4; color:var(--hijri-muted); }
+.scope .markedDay { color:var(--hijri-gold); }
+.calendarCircle { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:calc(100% - 6px); max-width:48px; aspect-ratio:1; border:1.8px solid var(--hijri-gold); border-radius:50%; pointer-events:none; }
+.selectedCircle { border:2px solid #f4d38e; box-shadow:0 0 0 1px #2b4d37,inset 0 0 0 1px #2b4d37; }
+.disabledCircle { opacity:.35; }
+.legend { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:8px; margin:20px 0 0; color:var(--hijri-gold); font-size:.875rem; line-height:1.6; }
+.legendRing { width:15px; height:15px; flex-shrink:0; border:1.5px solid var(--hijri-gold); border-radius:50%; }
+@media(max-width:540px) {
+  .section { padding:1rem .5rem 1.25rem; }
+  .todayPanel { grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr); gap:6px; padding:25px 8px 21px; border-radius:20px; }
+  .todayBadge { font-size:.875rem; padding:4px 18px; }
+  .caption { font-size:.75rem; margin-bottom:7px; }
+  .currentHijri { font-size:1.1rem; line-height:1.65; }
+  .currentGregorian { font-size:1rem; letter-spacing:-.4px; }
+  .dateDetail { font-size:.75rem; }
+  .moon { width:28px; height:28px; }
+  .nextHeading { margin:23px 0 31px; font-size:.9375rem; }
+  .cards { gap:8px; }
+  .dateCard { padding:24px 6px 14px; border-radius:21px; }
+  .nearest { padding-top:33px; padding-bottom:23px; }
+  .nearestBadge { font-size:.75rem; padding:6px 9px; }
+  .dayNumber { font-size:2.1rem; }
+  .hijriMonth { font-size:1rem; }
+  .hijriYear,.weekday { font-size:.75rem; }
+  .gregorian { font-size:.75rem; }
+  .calendarCircle { max-width:40px; }
+}
+@media(max-width:355px) {
+  .section { padding-right:.25rem; padding-left:.25rem; }
+  .currentHijri { font-size:1rem; }
+  .currentGregorian { font-size:.9375rem; }
+  .cards { gap:6px; }
+  .hijriMonth { font-size:.9375rem; }
+}

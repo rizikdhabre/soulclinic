@@ -18,6 +18,8 @@ import {
   isBefore,
 } from "date-fns";
 import { cn } from "@/lib/utils";
+import { formatCuppingLegend, getCuppingMonth } from "@/lib/hijriCuppingDates";
+import styles from "./HijriCupping.module.css";
 
 const WEEKDAYS = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
 export function AnimatedCalendar({
@@ -32,6 +34,8 @@ export function AnimatedCalendar({
   const monthEnd = endOfMonth(currentMonth);
   const calendarStart = startOfWeek(monthStart);
   const calendarEnd = endOfWeek(monthEnd);
+  const cuppingDates = getCuppingMonth(currentMonth.getFullYear(), currentMonth.getMonth());
+  const cuppingByDate = new Map(cuppingDates.map(date => [date.date, date]));
 
   const days = eachDayOfInterval({
     start: calendarStart,
@@ -72,10 +76,12 @@ export function AnimatedCalendar({
   };
 
   return (
-    <div className="w-full">
+    <div className={`w-full ${styles.scope}`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <motion.button
+          type="button"
+          aria-label="الشهر السابق"
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.95 }}
           onClick={goToPreviousMonth}
@@ -101,6 +107,8 @@ export function AnimatedCalendar({
         </AnimatePresence>
 
         <motion.button
+          type="button"
+          aria-label="الشهر التالي"
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.95 }}
           onClick={goToNextMonth}
@@ -141,10 +149,15 @@ export function AnimatedCalendar({
             const isTodayDate = isToday(day);
             const isAvailable =
               isDateAvailable(day) && !isPastDate(day);
+            const cuppingDate = isCurrentMonth ? cuppingByDate.get(format(day, "yyyy-MM-dd")) : null;
 
             return (
               <motion.button
+                type="button"
                 key={day.toISOString()}
+                aria-pressed={Boolean(isSelected)}
+                aria-label={`${format(day, "dd/MM/yyyy")}${cuppingDate ? `، ${cuppingDate.hijriLabel}، من أيام الحجامة` : ""}`}
+                data-hijri-cupping={Boolean(cuppingDate)}
                 initial={{ opacity: 0, scale: 0.85 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: index * 0.01 }}
@@ -154,6 +167,7 @@ export function AnimatedCalendar({
                 }
                 className={cn(
                   "relative aspect-square flex items-center justify-center rounded-xl text-sm font-medium transition-all",
+                  cuppingDate && isAvailable && !isSelected && styles.markedDay,
                   isSelected && "bg-primary text-primary-foreground shadow-lg",
                   isTodayDate &&
                     !isSelected &&
@@ -163,12 +177,17 @@ export function AnimatedCalendar({
                     "cursor-not-allowed text-muted-foreground/50"
                 )}
               >
+                {cuppingDate && <span aria-hidden="true" data-hijri-ring className={cn(styles.calendarCircle, isSelected && styles.selectedCircle, !isAvailable && styles.disabledCircle)} />}
                 {format(day, "d")}
               </motion.button>
             );
           })}
         </motion.div>
       </AnimatePresence>
+      <p className={styles.legend} aria-live="polite">
+        <span className={styles.legendRing} aria-hidden="true" />
+        <span>ايام الحجامة الهجرية : <bdi dir="ltr">{formatCuppingLegend(cuppingDates)}</bdi></span>
+      </p>
     </div>
   );
 }
